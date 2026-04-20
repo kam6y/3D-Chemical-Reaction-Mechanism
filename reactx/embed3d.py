@@ -30,9 +30,11 @@ def embed_mol_to_atoms(
     """Embed a 2D Mol into 3D and return an ase.Atoms with implicit Hs added.
 
     Atom order in the returned Atoms matches Chem.AddHs(mol).GetAtoms() exactly.
-    For disconnected fragments, each is embedded independently and then shifted
-    along +x so fragments are separated by FRAGMENT_SEPARATION between their
-    nearest x-extents, giving UMA a sensible encounter complex to relax.
+    For disconnected fragments, each is embedded independently and then placed
+    for backside attack geometry: the first fragment defines the substrate, and
+    subsequent fragments (nucleophile/leaving group) are placed on the -x side
+    of the first fragment so they approach anti to the leaving group (which MMFF
+    typically places along +x). This gives UMA a correct SN2 encounter complex.
     """
     mol_h = Chem.AddHs(mol)
     n_atoms = mol_h.GetNumAtoms()
@@ -49,19 +51,25 @@ def embed_mol_to_atoms(
             positions[orig_idx] = (p.x, p.y, p.z)
 
     if len(frag_indices) > 1:
-        prev_group = list(frag_indices[0])
+        # Place fragment 1 (nucleophile) on the -x side of fragment 0 (substrate)
+        # so it approaches from the backside of the C-LG bond (Walden inversion).
+        # MMFF places the leaving group along +x, so -x is the anti attack direction.
+        anchor_group = list(frag_indices[0])
+        anchor_min_x = positions[anchor_group, 0].min()
         for i in range(1, len(frag_indices)):
             curr_group = list(frag_indices[i])
-            prev_max_x = positions[prev_group, 0].max()
-            curr_min_x = positions[curr_group, 0].min()
-            offset = prev_max_x - curr_min_x + FRAGMENT_SEPARATION
+            curr_max_x = positions[curr_group, 0].max()
+            # Place current fragment so its max_x is at anchor_min_x - FRAGMENT_SEPARATION
+            offset = anchor_min_x - FRAGMENT_SEPARATION - curr_max_x
             positions[curr_group, 0] += offset
-            prev_group = curr_group
 
     symbols = [a.GetSymbol() for a in mol_h.GetAtoms()]
     charges = [a.GetFormalCharge() for a in mol_h.GetAtoms()]
     atoms = Atoms(symbols=symbols, positions=positions)
     atoms.set_initial_charges(charges)
+
+    atoms.info["charge"] = int(sum(charges))
+    atoms.info["spin"] = 1  # Phase 0: assume closed-shell singlet
 
     if calculator is not None:
         atoms.calc = calculator

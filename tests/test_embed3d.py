@@ -70,3 +70,17 @@ def test_embed_multifragment_preserves_addhs_ordering():
 
     atoms = embed_mol_to_atoms(mol, calculator=None, seed=42)
     assert atoms.get_chemical_symbols() == expected_symbols
+
+
+def test_embed_sets_total_charge_and_spin_in_info():
+    mol = Chem.MolFromSmiles("CCl.[F-]")
+    atoms = embed_mol_to_atoms(mol, calculator=None, seed=42)
+    assert atoms.info["charge"] == -1
+    assert atoms.info["spin"] == 1
+
+
+def test_embed_neutral_molecule_has_zero_charge():
+    mol = Chem.MolFromSmiles("CCl")
+    atoms = embed_mol_to_atoms(mol, calculator=None, seed=42)
+    assert atoms.info["charge"] == 0
+    assert atoms.info["spin"] == 1
