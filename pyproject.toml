@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reactx"
+version = "0.0.1"
+description = "2D reaction scheme to 3D NEB trajectory and Blender animation (Phase 0 spike)"
+requires-python = ">=3.10"
+dependencies = [
+    "rdkit>=2024.3",
+    "ase>=3.22",
+    "numpy>=1.24",
+    "fairchem-core>=1.0",
+    "torch>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+reactx = "reactx.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["reactx*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: require UMA model download and run NEB to convergence",
+    "blender: require local Blender install + atomic-blender-pdb-xyz add-on",
+]
+testpaths = ["tests"]
