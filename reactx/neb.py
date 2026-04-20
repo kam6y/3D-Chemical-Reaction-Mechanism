@@ -40,7 +40,7 @@ def run_neb(
     for img in images:
         img.calc = calculator_factory()
 
-    neb = NEB(images, climb=climb, allow_shared_calculator=False)
+    neb = NEB(images, climb=climb, allow_shared_calculator=False, method="improvedtangent")
     neb.interpolate(method="idpp")
 
     opt = BFGS(neb, logfile=None)

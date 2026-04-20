@@ -27,6 +27,12 @@ blender --background --python blender/render.py -- out/trajectory.xyz out/scene.
 - `out/meta.json` — 収束情報など
 - `out/scene.blend` — Blender シーン（GUI で開いて再生）
 
+## Phase 0 の既知の制約
+
+- **TS 付近のスローダウン再生** は Phase 1 で実装予定。Phase 0 の `blender/render.py` は軌跡を均一速度で再生する。
+- **Bond 形成・切断の動的 fade** は `atomic-blender-pdb-xyz` のデフォルト挙動（距離ベースの自動生成）に委ねる。
+- **`.mp4` 最終レンダリング** は Phase 0 スコープ外。Blender GUI で `.blend` を開いて再生する。
+
 `--render` フラグを付けると CLI から Blender を直接呼び出す:
 
 ```bash
