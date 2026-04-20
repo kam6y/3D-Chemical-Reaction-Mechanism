@@ -51,6 +51,9 @@ def _combine_fragments(mols: list[Chem.Mol]) -> Chem.Mol:
     combined = mols[0]
     for m in mols[1:]:
         combined = Chem.CombineMols(combined, m)
+    # Sanitize so implicit valence is calculated; reaction template mols from
+    # ReactionFromRxnFile + CombineMols are not automatically sanitized.
+    Chem.SanitizeMol(combined)
     return combined
 
 
