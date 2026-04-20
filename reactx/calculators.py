@@ -28,7 +28,7 @@ def _build_uma_calculator(
     *,
     model_name: str = "uma-s-1p2",  # valid names: "uma-s-1p2", "uma-s-1p1", "uma-m-1p1", or local path
     device: str | None = None,
-    task_name: str | None = None,
+    task_name: str = "omol",
     **kwargs: Any,
 ) -> Calculator:
     try:
