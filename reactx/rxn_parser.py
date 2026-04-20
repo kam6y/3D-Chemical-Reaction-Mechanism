@@ -36,6 +36,12 @@ def parse_rxn(rxn_path: str | Path) -> tuple[Chem.Mol, Chem.Mol, dict[int, int]]
             )
         mapping[r_idx] = p_map[mapnum]
 
+    for mapnum in p_map:
+        if mapnum not in r_map:
+            raise ValueError(
+                f"Atom map number {mapnum} present in product but not in reactant"
+            )
+
     return reactant, product, mapping
 
 
@@ -45,7 +51,6 @@ def _combine_fragments(mols: list[Chem.Mol]) -> Chem.Mol:
     combined = mols[0]
     for m in mols[1:]:
         combined = Chem.CombineMols(combined, m)
-    Chem.SanitizeMol(combined)
     return combined
 
 

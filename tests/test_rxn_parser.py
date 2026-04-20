@@ -42,5 +42,5 @@ def test_parse_rxn_raises_when_atom_map_missing(tmp_path: Path):
         "     RDKit          2D\n\n  1  0  0  0  0  0  0  0  0  0999 V2000\n"
         "    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0\nM  END\n"
     )
-    with pytest.raises(ValueError, match="atom map"):
+    with pytest.raises(ValueError, match="has no atom map number"):
         parse_rxn(bad)
