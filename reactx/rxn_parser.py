@@ -74,8 +74,8 @@ def heavy_to_hydrogen_groups(mol_with_h: Chem.Mol) -> dict[int, list[int]]:
     """Return {heavy_atom_idx: [bonded_h_idx, ...]} for a Mol with explicit Hs.
 
     Use after Chem.AddHs so that hydrogen indices correspond to positions in the
-    Atoms object produced by embed3d._rdkit_to_atoms (heavy atoms + attached Hs
-    in the original mol_h ordering).
+    Atoms object produced by embed3d.embed_mol_to_atoms, which preserves the
+    Chem.AddHs(mol) atom ordering exactly.
     """
     groups: dict[int, list[int]] = {}
     for atom in mol_with_h.GetAtoms():
