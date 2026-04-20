@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -40,6 +41,20 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _fmt_fmax(v: float) -> str:
+    return "nan" if math.isnan(v) else f"{v:.4f}"
+
+
+def _sanitize_for_json(obj):
+    if isinstance(obj, float):
+        return None if math.isnan(obj) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     if not args.rxn_path.exists():
         print(f"Error: .rxn not found: {args.rxn_path}", file=sys.stderr)
@@ -49,10 +64,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
 
-    calc = make_calculator(args.backend)
-
-    reactant = embed_mol_to_atoms(r_mol, calculator=calc, seed=1)
-    product_raw = embed_mol_to_atoms(p_mol, calculator=calc, seed=2)
+    reactant = embed_mol_to_atoms(
+        r_mol, calculator=make_calculator(args.backend), seed=1,
+    )
+    product_raw = embed_mol_to_atoms(
+        p_mol, calculator=make_calculator(args.backend), seed=2,
+    )
 
     r_mol_h = Chem.AddHs(r_mol)
     p_mol_h = Chem.AddHs(p_mol)
@@ -72,21 +89,31 @@ def _cmd_run(args: argparse.Namespace) -> int:
         pad_frames=args.pad_frames,
     )
 
-    (args.output / "meta.json").write_text(json.dumps(meta, indent=2))
-    (args.output / "energies.json").write_text(json.dumps(meta["image_energies"]))
+    meta_clean = _sanitize_for_json(meta)
+    (args.output / "meta.json").write_text(json.dumps(meta_clean, indent=2))
+    (args.output / "energies.json").write_text(json.dumps(meta_clean["image_energies"]))
 
     if args.render:
-        _invoke_blender(args, xyz)
+        rc = _invoke_blender(args, xyz)
+        if rc != 0:
+            return rc
 
-    print(f"OK: wrote {xyz} (converged={meta['converged']}, fmax={meta['final_fmax']:.4f})")
+    print(f"OK: wrote {xyz} (converged={meta['converged']}, fmax={_fmt_fmax(meta['final_fmax'])})")
     return 0
 
 
-def _invoke_blender(args: argparse.Namespace, xyz: Path) -> None:
+def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
     import subprocess
     script = Path(__file__).resolve().parent.parent / "blender" / "render.py"
     blend = args.output / "scene.blend"
     cmd = [args.blender_exe, "--background", "--python", str(script),
            "--", str(xyz), str(blend)]
     print("Running:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        print(
+            f"Error: blender exited with code {result.returncode}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
