@@ -30,3 +30,21 @@ def test_make_calculator_uma_requires_fairchem(monkeypatch):
     monkeypatch.setattr(mod, "_build_uma_calculator", lambda **_: fake_import())
     with pytest.raises(ImportError):
         make_calculator("uma")
+
+
+def test_make_calculator_does_not_import_torch_at_module_level():
+    """Regression test: importing reactx.calculators must not pull torch into sys.modules."""
+    import subprocess
+    import sys
+    code = (
+        "import sys; "
+        "import reactx.calculators; "
+        "assert 'torch' not in sys.modules, 'torch leaked into sys.modules'; "
+        "print('OK')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    assert "OK" in result.stdout

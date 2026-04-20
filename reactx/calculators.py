@@ -26,8 +26,9 @@ def make_calculator(name: str = "uma", **kwargs: Any) -> Calculator:
 
 def _build_uma_calculator(
     *,
-    model_name: str = "fairchem/UMA-S",
+    model_name: str = "uma-s-1p2",  # valid names: "uma-s-1p2", "uma-s-1p1", "uma-m-1p1", or local path
     device: str | None = None,
+    task_name: str | None = None,
     **kwargs: Any,
 ) -> Calculator:
     try:
@@ -40,11 +41,11 @@ def _build_uma_calculator(
         ) from exc
 
     if device is None:
-        if torch.backends.mps.is_available():
-            device = "mps"
-        elif torch.cuda.is_available():
+        if torch.cuda.is_available():
             device = "cuda"
         else:
             device = "cpu"
 
-    return FAIRChemCalculator(model_name=model_name, device=device, **kwargs)
+    return FAIRChemCalculator.from_model_checkpoint(
+        model_name, device=device, task_name=task_name, **kwargs
+    )
