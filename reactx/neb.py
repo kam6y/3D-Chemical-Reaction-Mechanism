@@ -43,13 +43,30 @@ def run_neb(
     for img in images:
         img.calc = calculator_factory()
 
-    neb = NEB(images, climb=climb, allow_shared_calculator=False, method="improvedtangent")
-    neb.interpolate(method="idpp")
+    # Two-phase NEB: warm up the band with plain NEB, then climb the TS.
+    # IDPP can produce non-physical midpoints for position-swapping reactions,
+    # and CI-NEB starting from a bad initial path tends to chase a wrong saddle.
+    # Warming up first lets the band relax to a sensible MEP before climbing.
+    warmup_steps = max(1, max_steps // 3)
+    climb_steps = max(1, max_steps - warmup_steps)
 
-    opt = FIRE(neb, logfile=None)
+    neb_warm = NEB(images, climb=False, allow_shared_calculator=False, method="improvedtangent")
+    neb_warm.interpolate(method="idpp")
+
     converged = False
     try:
-        opt.run(fmax=fmax, steps=max_steps)
+        FIRE(neb_warm, logfile=None).run(fmax=fmax, steps=warmup_steps)
+    except Exception:
+        pass
+
+    if climb:
+        neb_climb = NEB(images, climb=True, allow_shared_calculator=False, method="improvedtangent")
+        try:
+            FIRE(neb_climb, logfile=None).run(fmax=fmax, steps=climb_steps)
+        except Exception:
+            pass
+
+    try:
         converged = all(
             max(abs(img.get_forces().flatten())) < fmax
             for img in images[1:-1]
