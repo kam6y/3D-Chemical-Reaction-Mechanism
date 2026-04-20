@@ -27,7 +27,10 @@ def run_neb(
     pad_frames: int = 0,
 ) -> dict:
     """Run IDPP interpolation + (CI-)NEB, write trajectory XYZ, return metadata."""
-    assert n_images >= 3, "n_images must be >= 3 (reactant + >=1 middle + product)"
+    if n_images < 3:
+        raise ValueError(
+            f"n_images must be >= 3 (reactant + >=1 middle + product), got {n_images}"
+        )
 
     images = [reactant.copy()]
     for _ in range(n_images - 2):
@@ -51,11 +54,15 @@ def run_neb(
     except Exception:
         converged = False
 
-    final_fmax = max(
-        float(max(abs(img.get_forces().flatten())))
-        for img in images[1:-1]
-    )
-    image_energies = [float(img.get_potential_energy()) for img in images]
+    try:
+        final_fmax = max(
+            float(max(abs(img.get_forces().flatten())))
+            for img in images[1:-1]
+        )
+        image_energies = [float(img.get_potential_energy()) for img in images]
+    except Exception:
+        final_fmax = float("nan")
+        image_energies = [float("nan")] * n_images
 
     padded: list[Atoms] = []
     padded.extend([images[0].copy() for _ in range(pad_frames)])

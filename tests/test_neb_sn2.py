@@ -89,3 +89,15 @@ def test_sn2_neb_ts_has_walden_inversion(tmp_path: Path):
     cl = syms.index("Cl")
     angle = ts.get_angle(f, c, cl)
     assert angle > 165, f"Walden inversion expects near-linear F-C-Cl, got {angle:.1f}°"
+
+
+def test_run_neb_rejects_too_few_images(tmp_path: Path):
+    reactant = _two_state_h2(0.5)
+    product = _two_state_h2(1.2)
+    out = tmp_path / "traj.xyz"
+    with pytest.raises(ValueError, match="n_images must be >= 3"):
+        run_neb(
+            reactant=reactant, product=product,
+            calculator_factory=lambda: make_calculator("lj"),
+            n_images=2, output_xyz=out, fmax=0.5, max_steps=10,
+        )
