@@ -1430,7 +1430,7 @@ Phase 0 の範囲: SN2 反応 (CH₃Cl + F⁻ → CH₃F + Cl⁻) 1 件を end-t
 
 ```bash
 python -m pip install -e .[dev]
-huggingface-cli login    # UMA モデル取得のため
+hf auth login    # UMA モデル取得のため (huggingface-hub 1.0+ の新 CLI)
 ```
 
 Blender 4.x と `atomic-blender-pdb-xyz` アドオンを別途インストールしておく。

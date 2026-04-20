@@ -6,19 +6,20 @@ build-backend = "setuptools.build_meta"
 name = "reactx"
 version = "0.0.1"
 description = "2D reaction scheme to 3D NEB trajectory and Blender animation (Phase 0 spike)"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "rdkit>=2024.3",
-    "ase>=3.22",
-    "numpy>=1.24",
-    "fairchem-core>=1.0",
-    "torch>=2.2",
+    "rdkit>=2025.3",
+    "ase>=3.26",
+    "numpy>=2.0",
+    "fairchem-core>=2.14",
+    "torch>=2.5",
+    "huggingface-hub>=1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-mock>=3.12",
+    "pytest>=8.3",
+    "pytest-mock>=3.14",
 ]
 
 [project.scripts]

@@ -140,7 +140,7 @@ docs/
 ## 8. エラーハンドリング方針
 
 - **RDKit embed 失敗**: seed を変えて最大 5 回リトライ → `RuntimeError` + 「RDKit version / 入力構造確認」ヒント。
-- **UMA HF 認証失敗**: `cli` 起動時に `ReadyCheck` で事前検出し、`huggingface-cli login` 手順を案内。
+- **UMA HF 認証失敗**: `cli` 起動時に `ReadyCheck` で事前検出し、`hf auth login` 手順を案内。
 - **NEB 非収束**: warning + ベストエフォート軌跡保存。`meta.json` に `converged: false` と `final_fmax` を記録。
 - **Blender 起動失敗**: `atomic-blender-pdb-xyz` 未導入を検知、インストール手順 URL を提示。
 - **`.rxn` に atom mapping 欠損**: 明確なエラーで停止（Phase 0 では自動補完しない）。
@@ -154,12 +154,12 @@ docs/
 
 ## 10. 環境前提
 
-- OS: macOS (Apple Silicon 推奨、MPS 経由で UMA 加速) / Linux
-- Python 3.10+
+- OS: macOS (Apple Silicon) / Linux / Windows
+- Python 3.11+
 - Blender 4.x
 - `atomic-blender-pdb-xyz` アドオンがユーザ環境にインストール済み
-- Hugging Face アカウントで UMA 利用承認済み & `huggingface-cli login` 完了
-- 主要依存: `rdkit`, `ase`, `fairchem-core`, `torch`, `numpy`
+- Hugging Face アカウントで UMA 利用承認済み & `hf auth login` 完了 (huggingface-hub 1.0+ で `huggingface-cli` は `hf` にリネーム)
+- 主要依存: `rdkit` (>=2025.3), `ase` (>=3.26), `fairchem-core` (>=2.14), `torch` (>=2.5), `numpy` (>=2.0), `huggingface-hub` (>=1.0)
 
 ## 11. Phase 0 で意図的にやらないこと（非スコープ）
 

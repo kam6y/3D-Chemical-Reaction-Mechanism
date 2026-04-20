@@ -37,7 +37,7 @@ def _build_uma_calculator(
     except ImportError as exc:
         raise ImportError(
             "UMA backend requires fairchem-core and torch. "
-            "Install with: pip install fairchem-core torch"
+            "Install with: pip install fairchem-core torch huggingface-hub; then: hf auth login"
         ) from exc
 
     if device is None:
