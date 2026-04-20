@@ -28,10 +28,24 @@ def _reset_scene() -> None:
 
 
 def _import_trajectory(xyz: Path) -> None:
-    try:
-        bpy.ops.preferences.addon_enable(module="atomic_blender_pdb_xyz")
-    except Exception:
-        bpy.ops.preferences.addon_enable(module="atomic_blender_xyz")
+    candidates = (
+        "bl_ext.blender_org.atomic_blender_pdb_xyz",
+        "atomic_blender_pdb_xyz",
+        "atomic_blender_xyz",
+    )
+    last_err: Exception | None = None
+    for name in candidates:
+        try:
+            bpy.ops.preferences.addon_enable(module=name)
+            print(f"Enabled add-on: {name}")
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+    else:
+        raise RuntimeError(
+            f"Could not enable atomic-blender-pdb-xyz add-on. Tried: {candidates}. "
+            f"Last error: {last_err}. Install via Edit > Preferences > Get Extensions."
+        )
     bpy.ops.import_mesh.xyz(filepath=str(xyz), use_frames=True)
 
 
