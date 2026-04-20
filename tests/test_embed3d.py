@@ -59,3 +59,14 @@ def test_embed_failure_raises_runtime_error(monkeypatch):
     monkeypatch.setattr(mod.AllChem, "EmbedMolecule", always_fail)
     with pytest.raises(RuntimeError, match="embed"):
         embed_mol_to_atoms(_ch3cl(), calculator=None, seed=1)
+
+
+def test_embed_multifragment_preserves_addhs_ordering():
+    """Critical invariant: embed output atom order must match Chem.AddHs(mol)
+    so downstream align + heavy_to_hydrogen_groups can share indices."""
+    mol = Chem.MolFromSmiles("CCl.[F-]")
+    mol_h = Chem.AddHs(mol)
+    expected_symbols = [a.GetSymbol() for a in mol_h.GetAtoms()]
+
+    atoms = embed_mol_to_atoms(mol, calculator=None, seed=42)
+    assert atoms.get_chemical_symbols() == expected_symbols
