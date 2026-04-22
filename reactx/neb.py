@@ -51,10 +51,12 @@ def run_neb(
     # IDPP can produce non-physical midpoints for position-swapping reactions,
     # and CI-NEB starting from a bad initial path tends to chase a wrong saddle.
     # Warming up first lets the band relax to a sensible MEP before climbing.
-    warmup_steps = max(1, max_steps // 3)
+    # k=1.0 prevents image bunching near minima (default k=0.1 is too weak for
+    # position-swapping reactions like SN2 where images collapse to R/P sides).
+    warmup_steps = max(1, max_steps // 2)
     climb_steps = max(1, max_steps - warmup_steps)
 
-    neb_warm = NEB(images, climb=False, allow_shared_calculator=True, method="improvedtangent")
+    neb_warm = NEB(images, k=1.0, climb=False, allow_shared_calculator=True, method="improvedtangent")
     neb_warm.interpolate(method="idpp")
 
     converged = False
@@ -64,7 +66,7 @@ def run_neb(
         pass
 
     if climb:
-        neb_climb = NEB(images, climb=True, allow_shared_calculator=True, method="improvedtangent")
+        neb_climb = NEB(images, k=1.0, climb=True, allow_shared_calculator=True, method="improvedtangent")
         try:
             FIRE(neb_climb, logfile=None).run(fmax=fmax, steps=climb_steps)
         except Exception:
