@@ -23,10 +23,12 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Run full pipeline on a .rxn file")
     run.add_argument("rxn_path", type=Path)
     run.add_argument("-o", "--output", type=Path, required=True)
-    run.add_argument("--images", type=int, default=11)
+    run.add_argument("--images", type=int, default=15)
     run.add_argument("--fmax", type=float, default=0.05)
-    run.add_argument("--max-steps", type=int, default=200)
+    run.add_argument("--max-steps", type=int, default=500)
     run.add_argument("--backend", choices=["uma", "lj"], default="uma")
+    run.add_argument("--model", type=str, default="uma-m-1p1",
+                     help="UMA model name (uma-m-1p1, uma-s-1p2, ...)")
     run.add_argument("--pad-frames", type=int, default=3)
     run.add_argument("--render", action="store_true",
                      help="Also invoke blender/render.py after NEB")
@@ -64,11 +66,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
 
+    model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
     reactant = embed_mol_to_atoms(
-        r_mol, calculator=make_calculator(args.backend), seed=1,
+        r_mol, calculator=make_calculator(args.backend, **model_kwargs), seed=1,
     )
     product_raw = embed_mol_to_atoms(
-        p_mol, calculator=make_calculator(args.backend), seed=2,
+        p_mol, calculator=make_calculator(args.backend, **model_kwargs), seed=2,
     )
 
     r_mol_h = Chem.AddHs(r_mol)
@@ -81,7 +84,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     meta = run_neb(
         reactant=reactant,
         product=product,
-        calculator_factory=lambda: make_calculator(args.backend),
+        calculator_factory=lambda: make_calculator(args.backend, **model_kwargs),
         n_images=args.images,
         output_xyz=xyz,
         fmax=args.fmax,
