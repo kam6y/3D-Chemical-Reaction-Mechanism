@@ -40,8 +40,12 @@ def run_neb(
         images.append(reactant.copy())
     images.append(product.copy())
 
+    # Single shared calculator: large models (uma-m-1p1 = 11 GB) would OOM if
+    # instantiated once per image. allow_shared_calculator=True lets ASE
+    # evaluate images sequentially with one model instance.
+    shared_calc = calculator_factory()
     for img in images:
-        img.calc = calculator_factory()
+        img.calc = shared_calc
 
     # Two-phase NEB: warm up the band with plain NEB, then climb the TS.
     # IDPP can produce non-physical midpoints for position-swapping reactions,
@@ -50,7 +54,7 @@ def run_neb(
     warmup_steps = max(1, max_steps // 3)
     climb_steps = max(1, max_steps - warmup_steps)
 
-    neb_warm = NEB(images, climb=False, allow_shared_calculator=False, method="improvedtangent")
+    neb_warm = NEB(images, climb=False, allow_shared_calculator=True, method="improvedtangent")
     neb_warm.interpolate(method="idpp")
 
     converged = False
@@ -60,7 +64,7 @@ def run_neb(
         pass
 
     if climb:
-        neb_climb = NEB(images, climb=True, allow_shared_calculator=False, method="improvedtangent")
+        neb_climb = NEB(images, climb=True, allow_shared_calculator=True, method="improvedtangent")
         try:
             FIRE(neb_climb, logfile=None).run(fmax=fmax, steps=climb_steps)
         except Exception:
