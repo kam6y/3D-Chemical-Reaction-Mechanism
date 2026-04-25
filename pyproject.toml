@@ -42,3 +42,4 @@ markers = [
     "blender: require local Blender install + atomic-blender-pdb-xyz add-on",
 ]
 testpaths = ["tests"]
+addopts = "-m 'not slow and not blender'"

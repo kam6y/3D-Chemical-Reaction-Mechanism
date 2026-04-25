@@ -5,7 +5,6 @@ import argparse
 import json
 import logging
 import math
-import sys
 from pathlib import Path
 
 from rdkit import Chem
@@ -15,6 +14,8 @@ from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
 from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
+
+log = logging.getLogger("reactx")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,7 +74,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     _configure_reactx_logging()
 
     if not args.rxn_path.exists():
-        print(f"Error: .rxn not found: {args.rxn_path}", file=sys.stderr)
+        log.error("Error: .rxn not found: %s", args.rxn_path)
         return 1
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -115,7 +116,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if rc != 0:
             return rc
 
-    print(f"OK: wrote {xyz} (converged={meta['converged']}, fmax={_fmt_fmax(meta['final_fmax'])})")
+    log.info(
+        "OK: wrote %s (converged=%s, fmax=%s)",
+        xyz, meta["converged"], _fmt_fmax(meta["final_fmax"]),
+    )
     return 0
 
 
@@ -125,12 +129,9 @@ def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
     blend = args.output / "scene.blend"
     cmd = [args.blender_exe, "--background", "--python", str(script),
            "--", str(xyz), str(blend)]
-    print("Running:", " ".join(cmd))
+    log.info("Running: %s", " ".join(cmd))
     result = subprocess.run(cmd)
     if result.returncode != 0:
-        print(
-            f"Error: blender exited with code {result.returncode}",
-            file=sys.stderr,
-        )
+        log.error("Error: blender exited with code %d", result.returncode)
         return 1
     return 0

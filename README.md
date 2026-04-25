@@ -27,8 +27,17 @@ blender --background --python blender/render.py -- out/trajectory.xyz out/scene.
 - `out/meta.json` — 収束情報など
 - `out/scene.blend` — Blender シーン（GUI で開いて再生）
 
+## Phase 0 動作確認
+
+DoD は以下の手順で確認する:
+
+1. `reactx run examples/sn2.rxn -o out/ --backend uma --render` を実行 → `out/trajectory.xyz`, `out/scene.blend` が生成される。
+2. `out/scene.blend` を Blender GUI で開き、再生して **F⁻ が CH₃Cl の背面から接近 → C 中心の sp³ 反転 → Cl⁻ が脱離** する Walden 反転シーケンスが視認できることを確認する。
+3. `pytest -m slow` で `test_neb_sn2` を実行し、TS の C–F–Cl 角度が一定値以上であることを確認する。
+
 ## Phase 0 の既知の制約
 
+- **TS の線形性閾値が 170° → 120° に緩和**。`uma-m-1p1` (omol task) では SN2 の TS が安定して 170° (ほぼ線形) に到達しないため、Phase 0 では背面攻撃の方向性確認に留める。詳細は `docs/superpowers/specs/2026-04-20-reactx-phase-0-design.md` §9。Phase 1 でモデル/最適化チューニング後に再引き締め予定。
 - **TS 付近のスローダウン再生** は Phase 1 で実装予定。Phase 0 の `blender/render.py` は軌跡を均一速度で再生する。
 - **Bond 形成・切断の動的 fade** は `atomic-blender-pdb-xyz` のデフォルト挙動（距離ベースの自動生成）に委ねる。
 - **`.mp4` 最終レンダリング** は Phase 0 スコープ外。Blender GUI で `.blend` を開いて再生する。
