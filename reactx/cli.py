@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import sys
 from pathlib import Path
@@ -43,6 +44,17 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _configure_reactx_logging() -> None:
+    log = logging.getLogger("reactx")
+    if log.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[reactx] %(message)s"))
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+
+
 def _fmt_fmax(v: float) -> str:
     return "nan" if math.isnan(v) else f"{v:.4f}"
 
@@ -58,6 +70,8 @@ def _sanitize_for_json(obj):
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
+    _configure_reactx_logging()
+
     if not args.rxn_path.exists():
         print(f"Error: .rxn not found: {args.rxn_path}", file=sys.stderr)
         return 1

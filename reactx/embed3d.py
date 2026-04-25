@@ -24,8 +24,8 @@ def embed_mol_to_atoms(
     *,
     calculator: Optional[Calculator] = None,
     seed: int = 0xC0FFEE,
-    fmax: float = 0.05,
-    max_opt_steps: int = 200,
+    fmax: float = 0.01,
+    max_opt_steps: int = 300,
 ) -> Atoms:
     """Embed a 2D Mol into 3D and return an ase.Atoms with implicit Hs added.
 
@@ -51,17 +51,7 @@ def embed_mol_to_atoms(
             positions[orig_idx] = (p.x, p.y, p.z)
 
     if len(frag_indices) > 1:
-        # Place fragment 1 (nucleophile) on the -x side of fragment 0 (substrate)
-        # so it approaches from the backside of the C-LG bond (Walden inversion).
-        # MMFF places the leaving group along +x, so -x is the anti attack direction.
-        anchor_group = list(frag_indices[0])
-        anchor_min_x = positions[anchor_group, 0].min()
-        for i in range(1, len(frag_indices)):
-            curr_group = list(frag_indices[i])
-            curr_max_x = positions[curr_group, 0].max()
-            # Place current fragment so its max_x is at anchor_min_x - FRAGMENT_SEPARATION
-            offset = anchor_min_x - FRAGMENT_SEPARATION - curr_max_x
-            positions[curr_group, 0] += offset
+        positions = _place_nucleophile_backside(mol_h, frag_indices, positions)
 
     symbols = [a.GetSymbol() for a in mol_h.GetAtoms()]
     charges = [a.GetFormalCharge() for a in mol_h.GetAtoms()]
@@ -76,6 +66,73 @@ def embed_mol_to_atoms(
         BFGS(atoms, logfile=None).run(fmax=fmax, steps=max_opt_steps)
 
     return atoms
+
+
+def _find_c_lg_bond(mol_h: Chem.Mol, substrate_indices: list[int]) -> tuple[int, int] | None:
+    """Locate the C and leaving-group (LG) atoms in the substrate fragment.
+
+    LG heuristic: heavy atom (Z > 1) bonded to sp3 carbon with highest atomic
+    number (halogens F < Cl < Br < I; also works for O, N, S). Returns
+    (c_idx, lg_idx) in mol_h coordinates, or None if no C-LG bond is found.
+    """
+    best: tuple[int, int, int] | None = None  # (Z, c_idx, lg_idx)
+    substrate_set = set(substrate_indices)
+    for atom in mol_h.GetAtoms():
+        if atom.GetIdx() not in substrate_set or atom.GetSymbol() != "C":
+            continue
+        for nb in atom.GetNeighbors():
+            if nb.GetIdx() not in substrate_set or nb.GetAtomicNum() <= 1:
+                continue
+            if nb.GetSymbol() == "C":
+                continue
+            z = nb.GetAtomicNum()
+            if best is None or z > best[0]:
+                best = (z, atom.GetIdx(), nb.GetIdx())
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
+def _place_nucleophile_backside(
+    mol_h: Chem.Mol,
+    frag_indices: tuple[tuple[int, ...], ...],
+    positions: np.ndarray,
+) -> np.ndarray:
+    """Place nucleophile fragment(s) along -(C->LG) from the attacked carbon.
+
+    Uses the geometry of the substrate (fragment 0) to find the C-LG bond
+    direction, then places each nucleophile fragment's centroid at
+    ``C + (-unit(C->LG)) * FRAGMENT_SEPARATION``.
+
+    Falls back to placing nucleophile on substrate's -x side when no C-LG
+    bond can be identified (e.g., non-SN2 substrate without halogen/heteroatom
+    leaving group).
+    """
+    substrate = list(frag_indices[0])
+    bond = _find_c_lg_bond(mol_h, substrate)
+    if bond is None:
+        sub_min_x = positions[substrate, 0].min()
+        for i in range(1, len(frag_indices)):
+            nuc = list(frag_indices[i])
+            nuc_max_x = positions[nuc, 0].max()
+            positions[nuc, 0] += sub_min_x - FRAGMENT_SEPARATION - nuc_max_x
+        return positions
+
+    c_idx, lg_idx = bond
+    c_pos = positions[c_idx]
+    lg_pos = positions[lg_idx]
+    c_lg = lg_pos - c_pos
+    c_lg_norm = float(np.linalg.norm(c_lg))
+    if c_lg_norm < 1e-6:
+        return positions
+    backside = -c_lg / c_lg_norm
+
+    for i in range(1, len(frag_indices)):
+        nuc = list(frag_indices[i])
+        nuc_centroid = positions[nuc].mean(axis=0)
+        target = c_pos + backside * FRAGMENT_SEPARATION
+        positions[nuc] += target - nuc_centroid
+    return positions
 
 
 def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:

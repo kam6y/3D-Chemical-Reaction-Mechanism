@@ -34,10 +34,15 @@ def test_align_reorders_heavy_atoms_to_reactant_order():
     )
     assert aligned.get_chemical_symbols() == r.get_chemical_symbols()
 
-    # Expected permutation: reactant[0]=C -> product[2], [1]=Cl->[0], [2]=F->[1],
-    # plus the three Hs which map identity 3,4,5.
-    expected_positions = p.positions[[2, 0, 1, 3, 4, 5]]
-    assert np.allclose(aligned.positions, expected_positions)
+    # Expected permutation (before rigid-body alignment): centroid-subtracted
+    # positions must match, since align_product_to_reactant also applies
+    # rigid rotation+translation to minimize RMSD against reactant.
+    expected = p.positions[[2, 0, 1, 3, 4, 5]]
+    assert np.allclose(
+        aligned.positions - aligned.positions.mean(axis=0),
+        expected - expected.mean(axis=0),
+        atol=1e-6,
+    )
 
 
 def test_align_preserves_atom_count():

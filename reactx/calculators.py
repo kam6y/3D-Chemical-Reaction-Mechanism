@@ -1,9 +1,12 @@
 """ASE Calculator factory. Phase 0 supports UMA (primary) and LennardJones (tests)."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from ase.calculators.calculator import Calculator
+
+log = logging.getLogger(__name__)
 
 
 def make_calculator(name: str = "uma", **kwargs: Any) -> Calculator:
@@ -46,6 +49,7 @@ def _build_uma_calculator(
         else:
             device = "cpu"
 
+    log.info("UMA calculator: model=%s, device=%s", model_name, device)
     return FAIRChemCalculator.from_model_checkpoint(
         model_name, device=device, task_name=task_name, **kwargs
     )

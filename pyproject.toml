@@ -28,6 +28,14 @@ reactx = "reactx.cli:main"
 [tool.setuptools.packages.find]
 include = ["reactx*"]
 
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
 [tool.pytest.ini_options]
 markers = [
     "slow: require UMA model download and run NEB to convergence",

@@ -1,6 +1,7 @@
 """ASE IDPP + CI-NEB driver. Writes multi-frame XYZ with optional end padding."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable
 
@@ -12,6 +13,8 @@ try:
     from ase.mep import NEB
 except ImportError:  # ASE < 3.23
     from ase.neb import NEB
+
+log = logging.getLogger(__name__)
 
 
 def run_neb(
@@ -59,35 +62,42 @@ def run_neb(
     neb_warm = NEB(images, k=1.0, climb=False, allow_shared_calculator=True, method="improvedtangent")
     neb_warm.interpolate(method="idpp")
 
-    converged = False
+    # FIRE logs per-step energy/fmax to stdout ("-"). Users can pipe to a file.
+    warm_converged = False
+    log.info("NEB warmup phase: up to %d steps, fmax=%s", warmup_steps, fmax)
     try:
-        FIRE(neb_warm, logfile=None).run(fmax=fmax, steps=warmup_steps)
-    except Exception:
-        pass
+        warm_converged = bool(
+            FIRE(neb_warm, logfile="-").run(fmax=fmax, steps=warmup_steps)
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("NEB warmup raised %s: %s", type(exc).__name__, exc)
 
+    climb_converged = False
+    final_neb = neb_warm
     if climb:
         neb_climb = NEB(images, k=1.0, climb=True, allow_shared_calculator=True, method="improvedtangent")
+        final_neb = neb_climb
+        log.info("NEB climb phase: up to %d steps, fmax=%s", climb_steps, fmax)
         try:
-            FIRE(neb_climb, logfile=None).run(fmax=fmax, steps=climb_steps)
-        except Exception:
-            pass
+            climb_converged = bool(
+                FIRE(neb_climb, logfile="-").run(fmax=fmax, steps=climb_steps)
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("NEB climb raised %s: %s", type(exc).__name__, exc)
 
+    converged = climb_converged if climb else warm_converged
+    # final_neb.{residuals,energies} are populated by the last get_forces() call
+    # FIRE made internally — reading them here costs zero UMA evaluations.
     try:
-        converged = all(
-            max(abs(img.get_forces().flatten())) < fmax
-            for img in images[1:-1]
-        )
-    except Exception:
-        converged = False
-
-    try:
-        final_fmax = max(
-            float(max(abs(img.get_forces().flatten())))
-            for img in images[1:-1]
-        )
-        image_energies = [float(img.get_potential_energy()) for img in images]
-    except Exception:
+        final_fmax = float(final_neb.get_residual())
+    except Exception as exc:  # noqa: BLE001
+        log.warning("NEB fmax evaluation raised %s: %s", type(exc).__name__, exc)
         final_fmax = float("nan")
+
+    try:
+        image_energies = [float(e) for e in final_neb.energies]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Image energy evaluation raised %s: %s", type(exc).__name__, exc)
         image_energies = [float("nan")] * n_images
 
     padded: list[Atoms] = []

@@ -68,10 +68,20 @@ def _add_camera_looking_at_origin() -> None:
     bpy.context.scene.camera = bpy.context.object
 
 
-def _stretch_timeline() -> None:
+def _count_xyz_frames(xyz: Path) -> int:
+    """Number of frames in an extxyz trajectory (each frame = n_atoms + 2 lines)."""
+    lines = xyz.read_text().splitlines()
+    if not lines:
+        return 0
+    n_atoms = int(lines[0].strip())
+    return len(lines) // (n_atoms + 2)
+
+
+def _set_timeline_to_trajectory(xyz: Path) -> None:
+    n_frames = _count_xyz_frames(xyz)
     scene = bpy.context.scene
     scene.frame_start = 1
-    scene.frame_end = max(scene.frame_end, int(FPS * 10))
+    scene.frame_end = max(1, n_frames)
 
 
 def main(argv: list[str]) -> int:
@@ -80,7 +90,7 @@ def main(argv: list[str]) -> int:
     _import_trajectory(xyz)
     _add_three_point_lighting()
     _add_camera_looking_at_origin()
-    _stretch_timeline()
+    _set_timeline_to_trajectory(xyz)
     out.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(out))
     print(f"Saved: {out}")

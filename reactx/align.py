@@ -1,7 +1,11 @@
 """Reorder product atoms to match reactant atom ordering using atom mapping."""
 from __future__ import annotations
 
+from itertools import permutations
+
+import numpy as np
 from ase import Atoms
+from ase.build.rotate import minimize_rotation_and_translation
 
 
 def align_product_to_reactant(
@@ -47,4 +51,34 @@ def align_product_to_reactant(
         raise ValueError(f"Unmapped reactant atoms: {missing}")
 
     aligned = product[permutation]
+
+    # Rigid-body rotate+translate product onto reactant. Without this step,
+    # embed3d generates R and P in independent orientations, which causes the
+    # NEB interpolated path to pass atoms through each other (e.g. F/Cl
+    # swapping sides across C in SN2). Alignment is driven by atom-index
+    # correspondence so the RMSD-minimization is chemically meaningful.
+    minimize_rotation_and_translation(reactant, aligned)
+
+    # ETKDG seeds R and P independently, so hydrogens bonded to the same heavy
+    # atom may be in different relative orientations. Reassign P's Hs to R's
+    # Hs within each group by minimum sum of pairwise distances (≤3 Hs in
+    # Phase 0 substrates, so brute-force enumeration is fine).
+    h_perm = list(range(len(reactant)))
+    for r_hs in reactant_h_groups.values():
+        if len(r_hs) <= 1:
+            continue
+        r_positions = reactant.positions[r_hs]
+        p_positions = aligned.positions[r_hs]
+        best_perm = min(
+            permutations(range(len(r_hs))),
+            key=lambda perm: np.linalg.norm(
+                p_positions[list(perm)] - r_positions, axis=1
+            ).sum(),
+        )
+        if tuple(best_perm) == tuple(range(len(r_hs))):
+            continue
+        for dst_i, src_i in enumerate(best_perm):
+            h_perm[r_hs[dst_i]] = r_hs[src_i]
+    if h_perm != list(range(len(reactant))):
+        aligned = aligned[h_perm]
     return aligned
