@@ -1,4 +1,4 @@
-# Blender アニメーションの原子半径を van der Waals 半径比に揃える
+# Blender アニメーションの原子半径を van der Waals 半径比に揃える + 結合棒描画
 
 - 作成日: 2026-04-26
 - 関連: `docs/superpowers/specs/2026-04-20-reactx-phase-0-design.md`
@@ -9,6 +9,8 @@
 `reactx run --render` で生成される `out/scene.blend` は、`atomic-blender-pdb-xyz` アドオンに同梱の元素データから半径を引いている。アドオンの既定値は **共有結合半径 (covalent radius)** に相当し、たとえば SN2 反応 (CH₃Cl + F⁻ → CH₃F + Cl⁻) では H=0.32, C=0.77, F=0.72, Cl=0.99 (Å) という比率で球が描画される。
 
 化学的な視認性を高めるため、球サイズの **相対比** を実際の vdW 半径比へ揃える。これにより、たとえば F⁻ や Cl⁻ といった求核種・脱離基が対応する周辺原子と比べて適切な大きさで表示される。
+
+加えて、`atomic-blender-pdb-xyz` の **XYZ importer は結合棒描画機構を持たない** (PDB importer の `use_sticks` 系オプションは XYZ には存在しない) ことが判明したため、本仕様は結合棒の描画も `render.py` 側で実装する。Phase 0 当初の README にあった「アドオンのデフォルト挙動 (距離ベースの自動生成) に委ねる」という記述は誤りだったため併せて訂正する。
 
 UMA (`uma-m-1p1`) の分子タスク (`omol`) は OMol25 データセットで訓練されており、訓練元素は **Z=1 (H) から Z=83 (Bi) までの連続した 83 元素** (アクチノイドおよび Po, At, Rn, Fr, Ra は対象外)。本仕様の vdW テーブルもこれと同じ範囲 Z=1〜83 を一対一でカバーする。
 
@@ -25,9 +27,12 @@ Tl Tm V W Xe Y Yb Zn Zr
 | 項目 | 採用案 | 検討した代替 | 採用理由 |
 |---|---|---|---|
 | 絶対サイズ | vdW 半径 × 0.25 (ball-and-stick) | C を現状 0.77 Å に固定 / vdW そのまま (CPK) | 結合棒が見え続けて Walden 反転が視認しやすく、現状の見た目とほぼ同スケール |
-| データソース | Alvarez (2013) *Dalton Trans.* 42, 8617 (Z=1-96) | Bondi (1964) + Mantina (2009) 拡張 / RDKit `GetRvdw` | 単一論文で UMA 対応上限 Z=83 まで一貫した方法論。継ぎ接ぎ不要 |
+| データソース (vdW) | Alvarez (2013) *Dalton Trans.* 42, 8617 | Bondi (1964) + Mantina (2009) 拡張 / RDKit `GetRvdw` | 単一論文で UMA 対応上限 Z=83 まで一貫した方法論。継ぎ接ぎ不要 |
 | 差し替え方式 | Import 後の post-processing | アドオンの `datafile` 引数 / `ELEMENTS` の monkey-patch | コード量最少、アドオンの内部 API に依存しない、未知元素を素直にスキップできる |
 | 設定方式 | 環境変数 `REACTX_VDW_SCALE` | CLI フラグ / モジュール分割 | Phase 0 では Blender 側だけで完結させ、CLI 配管に手を入れない |
+| 結合検出 | Cordero (2008) 共有結合半径 × 1.3 の距離判定 | RDKit に推論依頼 / PDB CONECT 経由 / Geometry Nodes | RDKit を Blender 内に持ち込まずに済む / 全フレーム union 取得が容易 |
+| 結合の動かし方 | bond mesh + per-frame shape key (アドオン原子と同パターン) + Skin / Subsurf modifier | 静的シリンダ / 各フレーム再生成 + 可視性キーフレーム / Geometry Nodes / driver | 原子と完全同期して動き、`.blend` 再オープン時の auto-run 不要、API も小さい |
+| 結合の形成・切断 | 全フレーム union を全期間表示 (Phase 0) | 距離閾値ベースで動的 fade | Phase 0 スコープ内で最小実装。Phase 1 で fade に拡張予定 |
 
 ## 3. 実装
 
@@ -133,6 +138,40 @@ def main(argv: list[str]) -> int:
 
 - 切り戻し: `blender/render.py` の `_rescale_atoms_to_vdw()` 呼び出し1行を削除すれば元のアドオン既定半径に戻る
 - データ修正: vdW テーブルは単一辞書なので、Alvarez 表の誤読があれば該当 key の値を直す PR 1 件で対応可能
+
+## 6.5 結合棒の実装
+
+`render.py` 内に以下を追加:
+
+```python
+COVALENT_RADII_ANGSTROM: dict[str, float] = { "H": 0.31, ..., "Bi": 1.48 }  # Cordero 2008 Z=1..83
+BOND_TOLERANCE = 1.3
+BOND_RADIUS = 0.10  # Skin modifier cross-section radius (Å)
+
+def _parse_xyz_trajectory(xyz: Path) -> list[_AtomFrame]: ...
+def _center_frames(frames): ...                # mirror addon's put_to_center_all=True
+def _compute_bond_pairs(frames) -> list[(i, j)]: ...   # union over all frames
+def _animate_bond_shape_keys(bond_obj, n_frames): ...   # mirror xyz_import.py keyframing
+def _build_bonds(xyz: Path) -> None: ...
+```
+
+`_build_bonds()` は `_rescale_atoms_to_vdw()` の直後に呼び出す。
+
+### 6.5.1 動作仕様
+
+| ケース | 期待挙動 |
+|---|---|
+| 結合候補が 1 件以上検出 | `[reactx] bonds: N bond(s) across F frame(s)` をログ出力、Bonds オブジェクト作成 |
+| 結合 0 件 | `[reactx] bonds: no bonds detected` をログ出力、オブジェクトは作らない |
+| フレーム 0 件 | `[reactx] bonds: no frames parsed` をログ出力、オブジェクトは作らない |
+| 共有結合半径テーブルに無い元素 | その元素を含むペアは結合判定対象外 (skip) |
+| 形成・切断する結合 | union-over-frames なので全期間表示。両端の原子は shape key で動く |
+
+### 6.5.2 テスト追加
+
+`tests/test_blender_smoke.py::test_blender_bonds_detected`:
+- H₂ 2 フレーム軌跡 (距離 0.74 → 0.78 Å、両方とも `(0.31+0.31)*1.3 = 0.806` Å 閾値内)
+- stdout に `[reactx] bonds: 1 bond(s) across 2 frame(s)` が含まれることを assert
 
 ## 7. ドキュメント更新
 

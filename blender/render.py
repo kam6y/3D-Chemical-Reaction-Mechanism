@@ -66,6 +66,33 @@ _ELEMENT_NAME_TO_SYMBOL: dict[str, str] = {
 
 DEFAULT_VDW_SCALE = 0.25
 
+# Cordero et al. (2008) Dalton Trans. 2832. Covalent radii in Angstrom for
+# Z=1..83. Used purely for distance-based bond detection.
+COVALENT_RADII_ANGSTROM: dict[str, float] = {
+    "H": 0.31, "He": 0.28,
+    "Li": 1.28, "Be": 0.96, "B": 0.84, "C": 0.76, "N": 0.71, "O": 0.66,
+    "F": 0.57, "Ne": 0.58,
+    "Na": 1.66, "Mg": 1.41, "Al": 1.21, "Si": 1.11, "P": 1.07, "S": 1.05,
+    "Cl": 1.02, "Ar": 1.06,
+    "K": 2.03, "Ca": 1.76, "Sc": 1.70, "Ti": 1.60, "V": 1.53, "Cr": 1.39,
+    "Mn": 1.39, "Fe": 1.32, "Co": 1.26, "Ni": 1.24, "Cu": 1.32, "Zn": 1.22,
+    "Ga": 1.22, "Ge": 1.20, "As": 1.19, "Se": 1.20, "Br": 1.20, "Kr": 1.16,
+    "Rb": 2.20, "Sr": 1.95, "Y": 1.90, "Zr": 1.75, "Nb": 1.64, "Mo": 1.54,
+    "Tc": 1.47, "Ru": 1.46, "Rh": 1.42, "Pd": 1.39, "Ag": 1.45, "Cd": 1.44,
+    "In": 1.42, "Sn": 1.39, "Sb": 1.39, "Te": 1.38, "I": 1.39, "Xe": 1.40,
+    "Cs": 2.44, "Ba": 2.15,
+    "La": 2.07, "Ce": 2.04, "Pr": 2.03, "Nd": 2.01, "Pm": 1.99, "Sm": 1.98,
+    "Eu": 1.98, "Gd": 1.96, "Tb": 1.94, "Dy": 1.92, "Ho": 1.92, "Er": 1.89,
+    "Tm": 1.90, "Yb": 1.87, "Lu": 1.87,
+    "Hf": 1.75, "Ta": 1.70, "W": 1.62, "Re": 1.51, "Os": 1.44, "Ir": 1.41,
+    "Pt": 1.36, "Au": 1.36, "Hg": 1.32, "Tl": 1.45, "Pb": 1.46, "Bi": 1.48,
+}
+
+# A pair (i, j) is bonded if dist <= (rcov_i + rcov_j) * BOND_TOLERANCE.
+BOND_TOLERANCE = 1.3
+# Skin modifier cross-section radius for bond cylinders (A).
+BOND_RADIUS = 0.10
+
 
 FPS = 24
 
@@ -106,6 +133,166 @@ def _rescale_atoms_to_vdw() -> None:
         new_scale = radius * scale
         obj.scale = (new_scale, new_scale, new_scale)
         print(f"[reactx] vdw-rescale: {element_name} scale={new_scale:.6f}")
+
+
+_AtomFrame = list[tuple[str, tuple[float, float, float]]]
+
+
+def _parse_xyz_trajectory(xyz: Path) -> list[_AtomFrame]:
+    """Parse an extxyz file into a list of frames, each a list of (symbol, (x, y, z))."""
+    lines = xyz.read_text().splitlines()
+    frames: list[_AtomFrame] = []
+    i = 0
+    while i < len(lines):
+        head = lines[i].strip()
+        if not head:
+            i += 1
+            continue
+        try:
+            n = int(head)
+        except ValueError:
+            i += 1
+            continue
+        atoms: _AtomFrame = []
+        for j in range(2, 2 + n):
+            if i + j >= len(lines):
+                break
+            parts = lines[i + j].split()
+            if len(parts) < 4:
+                continue
+            atoms.append((parts[0], (float(parts[1]), float(parts[2]), float(parts[3]))))
+        if len(atoms) == n:
+            frames.append(atoms)
+        i += n + 2
+    return frames
+
+
+def _center_frames(frames: list[_AtomFrame]) -> list[_AtomFrame]:
+    """Subtract each frame's geometric mean to mirror the addon's put_to_center_all=True default."""
+    out: list[_AtomFrame] = []
+    for frame in frames:
+        n = len(frame)
+        if n == 0:
+            out.append(frame)
+            continue
+        cx = sum(p[0] for _, p in frame) / n
+        cy = sum(p[1] for _, p in frame) / n
+        cz = sum(p[2] for _, p in frame) / n
+        out.append([(s, (p[0] - cx, p[1] - cy, p[2] - cz)) for s, p in frame])
+    return out
+
+
+def _compute_bond_pairs(frames: list[_AtomFrame]) -> list[tuple[int, int]]:
+    """Bonded atom-index pairs (union over all frames) by covalent radius criterion."""
+    if not frames:
+        return []
+    n = len(frames[0])
+    bonds: set[tuple[int, int]] = set()
+    for frame in frames:
+        for i in range(n):
+            sym_i, pos_i = frame[i]
+            rcov_i = COVALENT_RADII_ANGSTROM.get(sym_i)
+            if rcov_i is None:
+                continue
+            for j in range(i + 1, n):
+                sym_j, pos_j = frame[j]
+                rcov_j = COVALENT_RADII_ANGSTROM.get(sym_j)
+                if rcov_j is None:
+                    continue
+                threshold = (rcov_i + rcov_j) * BOND_TOLERANCE
+                dx = pos_i[0] - pos_j[0]
+                dy = pos_i[1] - pos_j[1]
+                dz = pos_i[2] - pos_j[2]
+                if dx * dx + dy * dy + dz * dz <= threshold * threshold:
+                    bonds.add((i, j))
+    return sorted(bonds)
+
+
+def _animate_bond_shape_keys(bond_obj, n_frames: int, frame_delta: int = 1) -> None:
+    """Mirror xyz_import.py's per-frame shape-key value keyframing pattern."""
+    blocks = bond_obj.data.shape_keys.key_blocks
+    scene = bpy.context.scene
+
+    if n_frames < 1:
+        return
+    if n_frames == 1:
+        scene.frame_current = 0
+        blocks[1].value = 1.0
+        blocks[1].keyframe_insert("value")
+        return
+
+    scene.frame_current = 0
+    blocks[1].value = 1.0
+    blocks[2].value = 0.0
+    blocks[1].keyframe_insert("value")
+    blocks[2].keyframe_insert("value")
+
+    for number in range(2, n_frames):
+        scene.frame_current += frame_delta
+        blocks[number - 1].value = 0.0
+        blocks[number].value = 1.0
+        blocks[number + 1].value = 0.0
+        blocks[number - 1].keyframe_insert("value")
+        blocks[number].keyframe_insert("value")
+        blocks[number + 1].keyframe_insert("value")
+
+    scene.frame_current += frame_delta
+    blocks[n_frames].value = 1.0
+    blocks[n_frames - 1].value = 0.0
+    blocks[n_frames].keyframe_insert("value")
+    blocks[n_frames - 1].keyframe_insert("value")
+
+
+def _build_bonds(xyz: Path) -> None:
+    """Create a Bonds mesh whose vertices follow atom positions via shape keys.
+
+    Edges are drawn between atom pairs detected as bonded in any frame. A Skin
+    modifier thickens edges into rectangular tubes; a Subsurf modifier rounds them.
+    """
+    frames = _center_frames(_parse_xyz_trajectory(xyz))
+    if not frames:
+        print("[reactx] bonds: no frames parsed")
+        return
+    bond_pairs = _compute_bond_pairs(frames)
+    if not bond_pairs:
+        print("[reactx] bonds: no bonds detected")
+        return
+    print(f"[reactx] bonds: {len(bond_pairs)} bond(s) across {len(frames)} frame(s)")
+
+    verts0 = [pos for _, pos in frames[0]]
+    edges = [tuple(p) for p in bond_pairs]
+
+    bond_mesh = bpy.data.meshes.new("Bonds_mesh")
+    bond_mesh.from_pydata(verts0, edges, [])
+    bond_mesh.update()
+
+    bond_obj = bpy.data.objects.new("Bonds", bond_mesh)
+    bpy.context.scene.collection.objects.link(bond_obj)
+
+    bpy.ops.object.select_all(action="DESELECT")
+    bond_obj.select_set(True)
+    bpy.context.view_layer.objects.active = bond_obj
+
+    bpy.ops.object.shape_key_add(from_mix=False)  # Basis
+    for frame_idx, frame in enumerate(frames):
+        key = bond_obj.shape_key_add(name=f"Frame_{frame_idx}", from_mix=False)
+        key.value = 0.0
+        for v_idx, (_, pos) in enumerate(frame):
+            key.data[v_idx].co = pos
+
+    _animate_bond_shape_keys(bond_obj, len(frames))
+
+    skin_mod = bond_obj.modifiers.new(name="Skin", type="SKIN")
+    skin_mod.use_smooth_shade = True
+    if bond_mesh.skin_vertices:
+        skin_data = bond_mesh.skin_vertices[0].data
+        for sv in skin_data:
+            sv.radius = (BOND_RADIUS, BOND_RADIUS)
+        skin_data[0].use_root = True
+
+    subsurf = bond_obj.modifiers.new(name="Subsurf", type="SUBSURF")
+    subsurf.levels = 1
+    subsurf.render_levels = 2
 
 
 def _reset_scene() -> None:
@@ -175,6 +362,7 @@ def main(argv: list[str]) -> int:
     _reset_scene()
     _import_trajectory(xyz)
     _rescale_atoms_to_vdw()
+    _build_bonds(xyz)
     _add_three_point_lighting()
     _add_camera_looking_at_origin()
     _set_timeline_to_trajectory(xyz)

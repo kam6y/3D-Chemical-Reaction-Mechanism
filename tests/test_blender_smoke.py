@@ -63,3 +63,28 @@ def test_blender_vdw_rescale(tmp_path: Path):
     # Alvarez 2013 vdW: H=1.20, C=1.77; default scale=0.25.
     assert abs(scales["Hydrogen"] - 1.20 * 0.25) < 1e-3
     assert abs(scales["Carbon"] - 1.77 * 0.25) < 1e-3
+
+
+@pytest.mark.blender
+def test_blender_bonds_detected(tmp_path: Path):
+    if shutil.which(BLENDER) is None:
+        pytest.skip(f"Blender executable not found: {BLENDER}")
+
+    xyz = tmp_path / "traj.xyz"
+    # 2-frame H2 stretch — the two Hs stay within the covalent threshold (1.0 A)
+    # at frame 0 and split apart at frame 1 (still within the 1.3x slack at 1.10 A).
+    xyz.write_text(
+        "2\nFrame 0\nH 0.0 0.0 0.0\nH 0.0 0.0 0.74\n"
+        "2\nFrame 1\nH 0.0 0.0 0.0\nH 0.0 0.0 0.78\n"
+    )
+    out_blend = tmp_path / "scene.blend"
+    script = Path(__file__).resolve().parent.parent / "blender" / "render.py"
+    result = subprocess.run(
+        [BLENDER, "--background", "--python", str(script),
+         "--", str(xyz), str(out_blend)],
+        capture_output=True, text=True, timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "[reactx] bonds: 1 bond(s) across 2 frame(s)" in result.stdout, (
+        f"expected bond log line; stdout was:\n{result.stdout}"
+    )
