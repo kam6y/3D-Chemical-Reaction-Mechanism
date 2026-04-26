@@ -92,18 +92,34 @@ def embed_mol_to_atoms(
 
 
 def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:
-    params = AllChem.ETKDGv3()
-    for attempt in range(MAX_EMBED_RETRIES):
-        params.randomSeed = seed + attempt
-        status = AllChem.EmbedMolecule(frag, params)
-        if status == 0:
-            break
-    else:
-        elems = ", ".join(sorted({a.GetSymbol() for a in frag.GetAtoms()}))
-        raise RuntimeError(
-            f"RDKit failed to embed fragment ({frag.GetNumAtoms()} atoms: {elems}) "
-            f"after {MAX_EMBED_RETRIES} attempts. Check input structure and RDKit version."
-        )
+    # Clear chirality flags first: the .rxn parser may infer a spurious
+    # stereo center on charged atoms with identical substituents (e.g. N+ in
+    # NH4+ becomes [N@+]), which makes distance geometry unsatisfiable.
+    # Phase 1 only computes 3D from connectivity, not from R/S labels, so this
+    # is safe to drop for all inputs.
+    for atom in frag.GetAtoms():
+        atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+    for bond in frag.GetBonds():
+        bond.SetStereo(Chem.BondStereo.STEREONONE)
+
+    # Two stages: first try ETKDGv3 (curated knowledge), then fall back to
+    # random coords. The fallback rescues highly-symmetric small species like
+    # NH4+ where ETKDGv3 starting layout is degenerate.
+    for use_random in (False, True):
+        params = AllChem.ETKDGv3()
+        params.useRandomCoords = use_random
+        for attempt in range(MAX_EMBED_RETRIES):
+            params.randomSeed = seed + attempt + (1000 if use_random else 0)
+            if AllChem.EmbedMolecule(frag, params) == 0:
+                if frag.GetNumHeavyAtoms() > 1:
+                    AllChem.MMFFOptimizeMolecule(frag, maxIters=500)
+                return
+    elems = ", ".join(sorted({a.GetSymbol() for a in frag.GetAtoms()}))
+    raise RuntimeError(
+        f"RDKit failed to embed fragment ({frag.GetNumAtoms()} atoms: {elems}) "
+        f"after {MAX_EMBED_RETRIES} attempts (with and without random coords). "
+        "Check input structure and RDKit version."
+    )
 
     if frag.GetNumHeavyAtoms() > 1:
         result = AllChem.MMFFOptimizeMolecule(frag, maxIters=500)

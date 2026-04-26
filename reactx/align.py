@@ -1,4 +1,12 @@
-"""Reorder product atoms to match reactant atom ordering using atom mapping."""
+"""Reorder product atoms to match reactant atom ordering using atom mapping.
+
+Phase 1 update: takes a *full* atom-index mapping (every reactant atom in
+AddHs order to its product counterpart) so that migrating Hs (which switch
+heavy atoms between R and P) are handled directly via their atom map number.
+
+The previous Phase 0 contract (heavy_mapping + per-heavy H groups) couldn't
+express migration because it assumed each H stays on the same heavy atom.
+"""
 from __future__ import annotations
 
 from itertools import permutations
@@ -6,71 +14,55 @@ from itertools import permutations
 import numpy as np
 from ase import Atoms
 from ase.build.rotate import minimize_rotation_and_translation
+from rdkit import Chem
 
 
 def align_product_to_reactant(
     reactant: Atoms,
     product: Atoms,
-    heavy_mapping: dict[int, int],
-    reactant_h_groups: dict[int, list[int]],
-    product_h_groups: dict[int, list[int]],
+    atom_index_mapping: dict[int, int],
+    swappable_h_groups: list[list[int]] | None = None,
 ) -> Atoms:
-    """Return product Atoms reordered so that atom i corresponds to reactant atom i.
+    """Return product reordered so atom i corresponds to reactant atom i.
 
-    heavy_mapping maps reactant heavy-atom index -> product heavy-atom index.
-    *_h_groups maps heavy-atom index -> list of bonded hydrogen indices on that side.
+    atom_index_mapping: r_idx -> p_idx for *every* atom in AddHs(reactant)
+        ordering. Build via ``reactx.reaction_topology.expanded_atom_mapping``.
+    swappable_h_groups: optional list of reactant H index groups whose members
+        can be permuted within the group to minimize H-H RMSD (typically the
+        implicit Hs of a single heavy atom). Migrating Hs (those with explicit
+        atom map numbers in the .rxn) MUST NOT appear here — they are pinned
+        by atom_index_mapping.
     """
     if len(reactant) != len(product):
         raise ValueError(
             f"Atom count mismatch: reactant={len(reactant)} product={len(product)}"
         )
+    if len(atom_index_mapping) != len(reactant):
+        missing = [i for i in range(len(reactant)) if i not in atom_index_mapping]
+        raise ValueError(
+            f"atom_index_mapping must cover all reactant atoms; missing: {missing[:8]}"
+        )
 
-    permutation: list[int] = [-1] * len(reactant)
-    reactant_symbols = reactant.get_chemical_symbols()
-
-    for r_idx in range(len(reactant)):
-        sym_r = reactant_symbols[r_idx]
-        if sym_r == "H":
-            continue
-        if r_idx not in heavy_mapping:
-            raise ValueError(f"Reactant heavy atom {r_idx} ({sym_r}) not in mapping")
-        p_idx = heavy_mapping[r_idx]
-        permutation[r_idx] = p_idx
-
-        r_hs = reactant_h_groups.get(r_idx, [])
-        p_hs = product_h_groups.get(p_idx, [])
-        if len(r_hs) != len(p_hs):
-            raise ValueError(
-                f"hydrogen count mismatch for heavy atom {r_idx}->{p_idx}: "
-                f"{len(r_hs)} vs {len(p_hs)}"
-            )
-        for r_h, p_h in zip(r_hs, p_hs, strict=True):
-            permutation[r_h] = p_h
-
-    if any(x < 0 for x in permutation):
-        missing = [i for i, x in enumerate(permutation) if x < 0]
-        raise ValueError(f"Unmapped reactant atoms: {missing}")
-
+    permutation = [atom_index_mapping[i] for i in range(len(reactant))]
     aligned = product[permutation]
 
     # Rigid-body rotate+translate product onto reactant. Without this step,
     # embed3d generates R and P in independent orientations, which causes the
-    # NEB interpolated path to pass atoms through each other (e.g. F/Cl
-    # swapping sides across C in SN2). Alignment is driven by atom-index
-    # correspondence so the RMSD-minimization is chemically meaningful.
+    # NEB interpolated path to pass atoms through each other.
     minimize_rotation_and_translation(reactant, aligned)
 
-    # ETKDG seeds R and P independently, so hydrogens bonded to the same heavy
-    # atom may be in different relative orientations. Reassign P's Hs to R's
-    # Hs within each group by minimum sum of pairwise distances (≤3 Hs in
-    # Phase 0 substrates, so brute-force enumeration is fine).
+    if not swappable_h_groups:
+        return aligned
+
+    # ETKDG seeds R and P independently; within a swappable H group (implicit
+    # Hs of one heavy atom), find the permutation that minimizes Σ|p_i - r_i|.
     h_perm = list(range(len(reactant)))
-    for r_hs in reactant_h_groups.values():
-        n = len(r_hs)
+    for group in swappable_h_groups:
+        n = len(group)
         if n <= 1:
             continue
-        r_positions = reactant.positions[r_hs]
-        p_positions = aligned.positions[r_hs]
+        r_positions = reactant.positions[group]
+        p_positions = aligned.positions[group]
         dist = np.linalg.norm(
             p_positions[:, None, :] - r_positions[None, :, :], axis=-1
         )
@@ -82,7 +74,29 @@ def align_product_to_reactant(
         if best_perm == identity:
             continue
         for dst_i, src_i in enumerate(best_perm):
-            h_perm[r_hs[dst_i]] = r_hs[src_i]
+            h_perm[group[dst_i]] = group[src_i]
     if h_perm != list(range(len(reactant))):
         aligned = aligned[h_perm]
     return aligned
+
+
+def build_swappable_h_groups(
+    r_mol_h: Chem.Mol,
+) -> list[list[int]]:
+    """List groups of reactant H indices that may be permuted in alignment.
+
+    A group is the H children of one heavy atom EXCLUDING any H that has an
+    atom map number (those are pinned by the .rxn mapping — moving them would
+    misalign migrating-H trajectories).
+    """
+    groups: list[list[int]] = []
+    for atom in r_mol_h.GetAtoms():
+        if atom.GetAtomicNum() == 1:
+            continue
+        hs = [
+            n.GetIdx() for n in atom.GetNeighbors()
+            if n.GetAtomicNum() == 1 and n.GetAtomMapNum() == 0
+        ]
+        if len(hs) >= 2:
+            groups.append(hs)
+    return groups

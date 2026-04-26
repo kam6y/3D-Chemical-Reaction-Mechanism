@@ -9,12 +9,16 @@ from pathlib import Path
 
 from rdkit import Chem
 
-from reactx.align import align_product_to_reactant
+from reactx.align import align_product_to_reactant, build_swappable_h_groups
 from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
-from reactx.reaction_topology import BondChanges, compute_bond_changes
-from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
+from reactx.reaction_topology import (
+    BondChanges,
+    compute_bond_changes,
+    expanded_atom_mapping,
+)
+from reactx.rxn_parser import parse_rxn
 
 log = logging.getLogger("reactx")
 
@@ -37,7 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Run full pipeline on a .rxn file")
     run.add_argument("rxn_path", type=Path)
     run.add_argument("-o", "--output", type=Path, required=True)
-    run.add_argument("--images", type=int, default=15)
+    run.add_argument("--images", type=int, default=None,
+                     help="NEB image count (default: auto from bond changes)")
     run.add_argument("--fmax", type=float, default=0.05)
     run.add_argument("--max-steps", type=int, default=500)
     run.add_argument("--backend", choices=["uma", "lj"], default="uma")
@@ -128,23 +133,42 @@ def _cmd_run(args: argparse.Namespace) -> int:
     args.output.mkdir(parents=True, exist_ok=True)
 
     r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
+    r_mol_h = Chem.AddHs(r_mol)
+    p_mol_h = Chem.AddHs(p_mol)
+    bond_changes = compute_bond_changes(r_mol_h, p_mol_h, mapping)
+    expanded = expanded_atom_mapping(r_mol_h, p_mol_h, mapping)
+    log.info(
+        "Bond changes: %d broken, %d formed",
+        len(bond_changes.broken), len(bond_changes.formed),
+    )
+
+    n_images = args.images if args.images is not None else recommend_n_images(bond_changes)
+    log.info("Using n_images=%d", n_images)
 
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
     # Reuse one calculator across embed+NEB; UMA models (~11 GB) OOM if rebuilt.
     calc = make_calculator(args.backend, **model_kwargs)
-    reactant = embed_mol_to_atoms(r_mol, calculator=calc, seed=1)
-    product_raw = embed_mol_to_atoms(p_mol, calculator=calc, seed=2)
+    reactant = embed_mol_to_atoms(
+        r_mol, calculator=calc, seed=1,
+        bond_changes=bond_changes, side="reactant",
+    )
+    product_raw = embed_mol_to_atoms(
+        p_mol, calculator=calc, seed=2,
+        bond_changes=bond_changes, side="product",
+        index_translation=expanded,
+    )
 
-    rH = heavy_to_hydrogen_groups(Chem.AddHs(r_mol))
-    pH = heavy_to_hydrogen_groups(Chem.AddHs(p_mol))
-    product = align_product_to_reactant(reactant, product_raw, mapping, rH, pH)
+    swappable = build_swappable_h_groups(r_mol_h)
+    product = align_product_to_reactant(
+        reactant, product_raw, expanded, swappable_h_groups=swappable,
+    )
 
     xyz = args.output / "trajectory.xyz"
     meta = run_neb(
         reactant=reactant,
         product=product,
         calculator=calc,
-        n_images=args.images,
+        n_images=n_images,
         output_xyz=xyz,
         fmax=args.fmax,
         max_steps=args.max_steps,
