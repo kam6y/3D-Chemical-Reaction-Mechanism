@@ -6,6 +6,4 @@ __pycache__/
 out/
 out_*/
 *.log
-*.blend
-*.blend1
 .DS_Store
