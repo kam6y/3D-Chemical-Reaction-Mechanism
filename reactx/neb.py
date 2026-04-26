@@ -17,12 +17,26 @@ except ImportError:  # ASE < 3.23
 log = logging.getLogger(__name__)
 
 
+def _make_neb(images: list[Atoms], *, climb: bool) -> "NEB":
+    return NEB(
+        images, k=1.0, climb=climb,
+        allow_shared_calculator=True, method="improvedtangent",
+    )
+
+
+def _safe_call(fn, label: str, fallback):
+    try:
+        return fn()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("NEB %s evaluation raised %s: %s", label, type(exc).__name__, exc)
+        return fallback
+
+
 def _run_phase(label: str, neb, *, fmax: float, steps: int) -> bool:
     """Run FIRE on a NEB band; return True if converged. Logs and swallows
     runtime errors so a failed phase does not abort the pipeline."""
     log.info("NEB %s phase: up to %d steps, fmax=%s", label, steps, fmax)
     try:
-        # FIRE logs per-step energy/fmax to stdout ("-"). Users can pipe to a file.
         return bool(FIRE(neb, logfile="-").run(fmax=fmax, steps=steps))
     except Exception as exc:  # noqa: BLE001
         log.warning("NEB %s raised %s: %s", label, type(exc).__name__, exc)
@@ -61,49 +75,38 @@ def run_neb(
     for img in images:
         img.calc = calculator
 
-    # Two-phase NEB: warm up the band with plain NEB, then climb the TS.
-    # IDPP can produce non-physical midpoints for position-swapping reactions,
-    # and CI-NEB starting from a bad initial path tends to chase a wrong saddle.
+    # Two-phase NEB: warm up with plain NEB, then climb the TS. IDPP can
+    # produce non-physical midpoints for position-swapping reactions, so
+    # starting CI-NEB from a bad initial path tends to chase a wrong saddle.
     # k=1.0 prevents image bunching near minima (default k=0.1 is too weak for
     # position-swapping reactions like SN2 where images collapse to R/P sides).
     warmup_steps = max(1, max_steps // 2)
     climb_steps = max(1, max_steps - warmup_steps)
 
-    neb_warm = NEB(images, k=1.0, climb=False, allow_shared_calculator=True, method="improvedtangent")
+    neb_warm = _make_neb(images, climb=False)
     neb_warm.interpolate(method="idpp")
-
     warm_converged = _run_phase("warmup", neb_warm, fmax=fmax, steps=warmup_steps)
 
     climb_converged = False
     final_neb = neb_warm
     if climb:
-        neb_climb = NEB(images, k=1.0, climb=True, allow_shared_calculator=True, method="improvedtangent")
+        neb_climb = _make_neb(images, climb=True)
         climb_converged = _run_phase("climb", neb_climb, fmax=fmax, steps=climb_steps)
-        # Use the climb band even on partial results — its energies/forces are
-        # at least as recent as the warmup's. NaNs surface downstream via
-        # get_residual()/energies guards if no forces were ever evaluated.
+        # Prefer the climb band even on partial convergence — its forces/energies
+        # are at least as recent as the warmup's.
         final_neb = neb_climb
 
     converged = climb_converged if climb else warm_converged
-    # final_neb.{residuals,energies} are populated by the last get_forces() call
-    # FIRE made internally — reading them here costs zero UMA evaluations.
-    try:
-        final_fmax = float(final_neb.get_residual())
-    except Exception as exc:  # noqa: BLE001
-        log.warning("NEB fmax evaluation raised %s: %s", type(exc).__name__, exc)
-        final_fmax = float("nan")
+    final_fmax = _safe_call(final_neb.get_residual, "NEB fmax", float("nan"))
+    image_energies = _safe_call(
+        lambda: [float(e) for e in final_neb.energies],
+        "image energies",
+        [float("nan")] * n_images,
+    )
 
-    try:
-        image_energies = [float(e) for e in final_neb.energies]
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Image energy evaluation raised %s: %s", type(exc).__name__, exc)
-        image_energies = [float("nan")] * n_images
-
-    padded: list[Atoms] = []
-    padded.extend([images[0].copy() for _ in range(pad_frames)])
-    padded.extend(images)
-    padded.extend([images[-1].copy() for _ in range(pad_frames)])
-
+    # Reference-sharing the endpoint Atoms in the padded list is safe: extxyz
+    # writer only reads positions/symbols, never mutates.
+    padded = [images[0]] * pad_frames + list(images) + [images[-1]] * pad_frames
     write(str(output_xyz), padded, format="extxyz")
 
     return {

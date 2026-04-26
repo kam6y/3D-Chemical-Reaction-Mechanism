@@ -66,17 +66,20 @@ def align_product_to_reactant(
     # Phase 0 substrates, so brute-force enumeration is fine).
     h_perm = list(range(len(reactant)))
     for r_hs in reactant_h_groups.values():
-        if len(r_hs) <= 1:
+        n = len(r_hs)
+        if n <= 1:
             continue
         r_positions = reactant.positions[r_hs]
         p_positions = aligned.positions[r_hs]
-        best_perm = min(
-            permutations(range(len(r_hs))),
-            key=lambda perm: np.linalg.norm(
-                p_positions[list(perm)] - r_positions, axis=1
-            ).sum(),
+        dist = np.linalg.norm(
+            p_positions[:, None, :] - r_positions[None, :, :], axis=-1
         )
-        if tuple(best_perm) == tuple(range(len(r_hs))):
+        identity = tuple(range(n))
+        best_perm = min(
+            permutations(identity),
+            key=lambda perm: dist[perm, identity].sum(),
+        )
+        if best_perm == identity:
             continue
         for dst_i, src_i in enumerate(best_perm):
             h_perm[r_hs[dst_i]] = r_hs[src_i]

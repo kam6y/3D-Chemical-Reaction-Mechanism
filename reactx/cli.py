@@ -44,7 +44,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _configure_reactx_logging() -> None:
-    log = logging.getLogger("reactx")
     if log.handlers:
         return
     handler = logging.StreamHandler()

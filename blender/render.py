@@ -10,6 +10,7 @@ from pathlib import Path
 
 import bpy  # type: ignore[import-not-found]
 import mathutils  # type: ignore[import-not-found]
+import numpy as np
 
 
 # Alvarez (2013) "A cartography of the van der Waals territories"
@@ -135,86 +136,79 @@ def _rescale_atoms_to_vdw() -> None:
         print(f"[reactx] vdw-rescale: {element_name} scale={new_scale:.6f}")
 
 
-_AtomFrame = list[tuple[str, tuple[float, float, float]]]
+def _parse_xyz_trajectory(xyz: Path) -> tuple[list[str], np.ndarray]:
+    """Parse an extxyz file into (symbols, positions) where positions has shape (F, N, 3).
 
-
-def _parse_xyz_trajectory(xyz: Path) -> list[_AtomFrame]:
-    """Parse an extxyz file into a list of frames, each a list of (symbol, (x, y, z))."""
+    All frames must share the same atom count and order — true for trajectory.xyz.
+    """
     lines = xyz.read_text().splitlines()
-    frames: list[_AtomFrame] = []
+    symbols: list[str] = []
+    frames_pos: list[list[tuple[float, float, float]]] = []
     i = 0
     while i < len(lines):
         head = lines[i].strip()
-        if not head:
+        if not head or not head.lstrip("-").isdigit():
             i += 1
             continue
-        try:
-            n = int(head)
-        except ValueError:
-            i += 1
-            continue
-        atoms: _AtomFrame = []
+        n = int(head)
+        atoms_pos: list[tuple[float, float, float]] = []
+        atoms_sym: list[str] = []
         for j in range(2, 2 + n):
             if i + j >= len(lines):
                 break
             parts = lines[i + j].split()
             if len(parts) < 4:
                 continue
-            atoms.append((parts[0], (float(parts[1]), float(parts[2]), float(parts[3]))))
-        if len(atoms) == n:
-            frames.append(atoms)
+            atoms_sym.append(parts[0])
+            atoms_pos.append((float(parts[1]), float(parts[2]), float(parts[3])))
+        if len(atoms_pos) == n:
+            if not symbols:
+                symbols = atoms_sym
+            frames_pos.append(atoms_pos)
         i += n + 2
-    return frames
+    if not frames_pos:
+        return [], np.empty((0, 0, 3))
+    return symbols, np.asarray(frames_pos, dtype=np.float64)
 
 
-def _center_frames(frames: list[_AtomFrame]) -> list[_AtomFrame]:
-    """Subtract each frame's geometric mean to mirror the addon's put_to_center_all=True default."""
-    out: list[_AtomFrame] = []
-    for frame in frames:
-        n = len(frame)
-        if n == 0:
-            out.append(frame)
-            continue
-        cx = sum(p[0] for _, p in frame) / n
-        cy = sum(p[1] for _, p in frame) / n
-        cz = sum(p[2] for _, p in frame) / n
-        out.append([(s, (p[0] - cx, p[1] - cy, p[2] - cz)) for s, p in frame])
-    return out
+def _center_positions(positions: np.ndarray) -> np.ndarray:
+    """Subtract each frame's geometric mean to match the addon's put_to_center_all=True default."""
+    if positions.size == 0:
+        return positions
+    return positions - positions.mean(axis=1, keepdims=True)
 
 
-def _bond_threshold_sq(sym_i: str, sym_j: str) -> float | None:
-    rcov_i = COVALENT_RADII_ANGSTROM.get(sym_i)
-    rcov_j = COVALENT_RADII_ANGSTROM.get(sym_j)
-    if rcov_i is None or rcov_j is None:
-        return None
-    t = (rcov_i + rcov_j) * BOND_TOLERANCE
-    return t * t
+def _compute_bond_mask(
+    symbols: list[str], positions: np.ndarray
+) -> tuple[list[tuple[int, int]], np.ndarray]:
+    """Detect bonds across all frames in a single NumPy pass.
 
+    Returns (bond_pairs, bonded_mask) where bond_pairs is the union over frames
+    of (i, j) pairs that are bonded in at least one frame, and bonded_mask has
+    shape (F, len(bond_pairs)) marking per-frame visibility.
+    """
+    if positions.size == 0:
+        return [], np.empty((0, 0), dtype=bool)
+    n_frames, n_atoms, _ = positions.shape
 
-def _is_bonded_in_frame(frame: _AtomFrame, i: int, j: int) -> bool:
-    sym_i, pos_i = frame[i]
-    sym_j, pos_j = frame[j]
-    t_sq = _bond_threshold_sq(sym_i, sym_j)
-    if t_sq is None:
-        return False
-    dx = pos_i[0] - pos_j[0]
-    dy = pos_i[1] - pos_j[1]
-    dz = pos_i[2] - pos_j[2]
-    return dx * dx + dy * dy + dz * dz <= t_sq
+    rcov = np.array(
+        [COVALENT_RADII_ANGSTROM.get(s, math.nan) for s in symbols], dtype=np.float64
+    )
+    threshold_sq = ((rcov[:, None] + rcov[None, :]) * BOND_TOLERANCE) ** 2
+    # NaNs (unknown elements) propagate to NaN thresholds — comparisons return False.
 
+    deltas = positions[:, :, None, :] - positions[:, None, :, :]
+    dist_sq = np.einsum("fija,fija->fij", deltas, deltas)
 
-def _compute_bond_pairs(frames: list[_AtomFrame]) -> list[tuple[int, int]]:
-    """Bonded atom-index pairs (union over all frames) by covalent radius criterion."""
-    if not frames:
-        return []
-    n = len(frames[0])
-    bonds: set[tuple[int, int]] = set()
-    for frame in frames:
-        for i in range(n):
-            for j in range(i + 1, n):
-                if _is_bonded_in_frame(frame, i, j):
-                    bonds.add((i, j))
-    return sorted(bonds)
+    iu, ju = np.triu_indices(n_atoms, k=1)
+    pair_dist_sq = dist_sq[:, iu, ju]
+    pair_threshold_sq = threshold_sq[iu, ju]
+    pair_mask = pair_dist_sq <= pair_threshold_sq  # (F, n_pairs)
+
+    union = pair_mask.any(axis=0)
+    bond_pairs = list(zip(iu[union].tolist(), ju[union].tolist()))
+    bonded_mask = pair_mask[:, union]
+    return bond_pairs, bonded_mask
 
 
 def _make_bond_material():
@@ -228,18 +222,18 @@ def _make_bond_material():
     return mat
 
 
-def _build_bonds(frames: list[_AtomFrame]) -> None:
-    """For each candidate bond (union over all frames), create a cylinder whose
-    transform tracks the two atoms via per-frame keyframes, and whose visibility
-    flips on/off per frame based on the covalent-distance criterion. This means
-    bonds form and break dynamically: at any given trajectory frame, only pairs
-    that satisfy the criterion in that frame are visible."""
-    if not frames:
+def _build_bonds(
+    positions: np.ndarray,
+    bond_pairs: list[tuple[int, int]],
+    bonded_mask: np.ndarray,
+) -> None:
+    """Create one cylinder per candidate bond whose transform tracks the two
+    atoms across frames, and whose hide_* visibility toggles per frame so bonds
+    form/break dynamically."""
+    if positions.size == 0:
         print("[reactx] bonds: no frames parsed")
         return
-    n_frames = len(frames)
-
-    bond_pairs = _compute_bond_pairs(frames)
+    n_frames = positions.shape[0]
     if not bond_pairs:
         print("[reactx] bonds: no bonds detected")
         return
@@ -247,7 +241,6 @@ def _build_bonds(frames: list[_AtomFrame]) -> None:
           f"(per-frame visibility)")
 
     bond_mat = _make_bond_material()
-    scene = bpy.context.scene
 
     for bond_idx, (i, j) in enumerate(bond_pairs):
         bpy.ops.mesh.primitive_cylinder_add(
@@ -263,34 +256,31 @@ def _build_bonds(frames: list[_AtomFrame]) -> None:
         for poly in cyl.data.polygons:
             poly.use_smooth = abs(poly.normal.z) < 0.5
 
-        for k, frame in enumerate(frames):
-            scene.frame_current = k
-            _, p1 = frame[i]
-            _, p2 = frame[j]
-            mid = ((p1[0] + p2[0]) / 2.0,
-                   (p1[1] + p2[1]) / 2.0,
-                   (p1[2] + p2[2]) / 2.0)
-            vec = mathutils.Vector((p2[0] - p1[0],
-                                    p2[1] - p1[1],
-                                    p2[2] - p1[2]))
-            length = vec.length
-            cyl.location = mid
-            if length > 1e-6:
-                cyl.rotation_euler = vec.to_track_quat("Z", "Y").to_euler()
-                cyl.scale = (1.0, 1.0, length / 2.0)
+        p1 = positions[:, i, :]
+        p2 = positions[:, j, :]
+        mids = 0.5 * (p1 + p2)
+        vecs = p2 - p1
+        lengths = np.linalg.norm(vecs, axis=1)
+
+        for k in range(n_frames):
+            cyl.location = mids[k].tolist()
+            if lengths[k] > 1e-6:
+                cyl.rotation_euler = mathutils.Vector(vecs[k].tolist()).to_track_quat(
+                    "Z", "Y"
+                ).to_euler()
+                cyl.scale = (1.0, 1.0, lengths[k] / 2.0)
             else:
                 cyl.scale = (1.0, 1.0, 1e-6)
-            bonded = _is_bonded_in_frame(frame, i, j)
+            bonded = bool(bonded_mask[k, bond_idx])
             cyl.hide_viewport = not bonded
             cyl.hide_render = not bonded
-            cyl.keyframe_insert("location")
-            cyl.keyframe_insert("rotation_euler")
-            cyl.keyframe_insert("scale")
-            cyl.keyframe_insert("hide_viewport")
-            cyl.keyframe_insert("hide_render")
+            cyl.keyframe_insert("location", frame=k)
+            cyl.keyframe_insert("rotation_euler", frame=k)
+            cyl.keyframe_insert("scale", frame=k)
+            cyl.keyframe_insert("hide_viewport", frame=k)
+            cyl.keyframe_insert("hide_render", frame=k)
 
-        # Visibility must flip instantly, not ease — set CONSTANT interpolation
-        # on the hide_* fcurves only (location/rotation/scale stay smooth).
+        # CONSTANT interpolation makes visibility flip instantly rather than ease.
         if cyl.animation_data and cyl.animation_data.action:
             for fc in cyl.animation_data.action.fcurves:
                 if fc.data_path in ("hide_viewport", "hide_render"):
@@ -355,11 +345,13 @@ def main(argv: list[str]) -> int:
     _reset_scene()
     _import_trajectory(xyz)
     _rescale_atoms_to_vdw()
-    frames = _center_frames(_parse_xyz_trajectory(xyz))
-    _build_bonds(frames)
+    symbols, positions = _parse_xyz_trajectory(xyz)
+    positions = _center_positions(positions)
+    bond_pairs, bonded_mask = _compute_bond_mask(symbols, positions)
+    _build_bonds(positions, bond_pairs, bonded_mask)
     _add_three_point_lighting()
     _add_camera_looking_at_origin()
-    _set_timeline_to_trajectory(len(frames))
+    _set_timeline_to_trajectory(positions.shape[0] if positions.size else 0)
     out.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(out))
     print(f"Saved: {out}")

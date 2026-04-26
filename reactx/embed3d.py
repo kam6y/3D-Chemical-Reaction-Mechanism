@@ -6,8 +6,6 @@ on the same AddHs(mol) result.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 from ase import Atoms
 from ase.calculators.calculator import Calculator
@@ -22,7 +20,7 @@ FRAGMENT_SEPARATION = 3.5  # Å — attack distance for multi-fragment placement
 def embed_mol_to_atoms(
     mol: Chem.Mol,
     *,
-    calculator: Optional[Calculator] = None,
+    calculator: Calculator | None = None,
     seed: int = 0xC0FFEE,
     fmax: float = 0.01,
     max_opt_steps: int = 300,
@@ -76,7 +74,7 @@ def _find_c_lg_bond(mol_h: Chem.Mol, substrate_indices: list[int]) -> tuple[int,
     works for O, N, S). Hybridization is not enforced because Phase 0 only
     ever sees sp3 substrates; broader inputs are out of scope (see spec §11).
     """
-    best: tuple[int, int, int] | None = None  # (Z, c_idx, lg_idx)
+    best: tuple[int, int, int] | None = None
     substrate_set = set(substrate_indices)
     for atom in mol_h.GetAtoms():
         if atom.GetIdx() not in substrate_set or atom.GetSymbol() != "C":
