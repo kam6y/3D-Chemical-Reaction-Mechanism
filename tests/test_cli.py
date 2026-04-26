@@ -43,6 +43,7 @@ def test_cli_render_flag_invokes_blender_when_successful(
         return FakeResult()
 
     monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("shutil.which", lambda exe: f"/fake/{exe}")
 
     out = tmp_path / "out"
     rc = cli_mod.main([
@@ -64,11 +65,32 @@ def test_cli_render_propagates_blender_failure(
         returncode = 1
 
     monkeypatch.setattr("subprocess.run", lambda *a, **k: FakeResult())
+    monkeypatch.setattr("shutil.which", lambda exe: f"/fake/{exe}")
 
     out = tmp_path / "out"
     rc = cli.main([
         "run", str(sn2_rxn_path), "-o", str(out),
         "--images", "5", "--fmax", "0.5", "--max-steps", "10",
         "--backend", "lj", "--render", "--blender-exe", "mock-blender",
+    ])
+    assert rc != 0
+
+
+def test_cli_render_errors_when_blender_not_on_path(
+    tmp_path: Path, sn2_rxn_path: Path, monkeypatch
+):
+    """--render with missing blender returns nonzero before invoking subprocess."""
+    monkeypatch.setattr("shutil.which", lambda exe: None)
+
+    def fail_run(*a, **k):
+        raise AssertionError("subprocess.run should not be reached")
+
+    monkeypatch.setattr("subprocess.run", fail_run)
+
+    out = tmp_path / "out"
+    rc = cli.main([
+        "run", str(sn2_rxn_path), "-o", str(out),
+        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
+        "--backend", "lj", "--render", "--blender-exe", "definitely-not-blender",
     ])
     assert rc != 0

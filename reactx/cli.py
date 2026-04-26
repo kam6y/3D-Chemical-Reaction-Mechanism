@@ -67,12 +67,48 @@ def _sanitize_for_json(obj):
     return obj
 
 
+def _check_hf_auth() -> int:
+    """Verify the user is logged in to Hugging Face before downloading UMA.
+
+    Returns 0 if authenticated, 1 with a friendly error if not. UMA models
+    are gated, so a missing token surfaces deep inside FAIRChemCalculator
+    construction otherwise — catch it early per design spec §8.
+    """
+    try:
+        from huggingface_hub import HfApi
+        from huggingface_hub.errors import LocalTokenNotFoundError
+    except ImportError as exc:
+        log.error("UMA backend requires huggingface_hub: %s", exc)
+        return 1
+    try:
+        HfApi().whoami()
+    except LocalTokenNotFoundError:
+        log.error(
+            "Hugging Face token not found. Run `hf auth login` first "
+            "(UMA models are gated and require an authorized account)."
+        )
+        return 1
+    except Exception as exc:  # noqa: BLE001 — HF surfaces several auth error types
+        log.error(
+            "Hugging Face authentication check failed (%s: %s). "
+            "Run `hf auth login` and ensure UMA model access is approved.",
+            type(exc).__name__, exc,
+        )
+        return 1
+    return 0
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     _configure_reactx_logging()
 
     if not args.rxn_path.exists():
         log.error("Error: .rxn not found: %s", args.rxn_path)
         return 1
+
+    if args.backend == "uma":
+        rc = _check_hf_auth()
+        if rc != 0:
+            return rc
 
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -117,7 +153,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
+    import shutil
     import subprocess
+    if shutil.which(args.blender_exe) is None:
+        log.error(
+            "Blender executable not found on PATH: %s. Install Blender 4.x "
+            "(https://www.blender.org/download/) or pass --blender-exe "
+            "/path/to/blender.",
+            args.blender_exe,
+        )
+        return 1
     script = Path(__file__).resolve().parent.parent / "blender" / "render.py"
     blend = args.output / "scene.blend"
     cmd = [args.blender_exe, "--background", "--python", str(script),

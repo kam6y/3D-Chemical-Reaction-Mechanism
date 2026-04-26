@@ -145,7 +145,7 @@ def main(argv: list[str]) -> int:
 
 ```python
 COVALENT_RADII_ANGSTROM: dict[str, float] = { "H": 0.31, ..., "Bi": 1.48 }  # Cordero 2008 Z=1..83
-BOND_TOLERANCE = 1.05  # editable; user can tune for visual taste
+BOND_TOLERANCE = 1.1   # editable; user can tune for visual taste
 BOND_RADIUS = 0.10     # cylinder radius (Å)
 
 def _parse_xyz_trajectory(xyz): ...
@@ -185,7 +185,7 @@ def _build_bonds(xyz): ...                     # one cylinder per candidate, ful
 ### 6.5.2 テスト追加
 
 `tests/test_blender_smoke.py::test_blender_bonds_detected`:
-- H + C 2 フレーム軌跡: frame 0 で C-H = 1.05 Å (bonded、tolerance=1.05 で閾値 1.124 内)、frame 1 で C-H = 5.00 Å (broken)
+- H + C 2 フレーム軌跡: frame 0 で C-H = 1.05 Å (bonded、tolerance=1.1 で閾値 1.177 内)、frame 1 で C-H = 5.00 Å (broken)
 - stdout に `[reactx] bonds: 1 bond(s) across 2 frame(s)` が含まれることを assert (union 候補 1 本がカウントされる)
 
 ## 7. ドキュメント更新

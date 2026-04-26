@@ -71,7 +71,7 @@ def test_blender_bonds_detected(tmp_path: Path):
         pytest.skip(f"Blender executable not found: {BLENDER}")
 
     xyz = tmp_path / "traj.xyz"
-    # Frame 0: C-H at 1.05 A (bonded; threshold = (0.76+0.31)*BOND_TOLERANCE >= 1.05).
+    # Frame 0: C-H at 1.05 A (bonded; threshold = (0.76+0.31)*1.1 = 1.177 A).
     # Frame 1: C-H at 5.00 A (well past any reasonable threshold; bond breaks).
     # Union still reports 1 bond, but per-frame visibility hides it at frame 1.
     xyz.write_text(

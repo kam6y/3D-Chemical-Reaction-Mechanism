@@ -48,7 +48,7 @@ def run_neb(
     product: Atoms,
     *,
     calculator: Calculator,
-    n_images: int = 11,
+    n_images: int = 15,
     output_xyz: str | Path,
     fmax: float = 0.05,
     max_steps: int = 200,

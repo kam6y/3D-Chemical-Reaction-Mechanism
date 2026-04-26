@@ -105,7 +105,7 @@ docs/
 
 - `make_calculator(name: str = "uma") -> ase.Calculator`
 - Phase 0 は `name="uma"` のみサポート。内部で `fairchem.core.FAIRChemCalculator` をモデル名指定で返す。
-- デバイス選択: `torch.backends.mps.is_available()` → `mps`、無ければ `cpu`。
+- デバイス選択: `torch.cuda.is_available()` → `cuda`、無ければ `cpu`。MPS は fairchem-core の UMA モデルが依存する一部 torch op (scatter/gather など) が MPS 上で正しく動かないため Phase 0 では skip する (Apple Silicon は CPU フォールバックで動作)。
 - Phase 1 の拡張穴: `name="xtb"` で `tblite` 経由、`name="grrm23"` で外部プロセス呼出しアダプタ。
 
 ### 6.6 `cli`
