@@ -40,7 +40,7 @@ DoD は以下の手順で確認する:
 `blender/render.py` は `atomic-blender-pdb-xyz` アドオンで XYZ を読み込んだ後、`render.py` 側で 2 つの後処理を行う:
 
 1. **原子球サイズ**: 各元素ボールの半径を **Alvarez (2013) *Dalton Trans.* 42, 8617 の van der Waals 半径 × 0.25** で上書き (ball-and-stick 風スケール)。比率は実際の vdW 半径比と一致する。`REACTX_VDW_SCALE` で全体倍率を上書き可 (例: `REACTX_VDW_SCALE=0.4 reactx run ...` で CPK 寄り)。
-2. **結合棒**: アドオンの XYZ importer は結合を描画しないため、`render.py` が独自に Cordero (2008) 共有結合半径を用いた距離判定 (閾値 = `(rcov_A + rcov_B) × 1.3`) で結合を抽出し、原子と同期する shape key 付き bond mesh + Skin/Subsurf modifier として作画する。union-over-frames で結合を取るため、SN2 のように形成・切断する結合も全期間表示される (Phase 1 で動的 fade を予定)。
+2. **結合棒**: アドオンの XYZ importer は結合を描画しないため、`render.py` が独自に Cordero (2008) 共有結合半径を用いた距離判定 (閾値 = `(rcov_A + rcov_B) × BOND_TOLERANCE`、デフォルト 1.05) で結合を抽出。各候補結合 1 本につきシリンダオブジェクトを 1 個生成し、フレームごとに transform (両端原子に追従) と表示/非表示 (距離が閾値以内かを毎フレーム再判定) を keyframe する。これにより SN2 のように形成・切断する結合は途中で出現・消滅する。
 
 対応元素は UMA `omol` タスクの訓練範囲 = OMol25 = **Z=1 (H) 〜 Z=83 (Bi)** の連続 83 元素。Po (84) 以降、Fr/Ra および全アクチノイドは UMA 訓練外 → 入力 XYZ に出現しない想定。テーブル外の元素はリスケール対象外 (アドオン既定半径のまま) かつ結合棒も生成されない。
 
@@ -50,7 +50,7 @@ DoD は以下の手順で確認する:
 
 - **TS の線形性閾値が 170° → 120° に緩和**。`uma-m-1p1` (omol task) では SN2 の TS が安定して 170° (ほぼ線形) に到達しないため、Phase 0 では背面攻撃の方向性確認に留める。詳細は `docs/superpowers/specs/2026-04-20-reactx-phase-0-design.md` §9。Phase 1 でモデル/最適化チューニング後に再引き締め予定。
 - **TS 付近のスローダウン再生** は Phase 1 で実装予定。Phase 0 の `blender/render.py` は軌跡を均一速度で再生する。
-- **Bond 形成・切断の動的 fade** は Phase 1 で実装予定。Phase 0 の `render.py` は全フレームの和集合で抽出した結合を全期間表示する (静的セット、ただし両端は動く)。
+- **Bond 形成・切断の dynamic fade (滑らかなフェード)** は Phase 1 で実装予定。Phase 0 の `render.py` はフレームごとに表示/非表示を切り替える (constant interpolation、ハードカット)。
 - **`.mp4` 最終レンダリング** は Phase 0 スコープ外。Blender GUI で `.blend` を開いて再生する。
 
 `--render` フラグを付けると CLI から Blender を直接呼び出す:

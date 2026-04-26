@@ -4,12 +4,12 @@ Invoke:
     blender --background --python blender/render.py -- <trajectory.xyz> <out.blend>
 """
 import math
+import os
 import sys
 from pathlib import Path
 
 import bpy  # type: ignore[import-not-found]
-
-import os
+import mathutils  # type: ignore[import-not-found]
 
 
 # Alvarez (2013) "A cartography of the van der Waals territories"
@@ -89,7 +89,7 @@ COVALENT_RADII_ANGSTROM: dict[str, float] = {
 }
 
 # A pair (i, j) is bonded if dist <= (rcov_i + rcov_j) * BOND_TOLERANCE.
-BOND_TOLERANCE = 1.3
+BOND_TOLERANCE = 1.05
 # Skin modifier cross-section radius for bond cylinders (A).
 BOND_RADIUS = 0.10
 
@@ -182,6 +182,27 @@ def _center_frames(frames: list[_AtomFrame]) -> list[_AtomFrame]:
     return out
 
 
+def _bond_threshold_sq(sym_i: str, sym_j: str) -> float | None:
+    rcov_i = COVALENT_RADII_ANGSTROM.get(sym_i)
+    rcov_j = COVALENT_RADII_ANGSTROM.get(sym_j)
+    if rcov_i is None or rcov_j is None:
+        return None
+    t = (rcov_i + rcov_j) * BOND_TOLERANCE
+    return t * t
+
+
+def _is_bonded_in_frame(frame: _AtomFrame, i: int, j: int) -> bool:
+    sym_i, pos_i = frame[i]
+    sym_j, pos_j = frame[j]
+    t_sq = _bond_threshold_sq(sym_i, sym_j)
+    if t_sq is None:
+        return False
+    dx = pos_i[0] - pos_j[0]
+    dy = pos_i[1] - pos_j[1]
+    dz = pos_i[2] - pos_j[2]
+    return dx * dx + dy * dy + dz * dz <= t_sq
+
+
 def _compute_bond_pairs(frames: list[_AtomFrame]) -> list[tuple[int, int]]:
     """Bonded atom-index pairs (union over all frames) by covalent radius criterion."""
     if not frames:
@@ -190,109 +211,87 @@ def _compute_bond_pairs(frames: list[_AtomFrame]) -> list[tuple[int, int]]:
     bonds: set[tuple[int, int]] = set()
     for frame in frames:
         for i in range(n):
-            sym_i, pos_i = frame[i]
-            rcov_i = COVALENT_RADII_ANGSTROM.get(sym_i)
-            if rcov_i is None:
-                continue
             for j in range(i + 1, n):
-                sym_j, pos_j = frame[j]
-                rcov_j = COVALENT_RADII_ANGSTROM.get(sym_j)
-                if rcov_j is None:
-                    continue
-                threshold = (rcov_i + rcov_j) * BOND_TOLERANCE
-                dx = pos_i[0] - pos_j[0]
-                dy = pos_i[1] - pos_j[1]
-                dz = pos_i[2] - pos_j[2]
-                if dx * dx + dy * dy + dz * dz <= threshold * threshold:
+                if _is_bonded_in_frame(frame, i, j):
                     bonds.add((i, j))
     return sorted(bonds)
 
 
-def _animate_bond_shape_keys(bond_obj, n_frames: int, frame_delta: int = 1) -> None:
-    """Mirror xyz_import.py's per-frame shape-key value keyframing pattern."""
-    blocks = bond_obj.data.shape_keys.key_blocks
-    scene = bpy.context.scene
-
-    if n_frames < 1:
-        return
-    if n_frames == 1:
-        scene.frame_current = 0
-        blocks[1].value = 1.0
-        blocks[1].keyframe_insert("value")
-        return
-
-    scene.frame_current = 0
-    blocks[1].value = 1.0
-    blocks[2].value = 0.0
-    blocks[1].keyframe_insert("value")
-    blocks[2].keyframe_insert("value")
-
-    for number in range(2, n_frames):
-        scene.frame_current += frame_delta
-        blocks[number - 1].value = 0.0
-        blocks[number].value = 1.0
-        blocks[number + 1].value = 0.0
-        blocks[number - 1].keyframe_insert("value")
-        blocks[number].keyframe_insert("value")
-        blocks[number + 1].keyframe_insert("value")
-
-    scene.frame_current += frame_delta
-    blocks[n_frames].value = 1.0
-    blocks[n_frames - 1].value = 0.0
-    blocks[n_frames].keyframe_insert("value")
-    blocks[n_frames - 1].keyframe_insert("value")
+def _make_bond_material():
+    mat = bpy.data.materials.new(name="Bond")
+    mat.use_nodes = True
+    for n in mat.node_tree.nodes:
+        if n.type == "BSDF_PRINCIPLED":
+            n.inputs["Base Color"].default_value = (0.4, 0.4, 0.4, 1.0)
+            n.inputs["Roughness"].default_value = 0.5
+            break
+    return mat
 
 
 def _build_bonds(xyz: Path) -> None:
-    """Create a Bonds mesh whose vertices follow atom positions via shape keys.
-
-    Edges are drawn between atom pairs detected as bonded in any frame. A Skin
-    modifier thickens edges into rectangular tubes; a Subsurf modifier rounds them.
-    """
+    """For each candidate bond (union over all frames), create a cylinder whose
+    transform tracks the two atoms via per-frame keyframes, and whose visibility
+    flips on/off per frame based on the covalent-distance criterion. This means
+    bonds form and break dynamically: at any given trajectory frame, only pairs
+    that satisfy the criterion in that frame are visible."""
     frames = _center_frames(_parse_xyz_trajectory(xyz))
     if not frames:
         print("[reactx] bonds: no frames parsed")
         return
+    n_frames = len(frames)
+
     bond_pairs = _compute_bond_pairs(frames)
     if not bond_pairs:
         print("[reactx] bonds: no bonds detected")
         return
-    print(f"[reactx] bonds: {len(bond_pairs)} bond(s) across {len(frames)} frame(s)")
+    print(f"[reactx] bonds: {len(bond_pairs)} bond(s) across {n_frames} frame(s) "
+          f"(per-frame visibility)")
 
-    verts0 = [pos for _, pos in frames[0]]
-    edges = [tuple(p) for p in bond_pairs]
+    bond_mat = _make_bond_material()
+    scene = bpy.context.scene
 
-    bond_mesh = bpy.data.meshes.new("Bonds_mesh")
-    bond_mesh.from_pydata(verts0, edges, [])
-    bond_mesh.update()
+    for bond_idx, (i, j) in enumerate(bond_pairs):
+        bpy.ops.mesh.primitive_cylinder_add(
+            vertices=16, radius=BOND_RADIUS, depth=2.0,
+            enter_editmode=False, location=(0, 0, 0),
+        )
+        cyl = bpy.context.object
+        cyl.name = f"Bond_{bond_idx}_{i}_{j}"
+        cyl.data.materials.append(bond_mat)
 
-    bond_obj = bpy.data.objects.new("Bonds", bond_mesh)
-    bpy.context.scene.collection.objects.link(bond_obj)
+        for k, frame in enumerate(frames):
+            scene.frame_current = k
+            _, p1 = frame[i]
+            _, p2 = frame[j]
+            mid = ((p1[0] + p2[0]) / 2.0,
+                   (p1[1] + p2[1]) / 2.0,
+                   (p1[2] + p2[2]) / 2.0)
+            vec = mathutils.Vector((p2[0] - p1[0],
+                                    p2[1] - p1[1],
+                                    p2[2] - p1[2]))
+            length = vec.length
+            cyl.location = mid
+            if length > 1e-6:
+                cyl.rotation_euler = vec.to_track_quat("Z", "Y").to_euler()
+                cyl.scale = (1.0, 1.0, length / 2.0)
+            else:
+                cyl.scale = (1.0, 1.0, 1e-6)
+            bonded = _is_bonded_in_frame(frame, i, j)
+            cyl.hide_viewport = not bonded
+            cyl.hide_render = not bonded
+            cyl.keyframe_insert("location")
+            cyl.keyframe_insert("rotation_euler")
+            cyl.keyframe_insert("scale")
+            cyl.keyframe_insert("hide_viewport")
+            cyl.keyframe_insert("hide_render")
 
-    bpy.ops.object.select_all(action="DESELECT")
-    bond_obj.select_set(True)
-    bpy.context.view_layer.objects.active = bond_obj
-
-    bpy.ops.object.shape_key_add(from_mix=False)  # Basis
-    for frame_idx, frame in enumerate(frames):
-        key = bond_obj.shape_key_add(name=f"Frame_{frame_idx}", from_mix=False)
-        key.value = 0.0
-        for v_idx, (_, pos) in enumerate(frame):
-            key.data[v_idx].co = pos
-
-    _animate_bond_shape_keys(bond_obj, len(frames))
-
-    skin_mod = bond_obj.modifiers.new(name="Skin", type="SKIN")
-    skin_mod.use_smooth_shade = True
-    if bond_mesh.skin_vertices:
-        skin_data = bond_mesh.skin_vertices[0].data
-        for sv in skin_data:
-            sv.radius = (BOND_RADIUS, BOND_RADIUS)
-        skin_data[0].use_root = True
-
-    subsurf = bond_obj.modifiers.new(name="Subsurf", type="SUBSURF")
-    subsurf.levels = 1
-    subsurf.render_levels = 2
+        # Visibility must flip instantly, not ease — set CONSTANT interpolation
+        # on the hide_* fcurves only (location/rotation/scale stay smooth).
+        if cyl.animation_data and cyl.animation_data.action:
+            for fc in cyl.animation_data.action.fcurves:
+                if fc.data_path in ("hide_viewport", "hide_render"):
+                    for kp in fc.keyframe_points:
+                        kp.interpolation = "CONSTANT"
 
 
 def _reset_scene() -> None:

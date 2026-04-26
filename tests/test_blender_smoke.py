@@ -71,11 +71,12 @@ def test_blender_bonds_detected(tmp_path: Path):
         pytest.skip(f"Blender executable not found: {BLENDER}")
 
     xyz = tmp_path / "traj.xyz"
-    # 2-frame H2 stretch — the two Hs stay within the covalent threshold (1.0 A)
-    # at frame 0 and split apart at frame 1 (still within the 1.3x slack at 1.10 A).
+    # Frame 0: C-H at 1.05 A (bonded; threshold = (0.76+0.31)*BOND_TOLERANCE >= 1.05).
+    # Frame 1: C-H at 5.00 A (well past any reasonable threshold; bond breaks).
+    # Union still reports 1 bond, but per-frame visibility hides it at frame 1.
     xyz.write_text(
-        "2\nFrame 0\nH 0.0 0.0 0.0\nH 0.0 0.0 0.74\n"
-        "2\nFrame 1\nH 0.0 0.0 0.0\nH 0.0 0.0 0.78\n"
+        "2\nFrame 0\nH 0.0 0.0 0.0\nC 0.0 0.0 1.05\n"
+        "2\nFrame 1\nH 0.0 0.0 0.0\nC 0.0 0.0 5.00\n"
     )
     out_blend = tmp_path / "scene.blend"
     script = Path(__file__).resolve().parent.parent / "blender" / "render.py"

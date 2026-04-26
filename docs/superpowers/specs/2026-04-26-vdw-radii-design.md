@@ -31,8 +31,8 @@ Tl Tm V W Xe Y Yb Zn Zr
 | 差し替え方式 | Import 後の post-processing | アドオンの `datafile` 引数 / `ELEMENTS` の monkey-patch | コード量最少、アドオンの内部 API に依存しない、未知元素を素直にスキップできる |
 | 設定方式 | 環境変数 `REACTX_VDW_SCALE` | CLI フラグ / モジュール分割 | Phase 0 では Blender 側だけで完結させ、CLI 配管に手を入れない |
 | 結合検出 | Cordero (2008) 共有結合半径 × 1.3 の距離判定 | RDKit に推論依頼 / PDB CONECT 経由 / Geometry Nodes | RDKit を Blender 内に持ち込まずに済む / 全フレーム union 取得が容易 |
-| 結合の動かし方 | bond mesh + per-frame shape key (アドオン原子と同パターン) + Skin / Subsurf modifier | 静的シリンダ / 各フレーム再生成 + 可視性キーフレーム / Geometry Nodes / driver | 原子と完全同期して動き、`.blend` 再オープン時の auto-run 不要、API も小さい |
-| 結合の形成・切断 | 全フレーム union を全期間表示 (Phase 0) | 距離閾値ベースで動的 fade | Phase 0 スコープ内で最小実装。Phase 1 で fade に拡張予定 |
+| 結合の動かし方 | 結合ごとにシリンダオブジェクトを 1 個生成し、`location`/`rotation_euler`/`scale` をフレームごと keyframe (Bezier interp) で原子に追従 | bond mesh + shape key (union 結合のみ) / 静的シリンダ / Geometry Nodes / driver | per-frame で結合を再判定 (=形成・切断) するには可視性キーフレームを併用する必要があり、シリンダ単位の方が実装が簡潔 |
+| 結合の形成・切断 | フレームごとに距離判定し `hide_viewport`/`hide_render` を CONSTANT 補間で切替 | 全期間表示 (union) / 滑らかな alpha fade | Phase 0 で形成・切断を視認可能にする最小実装。滑らかな fade は Phase 1 |
 
 ## 3. 実装
 
@@ -145,33 +145,48 @@ def main(argv: list[str]) -> int:
 
 ```python
 COVALENT_RADII_ANGSTROM: dict[str, float] = { "H": 0.31, ..., "Bi": 1.48 }  # Cordero 2008 Z=1..83
-BOND_TOLERANCE = 1.3
-BOND_RADIUS = 0.10  # Skin modifier cross-section radius (Å)
+BOND_TOLERANCE = 1.05  # editable; user can tune for visual taste
+BOND_RADIUS = 0.10     # cylinder radius (Å)
 
-def _parse_xyz_trajectory(xyz: Path) -> list[_AtomFrame]: ...
-def _center_frames(frames): ...                # mirror addon's put_to_center_all=True
-def _compute_bond_pairs(frames) -> list[(i, j)]: ...   # union over all frames
-def _animate_bond_shape_keys(bond_obj, n_frames): ...   # mirror xyz_import.py keyframing
-def _build_bonds(xyz: Path) -> None: ...
+def _parse_xyz_trajectory(xyz): ...
+def _center_frames(frames): ...                # mirror put_to_center_all=True
+def _bond_threshold_sq(sym_i, sym_j): ...      # cached squared threshold
+def _is_bonded_in_frame(frame, i, j): ...      # per-frame predicate
+def _compute_bond_pairs(frames): ...           # union over all frames (= candidate set)
+def _make_bond_material(): ...
+def _build_bonds(xyz): ...                     # one cylinder per candidate, fully keyframed
 ```
 
 `_build_bonds()` は `_rescale_atoms_to_vdw()` の直後に呼び出す。
+
+各候補結合ペア `(i, j)` について:
+1. `bpy.ops.mesh.primitive_cylinder_add(radius=BOND_RADIUS, depth=2.0)` でデフォルトのシリンダ (Z 軸方向、長さ 2) を作成
+2. 共有マテリアル (`Bond`、グレー) を貼る
+3. 各フレーム k について:
+   - `cyl.location = midpoint(p_i^k, p_j^k)`
+   - `cyl.rotation_euler = vec(p_j^k - p_i^k).to_track_quat("Z","Y").to_euler()`
+   - `cyl.scale = (1, 1, length / 2)`
+   - `cyl.hide_viewport = cyl.hide_render = not _is_bonded_in_frame(k, i, j)`
+   - 全 5 チャネルを `keyframe_insert`
+4. `hide_viewport` / `hide_render` の f-curve だけ補間を `CONSTANT` に上書き (transform は Bezier のまま、滑らかに動く)
 
 ### 6.5.1 動作仕様
 
 | ケース | 期待挙動 |
 |---|---|
-| 結合候補が 1 件以上検出 | `[reactx] bonds: N bond(s) across F frame(s)` をログ出力、Bonds オブジェクト作成 |
-| 結合 0 件 | `[reactx] bonds: no bonds detected` をログ出力、オブジェクトは作らない |
-| フレーム 0 件 | `[reactx] bonds: no frames parsed` をログ出力、オブジェクトは作らない |
-| 共有結合半径テーブルに無い元素 | その元素を含むペアは結合判定対象外 (skip) |
-| 形成・切断する結合 | union-over-frames なので全期間表示。両端の原子は shape key で動く |
+| 結合候補 N ≥ 1 件 | `[reactx] bonds: N bond(s) across F frame(s) (per-frame visibility)` を出力、N 個のシリンダ生成 |
+| 結合 0 件 | `[reactx] bonds: no bonds detected` を出力、オブジェクト未生成 |
+| フレーム 0 件 | `[reactx] bonds: no frames parsed` を出力、オブジェクト未生成 |
+| 共有結合半径テーブル外の元素 | そのペアは候補から除外 (skip) |
+| 形成 (途中から bonded) | 該当フレーム以降だけシリンダが visible になる |
+| 切断 (途中から unbonded) | 該当フレーム以降だけシリンダが hidden になる |
+| 短時間だけ bonded | その期間中だけ visible になる (任意の bonded フレームが候補入りすればシリンダは生成される) |
 
 ### 6.5.2 テスト追加
 
 `tests/test_blender_smoke.py::test_blender_bonds_detected`:
-- H₂ 2 フレーム軌跡 (距離 0.74 → 0.78 Å、両方とも `(0.31+0.31)*1.3 = 0.806` Å 閾値内)
-- stdout に `[reactx] bonds: 1 bond(s) across 2 frame(s)` が含まれることを assert
+- H + C 2 フレーム軌跡: frame 0 で C-H = 1.05 Å (bonded、tolerance=1.05 で閾値 1.124 内)、frame 1 で C-H = 5.00 Å (broken)
+- stdout に `[reactx] bonds: 1 bond(s) across 2 frame(s)` が含まれることを assert (union 候補 1 本がカウントされる)
 
 ## 7. ドキュメント更新
 
