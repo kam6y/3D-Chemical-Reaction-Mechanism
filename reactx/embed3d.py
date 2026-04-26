@@ -71,8 +71,10 @@ def embed_mol_to_atoms(
 def _find_c_lg_bond(mol_h: Chem.Mol, substrate_indices: list[int]) -> tuple[int, int]:
     """Locate the C and leaving-group (LG) atoms in the substrate fragment.
 
-    LG heuristic: heavy atom (Z > 1) bonded to sp3 carbon with highest atomic
-    number (halogens F < Cl < Br < I; also works for O, N, S).
+    Phase 0 assumes an SN2-style substrate (CH3X). The heuristic picks the
+    C–heteroatom bond with the highest-Z heteroatom (F < Cl < Br < I; also
+    works for O, N, S). Hybridization is not enforced because Phase 0 only
+    ever sees sp3 substrates; broader inputs are out of scope (see spec §11).
     """
     best: tuple[int, int, int] | None = None  # (Z, c_idx, lg_idx)
     substrate_set = set(substrate_indices)
@@ -112,7 +114,8 @@ def _place_nucleophile_backside(
     lg_pos = positions[lg_idx]
     c_lg = lg_pos - c_pos
     c_lg_norm = float(np.linalg.norm(c_lg))
-    assert c_lg_norm > 1e-6, "C and LG atoms coincide after MMFF — embedding is broken"
+    if c_lg_norm < 1e-6:
+        raise RuntimeError("C and LG atoms coincide after MMFF — embedding is broken")
     backside = -c_lg / c_lg_norm
 
     for i in range(1, len(frag_indices)):

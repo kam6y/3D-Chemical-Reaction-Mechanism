@@ -28,7 +28,7 @@ Phase 0 の目的は「特定 1 反応で全パイプラインが動作する」
        └─▶ [embed3d]  RDKit EmbedMolecule → MMFF94 → UMA 単点再最適化
             └─▶ [align]  atom mapping に基づく原子順の一致化
                  └─▶ [neb]   ASE NEB (IDPP 初期路 → CI-NEB) × UMA
-                      └─▶ trajectory.xyz (multi-frame, N≈11)
+                      └─▶ trajectory.xyz (multi-frame, N≈15)
                            └─▶ [blender] bpy script + atomic-blender-pdb-xyz
                                 └─▶ .blend シーン (keyframe 化された ball-and-stick + カメラ/照明)
 ```
@@ -92,7 +92,7 @@ docs/
 - 入力: reactant `Atoms`, product `Atoms` (aligned)
 - 出力: `trajectory.xyz`（multi-frame ASE XYZ）
 - 実装:
-  - `ase.neb.NEB` で 11 images (両端 + 9 中間) 生成
+  - `ase.neb.NEB` で 15 images (両端 + 13 中間) 生成。`uma-m-1p1` では 11 images だと TS 周辺の解像度が足りず収束が不安定だったため、Phase 0 では 15 を default に採用する (`--images` で上書き可)。
   - `IDPP` (`neb.idpp_interpolate()`) で初期パスを生成
   - 全 images に UMA Calculator を装着
   - `NEB.climb = True` (CI-NEB)
@@ -110,7 +110,7 @@ docs/
 
 ### 6.6 `cli`
 
-- コマンド例: `reactx run examples/sn2.rxn -o out/ --images 11 --fmax 0.05`
+- コマンド例: `reactx run examples/sn2.rxn -o out/ --images 15 --fmax 0.05`
 - 実行ステップ: parse → embed3d (reactant, product) → align → neb → Blender 呼出し（`--render` フラグ時）
 - 出力: `out/trajectory.xyz`, `out/energies.json`, `out/meta.json`, (`out/scene.blend`)
 
@@ -134,7 +134,7 @@ docs/
 | rxn_parser | `examples/sn2.rxn` | reactant Mol, product Mol, mapping |
 | embed3d | Mol × 2 | reactant.xyz, product.xyz |
 | align | 2 Atoms + mapping | aligned product.xyz |
-| neb | reactant + aligned product | trajectory.xyz (11+ frames), energies.json |
+| neb | reactant + aligned product | trajectory.xyz (15+ frames), energies.json |
 | blender | trajectory.xyz | scene.blend |
 
 ## 8. エラーハンドリング方針
@@ -149,7 +149,7 @@ docs/
 
 - `test_rxn_parser`: SN2 `.rxn` → 反応物 2 分子 + 生成物 2 分子 + mapping dict が期待値通り。
 - `test_embed3d`: CH₃Cl の C–Cl 結合長が 1.7–1.9 Å、H–C–H 角が 105–115°。
-- `test_neb_sn2`: 11 frame XYZ、エネルギーが単峰、TS エネルギーが両端より高い、TS で C–F–Cl 角度が一定値以上。
+- `test_neb_sn2`: 15 frame XYZ (slow テストでは `n_images=11` を直接渡しているが production default は 15)、エネルギーが単峰、TS エネルギーが両端より高い、TS で C–F–Cl 角度が一定値以上。
   - **Phase 0 緩和**: 当初仕様は「170° 以上（ほぼ線形）」だったが、`uma-m-1p1` (omol task) では SN2 の TS 線形性が安定して 170° に達しないため、Phase 0 では **120° 以上** に閾値を緩める。背面攻撃の方向性は確認できる一方、完全な C–F–Cl 線形 TS の再現は将来モデル/最適化チューニングに委ねる。再引き締めは Phase 1 の TODO。
 - `test_blender_smoke`: `blender --background --python blender/render.py -- out/trajectory.xyz /tmp/scene.blend` が exit code 0、`/tmp/scene.blend` が生成される（Blender と add-on は CI では skip、ローカルのみ）。
 

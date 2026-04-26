@@ -82,12 +82,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
     r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
 
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
-    reactant = embed_mol_to_atoms(
-        r_mol, calculator=make_calculator(args.backend, **model_kwargs), seed=1,
-    )
-    product_raw = embed_mol_to_atoms(
-        p_mol, calculator=make_calculator(args.backend, **model_kwargs), seed=2,
-    )
+    # Single calculator reused across the entire pipeline (embed × 2 + NEB).
+    # UMA models are ~11 GB each; constructing one per stage would peak at 3×
+    # residency right when NEB allocates its own and OOM on consumer hardware.
+    calc = make_calculator(args.backend, **model_kwargs)
+    reactant = embed_mol_to_atoms(r_mol, calculator=calc, seed=1)
+    product_raw = embed_mol_to_atoms(p_mol, calculator=calc, seed=2)
 
     r_mol_h = Chem.AddHs(r_mol)
     p_mol_h = Chem.AddHs(p_mol)
@@ -99,7 +99,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     meta = run_neb(
         reactant=reactant,
         product=product,
-        calculator_factory=lambda: make_calculator(args.backend, **model_kwargs),
+        calculator_factory=lambda: calc,
         n_images=args.images,
         output_xyz=xyz,
         fmax=args.fmax,

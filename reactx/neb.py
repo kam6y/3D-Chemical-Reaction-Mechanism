@@ -76,14 +76,21 @@ def run_neb(
     final_neb = neb_warm
     if climb:
         neb_climb = NEB(images, k=1.0, climb=True, allow_shared_calculator=True, method="improvedtangent")
-        final_neb = neb_climb
         log.info("NEB climb phase: up to %d steps, fmax=%s", climb_steps, fmax)
         try:
             climb_converged = bool(
                 FIRE(neb_climb, logfile="-").run(fmax=fmax, steps=climb_steps)
             )
+            final_neb = neb_climb
         except Exception as exc:  # noqa: BLE001
             log.warning("NEB climb raised %s: %s", type(exc).__name__, exc)
+            # Prefer climb's partial result if it produced energies; otherwise
+            # fall back to the warmup band so we report something meaningful
+            # instead of a vector of NaNs.
+            if neb_climb.energies is not None:
+                final_neb = neb_climb
+            else:
+                log.info("NEB climb produced no energies; using warmup result")
 
     converged = climb_converged if climb else warm_converged
     # final_neb.{residuals,energies} are populated by the last get_forces() call

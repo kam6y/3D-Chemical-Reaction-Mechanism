@@ -16,13 +16,13 @@ Blender 4.x と `atomic-blender-pdb-xyz` アドオンを別途インストール
 ## 使い方
 
 ```bash
-reactx run examples/sn2.rxn -o out/ --images 11 --fmax 0.05 --backend uma
+reactx run examples/sn2.rxn -o out/ --images 15 --fmax 0.05 --backend uma
 blender --background --python blender/render.py -- out/trajectory.xyz out/scene.blend
 ```
 
 生成物:
 
-- `out/trajectory.xyz` — 11+ フレームの NEB 軌跡
+- `out/trajectory.xyz` — 15+ フレームの NEB 軌跡 (default `--images 15`、padding 含む)
 - `out/energies.json` — 各 image のエネルギー
 - `out/meta.json` — 収束情報など
 - `out/scene.blend` — Blender シーン（GUI で開いて再生）
