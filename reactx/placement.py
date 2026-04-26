@@ -16,7 +16,7 @@ from reactx.reaction_topology import BondChange, BondChanges
 
 log = logging.getLogger(__name__)
 
-DEFAULT_D_FORM = 3.0  # Å — formed bond でのアプローチ距離
+DEFAULT_D_FORM = 3.5  # Å — Phase 0 SN2 で使われた値と一致 (FRAGMENT_SEPARATION)
 DEFAULT_D_DISSOC = 4.0  # Å — broken bond による product 側分離距離
 
 

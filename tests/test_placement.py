@@ -58,7 +58,7 @@ def test_sn2_reactant_placement_puts_F_on_backside_of_C(sn2_rxn_path: Path):
     assert cos_theta < -0.7, f"F not on backside of C-Cl: cos(theta)={cos_theta:.3f}"
 
     cf_dist = float(np.linalg.norm(c_to_f))
-    assert 2.0 <= cf_dist <= 4.0, f"|C-F| = {cf_dist:.3f} Å, expected ~3.0±1.0"
+    assert 2.5 <= cf_dist <= 4.5, f"|C-F| = {cf_dist:.3f} Å, expected ~3.5±1.0"
 
 
 def test_proton_transfer_reactant_places_NH3_near_HCl_H(
@@ -84,7 +84,7 @@ def test_proton_transfer_reactant_places_NH3_near_HCl_H(
     )
 
     nh_dist = float(np.linalg.norm(placed[n] - placed[h_hcl]))
-    assert 2.0 <= nh_dist <= 4.0, f"|N-H(Cl)| = {nh_dist:.2f} Å, expected ~3.0±1.0"
+    assert 2.5 <= nh_dist <= 4.5, f"|N-H(Cl)| = {nh_dist:.2f} Å, expected ~3.5±1.0"
 
 
 def test_e2_reactant_places_OH_near_beta_H(e2_rxn_path: Path):
@@ -104,7 +104,7 @@ def test_e2_reactant_places_OH_near_beta_H(e2_rxn_path: Path):
     o = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 4)
     h_beta = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 6)
     oh_dist = float(np.linalg.norm(placed[o] - placed[h_beta]))
-    assert 2.0 <= oh_dist <= 4.0, f"|O-Hβ| = {oh_dist:.2f} Å, expected ~3.0±1.0"
+    assert 2.5 <= oh_dist <= 4.5, f"|O-Hβ| = {oh_dist:.2f} Å, expected ~3.5±1.0"
 
 
 def test_sn1_step1_product_separates_Br_from_C(sn1_step1_rxn_path: Path):
