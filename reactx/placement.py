@@ -28,6 +28,7 @@ def place_fragments_generic(
     side: Literal["reactant", "product"],
     d_form: float = DEFAULT_D_FORM,
     d_dissoc: float = DEFAULT_D_DISSOC,
+    index_translation: dict[int, int] | None = None,
 ) -> np.ndarray:
     """Position fragments (i != primary) relative to the primary fragment.
 
@@ -36,15 +37,22 @@ def place_fragments_generic(
     formed (reactant side) or broken (product side) bond changes, compute each
     anchor's ideal position, then rigid-transform the fragment via Kabsch
     alignment. Single-anchor fragments are translated only.
+
+    bond_changes uses reactant indexing by convention. When mol_h is the
+    *product* mol_h, pass index_translation (typically expanded_atom_mapping
+    from reaction_topology) so that BondChange.{a,b} are projected to
+    product-side indices.
     """
     if len(frag_indices) <= 1:
         return positions
+
+    bc = _translate_bond_changes(bond_changes, index_translation)
 
     primary_idx = _pick_primary_fragment(mol_h, frag_indices)
     primary = frag_indices[primary_idx]
     primary_set = set(primary)
 
-    relevant = bond_changes.formed if side == "reactant" else bond_changes.broken
+    relevant = bc.formed if side == "reactant" else bc.broken
     distance = d_form if side == "reactant" else d_dissoc
 
     out = positions.copy()
@@ -52,7 +60,7 @@ def place_fragments_generic(
         if i == primary_idx:
             continue
         anchors = _collect_anchors(
-            primary_set, set(frag), relevant, out, bond_changes,
+            primary_set, set(frag), relevant, out, bc,
             side=side, distance=distance,
         )
         if not anchors:
@@ -64,6 +72,29 @@ def place_fragments_generic(
             continue
         out = _apply_kabsch(out, frag, anchors)
     return out
+
+
+def _translate_bond_changes(
+    bc: BondChanges, index_map: dict[int, int] | None,
+) -> BondChanges:
+    if index_map is None:
+        return bc
+    return BondChanges(
+        broken=[
+            BondChange(
+                a=index_map[c.a], b=index_map[c.b],
+                order_before=c.order_before, order_after=c.order_after,
+            )
+            for c in bc.broken
+        ],
+        formed=[
+            BondChange(
+                a=index_map[c.a], b=index_map[c.b],
+                order_before=c.order_before, order_after=c.order_after,
+            )
+            for c in bc.formed
+        ],
+    )
 
 
 def _pick_primary_fragment(

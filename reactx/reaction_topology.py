@@ -88,6 +88,20 @@ def _bond_orders(mol_h: Chem.Mol) -> dict[tuple[int, int], float]:
     return out
 
 
+def expanded_atom_mapping(
+    r_mol_h: Chem.Mol,
+    p_mol_h: Chem.Mol,
+    atom_mapping: dict[int, int],
+) -> dict[int, int]:
+    """Public: full reactant->product index map including implicit Hs.
+
+    Wrapper around the same internal pairing used by compute_bond_changes.
+    Useful for callers that need to project reactant-indexed BondChanges into
+    product indexing (see reactx.placement.place_fragments_generic).
+    """
+    return _build_expanded_mapping(r_mol_h, p_mol_h, atom_mapping)
+
+
 def _build_expanded_mapping(
     r_mol_h: Chem.Mol,
     p_mol_h: Chem.Mol,
