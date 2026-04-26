@@ -1,4 +1,5 @@
 """Tests for recommend_n_images pure function."""
+
 from reactx.cli import recommend_n_images
 from reactx.reaction_topology import BondChange, BondChanges
 

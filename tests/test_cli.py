@@ -6,11 +6,22 @@ from reactx import cli
 
 def test_cli_run_end_to_end_with_lj_backend(tmp_path: Path, sn2_rxn_path: Path):
     out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "20",
-        "--backend", "lj",
-    ])
+    rc = cli.main(
+        [
+            "run",
+            str(sn2_rxn_path),
+            "-o",
+            str(out),
+            "--images",
+            "5",
+            "--fmax",
+            "0.5",
+            "--max-steps",
+            "20",
+            "--backend",
+            "lj",
+        ]
+    )
     assert rc == 0
     assert (out / "trajectory.xyz").exists()
     meta = json.loads((out / "meta.json").read_text())
@@ -20,10 +31,16 @@ def test_cli_run_end_to_end_with_lj_backend(tmp_path: Path, sn2_rxn_path: Path):
 
 
 def test_cli_missing_rxn_returns_nonzero(tmp_path: Path):
-    rc = cli.main([
-        "run", str(tmp_path / "nope.rxn"), "-o", str(tmp_path / "out"),
-        "--backend", "lj",
-    ])
+    rc = cli.main(
+        [
+            "run",
+            str(tmp_path / "nope.rxn"),
+            "-o",
+            str(tmp_path / "out"),
+            "--backend",
+            "lj",
+        ]
+    )
     assert rc != 0
 
 
@@ -46,21 +63,34 @@ def test_cli_render_flag_invokes_blender_when_successful(
     monkeypatch.setattr("shutil.which", lambda exe: f"/fake/{exe}")
 
     out = tmp_path / "out"
-    rc = cli_mod.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "mock-blender",
-    ])
+    rc = cli_mod.main(
+        [
+            "run",
+            str(sn2_rxn_path),
+            "-o",
+            str(out),
+            "--images",
+            "5",
+            "--fmax",
+            "0.5",
+            "--max-steps",
+            "10",
+            "--backend",
+            "lj",
+            "--render",
+            "--blender-exe",
+            "mock-blender",
+        ]
+    )
     assert rc == 0
     # Blender was invoked with the right positional args after "--"
     assert any("mock-blender" in c[0] for c in calls), calls
     assert any("--background" in c for c in calls)
 
 
-def test_cli_render_propagates_blender_failure(
-    tmp_path: Path, sn2_rxn_path: Path, monkeypatch
-):
+def test_cli_render_propagates_blender_failure(tmp_path: Path, sn2_rxn_path: Path, monkeypatch):
     """--render path failure: subprocess returns rc=1, CLI returns nonzero."""
+
     class FakeResult:
         returncode = 1
 
@@ -68,11 +98,25 @@ def test_cli_render_propagates_blender_failure(
     monkeypatch.setattr("shutil.which", lambda exe: f"/fake/{exe}")
 
     out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "mock-blender",
-    ])
+    rc = cli.main(
+        [
+            "run",
+            str(sn2_rxn_path),
+            "-o",
+            str(out),
+            "--images",
+            "5",
+            "--fmax",
+            "0.5",
+            "--max-steps",
+            "10",
+            "--backend",
+            "lj",
+            "--render",
+            "--blender-exe",
+            "mock-blender",
+        ]
+    )
     assert rc != 0
 
 
@@ -88,9 +132,23 @@ def test_cli_render_errors_when_blender_not_on_path(
     monkeypatch.setattr("subprocess.run", fail_run)
 
     out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "definitely-not-blender",
-    ])
+    rc = cli.main(
+        [
+            "run",
+            str(sn2_rxn_path),
+            "-o",
+            str(out),
+            "--images",
+            "5",
+            "--fmax",
+            "0.5",
+            "--max-steps",
+            "10",
+            "--backend",
+            "lj",
+            "--render",
+            "--blender-exe",
+            "definitely-not-blender",
+        ]
+    )
     assert rc != 0

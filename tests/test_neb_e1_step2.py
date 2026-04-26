@@ -1,4 +1,5 @@
 """E1 step 2 (β-H elimination from carbocation) end-to-end NEB test."""
+
 from pathlib import Path
 
 import pytest
@@ -25,21 +26,37 @@ def test_e1_step2_neb_extracts_beta_H(tmp_path: Path, e1_step2_rxn_path: Path):
 
     calc = make_calculator("uma")
     reactant = embed_mol_to_atoms(
-        r_mol, calculator=calc, seed=1, bond_changes=bc, side="reactant",
+        r_mol,
+        calculator=calc,
+        seed=1,
+        bond_changes=bc,
+        side="reactant",
     )
     product_raw = embed_mol_to_atoms(
-        p_mol, calculator=calc, seed=2, bond_changes=bc, side="product",
+        p_mol,
+        calculator=calc,
+        seed=2,
+        bond_changes=bc,
+        side="product",
         index_translation=expanded,
     )
     product = align_product_to_reactant(
-        reactant, product_raw, expanded,
+        reactant,
+        product_raw,
+        expanded,
         swappable_h_groups=build_swappable_h_groups(r_h),
     )
 
     out = tmp_path / "traj.xyz"
     run_neb(
-        reactant=reactant, product=product, calculator=calc,
-        n_images=13, output_xyz=out, fmax=0.05, max_steps=200, pad_frames=0,
+        reactant=reactant,
+        product=product,
+        calculator=calc,
+        n_images=13,
+        output_xyz=out,
+        fmax=0.05,
+        max_steps=200,
+        pad_frames=0,
     )
     frames = read(str(out), index=":")
     c_alpha = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 1)

@@ -1,4 +1,5 @@
 """Parse MDL .rxn files into combined RDKit Mols and atom mapping."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,16 +32,12 @@ def parse_rxn(rxn_path: str | Path) -> tuple[Chem.Mol, Chem.Mol, dict[int, int]]
     mapping: dict[int, int] = {}
     for mapnum, r_idx in r_map.items():
         if mapnum not in p_map:
-            raise ValueError(
-                f"Atom map number {mapnum} present in reactant but not in product"
-            )
+            raise ValueError(f"Atom map number {mapnum} present in reactant but not in product")
         mapping[r_idx] = p_map[mapnum]
 
     for mapnum in p_map:
         if mapnum not in r_map:
-            raise ValueError(
-                f"Atom map number {mapnum} present in product but not in reactant"
-            )
+            raise ValueError(f"Atom map number {mapnum} present in product but not in reactant")
 
     return reactant, product, mapping
 
@@ -66,9 +63,7 @@ def _collect_atom_map_numbers(mol: Chem.Mol, *, side: str) -> dict[int, int]:
                 f"{side} atom {atom.GetIdx()} ({atom.GetSymbol()}) has no atom map number"
             )
         if mapnum in result:
-            raise ValueError(
-                f"Duplicate atom map number {mapnum} on {side} side"
-            )
+            raise ValueError(f"Duplicate atom map number {mapnum} on {side} side")
         result[mapnum] = atom.GetIdx()
     return result
 

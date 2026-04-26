@@ -1,4 +1,5 @@
 """E2 elimination end-to-end NEB test."""
+
 from pathlib import Path
 
 import numpy as np
@@ -27,22 +28,37 @@ def test_e2_neb_breaks_CBr_and_CbetaH_in_concert(tmp_path: Path, e2_rxn_path: Pa
 
     calc = make_calculator("uma")
     reactant = embed_mol_to_atoms(
-        r_mol, calculator=calc, seed=1, bond_changes=bc, side="reactant",
+        r_mol,
+        calculator=calc,
+        seed=1,
+        bond_changes=bc,
+        side="reactant",
     )
     product_raw = embed_mol_to_atoms(
-        p_mol, calculator=calc, seed=2, bond_changes=bc, side="product",
+        p_mol,
+        calculator=calc,
+        seed=2,
+        bond_changes=bc,
+        side="product",
         index_translation=expanded,
     )
     product = align_product_to_reactant(
-        reactant, product_raw, expanded,
+        reactant,
+        product_raw,
+        expanded,
         swappable_h_groups=build_swappable_h_groups(r_h),
     )
 
     out = tmp_path / "traj.xyz"
     meta = run_neb(
-        reactant=reactant, product=product, calculator=calc,
+        reactant=reactant,
+        product=product,
+        calculator=calc,
         n_images=recommend_n_images(bc),
-        output_xyz=out, fmax=0.05, max_steps=300, pad_frames=0,
+        output_xyz=out,
+        fmax=0.05,
+        max_steps=300,
+        pad_frames=0,
     )
     frames = read(str(out), index=":")
     energies = np.array(meta["image_energies"])

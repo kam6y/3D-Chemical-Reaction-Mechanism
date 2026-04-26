@@ -39,9 +39,13 @@ def test_run_neb_pads_endpoints(tmp_path: Path):
     product = _two_state_h2(1.2)
     out = tmp_path / "traj.xyz"
     run_neb(
-        reactant=reactant, product=product,
+        reactant=reactant,
+        product=product,
         calculator=make_calculator("lj"),
-        n_images=5, output_xyz=out, fmax=0.5, max_steps=10,
+        n_images=5,
+        output_xyz=out,
+        fmax=0.5,
+        max_steps=10,
         pad_frames=3,
     )
     frames = read(str(out), index=":")
@@ -69,22 +73,37 @@ def test_sn2_neb_ts_has_walden_inversion(tmp_path: Path):
 
     calc = make_calculator("uma")
     reactant = embed_mol_to_atoms(
-        r_mol, calculator=calc, seed=1, bond_changes=bc, side="reactant",
+        r_mol,
+        calculator=calc,
+        seed=1,
+        bond_changes=bc,
+        side="reactant",
     )
     product_raw = embed_mol_to_atoms(
-        p_mol, calculator=calc, seed=2, bond_changes=bc, side="product",
+        p_mol,
+        calculator=calc,
+        seed=2,
+        bond_changes=bc,
+        side="product",
         index_translation=expanded,
     )
     product = align_product_to_reactant(
-        reactant, product_raw, expanded,
+        reactant,
+        product_raw,
+        expanded,
         swappable_h_groups=build_swappable_h_groups(r_mol_h),
     )
 
     out = tmp_path / "traj.xyz"
     meta = run_neb(
-        reactant=reactant, product=product,
+        reactant=reactant,
+        product=product,
         calculator=calc,
-        n_images=11, output_xyz=out, fmax=0.05, max_steps=200, pad_frames=0,
+        n_images=11,
+        output_xyz=out,
+        fmax=0.05,
+        max_steps=200,
+        pad_frames=0,
     )
     frames = read(str(out), index=":")
     energies = np.array(meta["image_energies"])
@@ -112,7 +131,11 @@ def test_run_neb_rejects_too_few_images(tmp_path: Path):
     out = tmp_path / "traj.xyz"
     with pytest.raises(ValueError, match="n_images must be >= 3"):
         run_neb(
-            reactant=reactant, product=product,
+            reactant=reactant,
+            product=product,
             calculator=make_calculator("lj"),
-            n_images=2, output_xyz=out, fmax=0.5, max_steps=10,
+            n_images=2,
+            output_xyz=out,
+            fmax=0.5,
+            max_steps=10,
         )

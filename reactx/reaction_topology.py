@@ -4,6 +4,7 @@ Compares reactant and product bond graphs (under a common atom-mapping
 projection) and returns the set of broken / formed bonds. Phase 1 uses these
 to drive generic fragment placement (see reactx.placement).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -43,9 +44,7 @@ def compute_bond_changes(
     explicitly tracked migrating Hs). Implicit/unmapped Hs added by Chem.AddHs
     are paired positionally per heavy-atom group.
     """
-    expanded = _build_expanded_mapping(
-        reactant_mol_h, product_mol_h, atom_mapping
-    )
+    expanded = _build_expanded_mapping(reactant_mol_h, product_mol_h, atom_mapping)
     inv_expanded = {p: r for r, p in expanded.items()}
 
     r_bonds = _bond_orders(reactant_mol_h)
@@ -144,11 +143,13 @@ def _build_expanded_mapping(
         r_atom = r_mol_h.GetAtomWithIdx(r_idx)
         p_atom = p_mol_h.GetAtomWithIdx(p_idx)
         r_unpaired = [
-            n.GetIdx() for n in r_atom.GetNeighbors()
+            n.GetIdx()
+            for n in r_atom.GetNeighbors()
             if n.GetAtomicNum() == 1 and n.GetIdx() not in paired_r
         ]
         p_unpaired = [
-            n.GetIdx() for n in p_atom.GetNeighbors()
+            n.GetIdx()
+            for n in p_atom.GetNeighbors()
             if n.GetAtomicNum() == 1 and n.GetIdx() not in paired_p
         ]
         for rh, ph in zip(r_unpaired, p_unpaired, strict=False):

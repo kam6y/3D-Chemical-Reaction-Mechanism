@@ -34,8 +34,9 @@ def test_embed_ch3cl_has_reasonable_hch_angles():
     c_idx = syms.index("C")
     h_idxs = [i for i, s in enumerate(syms) if s == "H"]
     assert len(h_idxs) == 3
-    angles = [atoms.get_angle(h_idxs[i], c_idx, h_idxs[j])
-              for i in range(3) for j in range(i + 1, 3)]
+    angles = [
+        atoms.get_angle(h_idxs[i], c_idx, h_idxs[j]) for i in range(3) for j in range(i + 1, 3)
+    ]
     for a in angles:
         assert 100 < a < 120, f"H-C-H angle out of range: {a:.1f}°"
 
@@ -53,8 +54,10 @@ def test_embed_multifragment_places_fragments_apart():
 
 def test_embed_failure_raises_runtime_error(monkeypatch):
     from reactx import embed3d as mod
+
     def always_fail(*_a, **_kw):
         return -1  # RDKit embed failure code
+
     monkeypatch.setattr(mod.AllChem, "EmbedMolecule", always_fail)
     with pytest.raises(RuntimeError, match="embed"):
         embed_mol_to_atoms(_ch3cl(), calculator=None, seed=1)

@@ -1,4 +1,5 @@
 """Tests for reactx.reaction_topology module."""
+
 from pathlib import Path
 
 from rdkit import Chem
@@ -22,10 +23,14 @@ def test_bondchanges_default_lists():
 
 
 def _pair_syms(bc: BondChange, mol_h: Chem.Mol) -> tuple[str, str]:
-    return tuple(sorted([
-        mol_h.GetAtomWithIdx(bc.a).GetSymbol(),
-        mol_h.GetAtomWithIdx(bc.b).GetSymbol(),
-    ]))
+    return tuple(
+        sorted(
+            [
+                mol_h.GetAtomWithIdx(bc.a).GetSymbol(),
+                mol_h.GetAtomWithIdx(bc.b).GetSymbol(),
+            ]
+        )
+    )
 
 
 def test_sn2_bond_changes(sn2_rxn_path: Path):

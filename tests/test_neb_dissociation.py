@@ -1,4 +1,5 @@
 """SN1 step 1 (heterolytic dissociation) end-to-end NEB test."""
+
 from pathlib import Path
 
 import numpy as np
@@ -26,21 +27,36 @@ def test_dissociation_neb_separates_C_and_Br(tmp_path: Path, sn1_step1_rxn_path:
 
     calc = make_calculator("uma")
     reactant = embed_mol_to_atoms(
-        r_mol, calculator=calc, seed=1, bond_changes=bc, side="reactant",
+        r_mol,
+        calculator=calc,
+        seed=1,
+        bond_changes=bc,
+        side="reactant",
     )
     product_raw = embed_mol_to_atoms(
-        p_mol, calculator=calc, seed=2, bond_changes=bc, side="product",
+        p_mol,
+        calculator=calc,
+        seed=2,
+        bond_changes=bc,
+        side="product",
         index_translation=expanded,
     )
     product = align_product_to_reactant(
-        reactant, product_raw, expanded,
+        reactant,
+        product_raw,
+        expanded,
         swappable_h_groups=build_swappable_h_groups(r_h),
     )
 
     out = tmp_path / "traj.xyz"
     meta = run_neb(
-        reactant=reactant, product=product, calculator=calc,
-        n_images=11, output_xyz=out, fmax=0.05, max_steps=200,
+        reactant=reactant,
+        product=product,
+        calculator=calc,
+        n_images=11,
+        output_xyz=out,
+        fmax=0.05,
+        max_steps=200,
         pad_frames=0,
     )
     frames = read(str(out), index=":")

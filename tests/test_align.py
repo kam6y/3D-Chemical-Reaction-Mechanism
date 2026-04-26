@@ -9,14 +9,26 @@ def _build_pair():
     # reactant: C, Cl, F, H, H, H  (indices 0..5)
     r = Atoms(
         symbols=["C", "Cl", "F", "H", "H", "H"],
-        positions=[(0, 0, 0), (1.8, 0, 0), (-3.5, 0, 0),
-                   (0.3, 1.0, 0), (0.3, -0.5, 0.9), (0.3, -0.5, -0.9)],
+        positions=[
+            (0, 0, 0),
+            (1.8, 0, 0),
+            (-3.5, 0, 0),
+            (0.3, 1.0, 0),
+            (0.3, -0.5, 0.9),
+            (0.3, -0.5, -0.9),
+        ],
     )
     # product: Cl, F, C, H, H, H (indices 0..5) — heavy atoms shuffled
     p = Atoms(
         symbols=["Cl", "F", "C", "H", "H", "H"],
-        positions=[(3.8, 0, 0), (-1.5, 0, 0), (0, 0, 0),
-                   (-0.3, 1.0, 0), (-0.3, -0.5, 0.9), (-0.3, -0.5, -0.9)],
+        positions=[
+            (3.8, 0, 0),
+            (-1.5, 0, 0),
+            (0, 0, 0),
+            (-0.3, 1.0, 0),
+            (-0.3, -0.5, 0.9),
+            (-0.3, -0.5, -0.9),
+        ],
     )
     # full atom mapping (reactant idx -> product idx) including Hs
     atom_mapping = {0: 2, 1: 0, 2: 1, 3: 3, 4: 4, 5: 5}
@@ -68,7 +80,9 @@ def test_align_with_no_swappable_groups_skips_h_permutation():
 
 def test_build_swappable_h_groups_excludes_atom_mapped_h():
     from rdkit import Chem
+
     from reactx.align import build_swappable_h_groups
+
     # methane with one explicit H carrying an atom map number; that H must
     # NOT appear in the swappable group.
     mol = Chem.MolFromSmiles("C")

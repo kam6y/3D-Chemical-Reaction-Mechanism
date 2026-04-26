@@ -48,6 +48,7 @@ def test_parse_rxn_raises_when_atom_map_missing(tmp_path: Path):
 
 def test_heavy_to_hydrogen_groups_on_methane():
     from reactx.rxn_parser import heavy_to_hydrogen_groups
+
     mol = Chem.MolFromSmiles("C")
     mol_h = Chem.AddHs(mol)
     groups = heavy_to_hydrogen_groups(mol_h)

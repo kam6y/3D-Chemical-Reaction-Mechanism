@@ -1,4 +1,5 @@
 """Tests for reactx.placement."""
+
 from pathlib import Path
 
 import numpy as np
@@ -39,7 +40,11 @@ def test_sn2_reactant_placement_puts_F_on_backside_of_C(sn2_rxn_path: Path):
     frag_indices, positions = _embed_for_test(r_h)
 
     placed = place_fragments_generic(
-        r_h, frag_indices, positions, bc, side="reactant",
+        r_h,
+        frag_indices,
+        positions,
+        bc,
+        side="reactant",
     )
 
     syms = [a.GetSymbol() for a in r_h.GetAtoms()]
@@ -49,10 +54,7 @@ def test_sn2_reactant_placement_puts_F_on_backside_of_C(sn2_rxn_path: Path):
 
     c_to_cl = placed[cl] - placed[c]
     c_to_f = placed[f] - placed[c]
-    cos_theta = (
-        np.dot(c_to_cl, c_to_f)
-        / (np.linalg.norm(c_to_cl) * np.linalg.norm(c_to_f))
-    )
+    cos_theta = np.dot(c_to_cl, c_to_f) / (np.linalg.norm(c_to_cl) * np.linalg.norm(c_to_f))
     assert cos_theta < -0.7, f"F not on backside of C-Cl: cos(theta)={cos_theta:.3f}"
 
     cf_dist = float(np.linalg.norm(c_to_f))
@@ -69,13 +71,16 @@ def test_proton_transfer_reactant_places_NH3_near_HCl_H(
     frag_indices, positions = _embed_for_test(r_h)
 
     placed = place_fragments_generic(
-        r_h, frag_indices, positions, bc, side="reactant",
+        r_h,
+        frag_indices,
+        positions,
+        bc,
+        side="reactant",
     )
     syms = [a.GetSymbol() for a in r_h.GetAtoms()]
     n = syms.index("N")
     h_hcl = next(
-        a.GetIdx() for a in r_h.GetAtoms()
-        if a.GetSymbol() == "H" and a.GetAtomMapNum() == 1
+        a.GetIdx() for a in r_h.GetAtoms() if a.GetSymbol() == "H" and a.GetAtomMapNum() == 1
     )
 
     nh_dist = float(np.linalg.norm(placed[n] - placed[h_hcl]))
@@ -90,7 +95,11 @@ def test_e2_reactant_places_OH_near_beta_H(e2_rxn_path: Path):
     frag_indices, positions = _embed_for_test(r_h)
 
     placed = place_fragments_generic(
-        r_h, frag_indices, positions, bc, side="reactant",
+        r_h,
+        frag_indices,
+        positions,
+        bc,
+        side="reactant",
     )
     o = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 4)
     h_beta = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 6)
@@ -107,7 +116,11 @@ def test_sn1_step1_product_separates_Br_from_C(sn1_step1_rxn_path: Path):
     frag_indices, positions = _embed_for_test(p_h)
 
     placed = place_fragments_generic(
-        p_h, frag_indices, positions, bc, side="product",
+        p_h,
+        frag_indices,
+        positions,
+        bc,
+        side="product",
         index_translation=expanded,
     )
     syms = [a.GetSymbol() for a in p_h.GetAtoms()]
@@ -126,7 +139,11 @@ def test_e1_step2_product_separates_H_from_Cb(e1_step2_rxn_path: Path):
     frag_indices, positions = _embed_for_test(p_h)
 
     placed = place_fragments_generic(
-        p_h, frag_indices, positions, bc, side="product",
+        p_h,
+        frag_indices,
+        positions,
+        bc,
+        side="product",
         index_translation=expanded,
     )
     h_leaving = next(a.GetIdx() for a in p_h.GetAtoms() if a.GetAtomMapNum() == 5)

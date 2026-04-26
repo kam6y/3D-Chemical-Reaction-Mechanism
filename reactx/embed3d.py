@@ -7,6 +7,7 @@ on the same AddHs(mol) result.
 Multi-fragment placement is delegated to reactx.placement.place_fragments_generic,
 driven by bond_changes computed in cli.py from the .rxn atom mapping.
 """
+
 from __future__ import annotations
 
 import logging
@@ -68,11 +69,13 @@ def embed_mol_to_atoms(
             positions[orig_idx] = (p.x, p.y, p.z)
 
     if len(frag_indices) > 1:
-        bc = bond_changes if bond_changes is not None else BondChanges(
-            broken=[], formed=[]
-        )
+        bc = bond_changes if bond_changes is not None else BondChanges(broken=[], formed=[])
         positions = place_fragments_generic(
-            mol_h, frag_indices, positions, bc, side=side,
+            mol_h,
+            frag_indices,
+            positions,
+            bc,
+            side=side,
             index_translation=index_translation,
         )
 
@@ -120,11 +123,3 @@ def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:
         f"after {MAX_EMBED_RETRIES} attempts (with and without random coords). "
         "Check input structure and RDKit version."
     )
-
-    if frag.GetNumHeavyAtoms() > 1:
-        result = AllChem.MMFFOptimizeMolecule(frag, maxIters=500)
-        if result == -1:
-            raise RuntimeError(
-                f"MMFF94 force field could not be constructed for fragment "
-                f"({frag.GetNumAtoms()} atoms). Check element coverage."
-            )

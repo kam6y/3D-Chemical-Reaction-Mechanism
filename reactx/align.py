@@ -7,6 +7,7 @@ heavy atoms between R and P) are handled directly via their atom map number.
 The previous Phase 0 contract (heavy_mapping + per-heavy H groups) couldn't
 express migration because it assumed each H stays on the same heavy atom.
 """
+
 from __future__ import annotations
 
 from itertools import permutations
@@ -34,9 +35,7 @@ def align_product_to_reactant(
         by atom_index_mapping.
     """
     if len(reactant) != len(product):
-        raise ValueError(
-            f"Atom count mismatch: reactant={len(reactant)} product={len(product)}"
-        )
+        raise ValueError(f"Atom count mismatch: reactant={len(reactant)} product={len(product)}")
     if len(atom_index_mapping) != len(reactant):
         missing = [i for i in range(len(reactant)) if i not in atom_index_mapping]
         raise ValueError(
@@ -63,9 +62,7 @@ def align_product_to_reactant(
             continue
         r_positions = reactant.positions[group]
         p_positions = aligned.positions[group]
-        dist = np.linalg.norm(
-            p_positions[:, None, :] - r_positions[None, :, :], axis=-1
-        )
+        dist = np.linalg.norm(p_positions[:, None, :] - r_positions[None, :, :], axis=-1)
         identity = tuple(range(n))
         best_perm = min(
             permutations(identity),
@@ -94,7 +91,8 @@ def build_swappable_h_groups(
         if atom.GetAtomicNum() == 1:
             continue
         hs = [
-            n.GetIdx() for n in atom.GetNeighbors()
+            n.GetIdx()
+            for n in atom.GetNeighbors()
             if n.GetAtomicNum() == 1 and n.GetAtomMapNum() == 0
         ]
         if len(hs) >= 2:

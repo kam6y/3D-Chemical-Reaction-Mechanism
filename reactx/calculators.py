@@ -1,4 +1,5 @@
 """ASE Calculator factory. Phase 0 supports UMA (primary) and LennardJones (tests)."""
+
 from __future__ import annotations
 
 import logging
@@ -22,9 +23,7 @@ def make_calculator(name: str = "uma", **kwargs: Any) -> Calculator:
         from ase.calculators.lj import LennardJones
 
         return LennardJones(**kwargs)
-    raise ValueError(
-        f"Unknown calculator '{name}'. Supported: 'uma', 'lj'."
-    )
+    raise ValueError(f"Unknown calculator '{name}'. Supported: 'uma', 'lj'.")
 
 
 def _build_uma_calculator(

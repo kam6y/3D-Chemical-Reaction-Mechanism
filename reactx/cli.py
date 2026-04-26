@@ -1,4 +1,5 @@
 """CLI entry point: reactx run <rxn> -o <outdir> [options]."""
+
 from __future__ import annotations
 
 import argparse
@@ -41,16 +42,19 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Run full pipeline on a .rxn file")
     run.add_argument("rxn_path", type=Path)
     run.add_argument("-o", "--output", type=Path, required=True)
-    run.add_argument("--images", type=int, default=None,
-                     help="NEB image count (default: auto from bond changes)")
+    run.add_argument(
+        "--images", type=int, default=None, help="NEB image count (default: auto from bond changes)"
+    )
     run.add_argument("--fmax", type=float, default=0.05)
     run.add_argument("--max-steps", type=int, default=500)
     run.add_argument("--backend", choices=["uma", "lj"], default="uma")
-    run.add_argument("--model", type=str, default="uma-m-1p1",
-                     help="UMA model name (uma-m-1p1, uma-s-1p2, ...)")
+    run.add_argument(
+        "--model", type=str, default="uma-m-1p1", help="UMA model name (uma-m-1p1, uma-s-1p2, ...)"
+    )
     run.add_argument("--pad-frames", type=int, default=3)
-    run.add_argument("--render", action="store_true",
-                     help="Also invoke blender/render.py after NEB")
+    run.add_argument(
+        "--render", action="store_true", help="Also invoke blender/render.py after NEB"
+    )
     run.add_argument("--blender-exe", type=str, default="blender")
     return p
 
@@ -112,7 +116,8 @@ def _check_hf_auth() -> int:
         log.error(
             "Hugging Face authentication check failed (%s: %s). "
             "Run `hf auth login` and ensure UMA model access is approved.",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
         )
         return 1
     return 0
@@ -139,7 +144,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     expanded = expanded_atom_mapping(r_mol_h, p_mol_h, mapping)
     log.info(
         "Bond changes: %d broken, %d formed",
-        len(bond_changes.broken), len(bond_changes.formed),
+        len(bond_changes.broken),
+        len(bond_changes.formed),
     )
 
     n_images = args.images if args.images is not None else recommend_n_images(bond_changes)
@@ -149,18 +155,27 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # Reuse one calculator across embed+NEB; UMA models (~11 GB) OOM if rebuilt.
     calc = make_calculator(args.backend, **model_kwargs)
     reactant = embed_mol_to_atoms(
-        r_mol, calculator=calc, seed=1,
-        bond_changes=bond_changes, side="reactant",
+        r_mol,
+        calculator=calc,
+        seed=1,
+        bond_changes=bond_changes,
+        side="reactant",
     )
     product_raw = embed_mol_to_atoms(
-        p_mol, calculator=calc, seed=2,
-        bond_changes=bond_changes, side="product",
+        p_mol,
+        calculator=calc,
+        seed=2,
+        bond_changes=bond_changes,
+        side="product",
         index_translation=expanded,
     )
 
     swappable = build_swappable_h_groups(r_mol_h)
     product = align_product_to_reactant(
-        reactant, product_raw, expanded, swappable_h_groups=swappable,
+        reactant,
+        product_raw,
+        expanded,
+        swappable_h_groups=swappable,
     )
 
     xyz = args.output / "trajectory.xyz"
@@ -186,7 +201,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     log.info(
         "OK: wrote %s (converged=%s, fmax=%s)",
-        xyz, meta["converged"], _fmt_fmax(meta["final_fmax"]),
+        xyz,
+        meta["converged"],
+        _fmt_fmax(meta["final_fmax"]),
     )
     return 0
 
@@ -194,6 +211,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
     import shutil
     import subprocess
+
     if shutil.which(args.blender_exe) is None:
         log.error(
             "Blender executable not found on PATH: %s. Install Blender 4.x "
@@ -204,8 +222,7 @@ def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
         return 1
     script = Path(__file__).resolve().parent.parent / "blender" / "render.py"
     blend = args.output / "scene.blend"
-    cmd = [args.blender_exe, "--background", "--python", str(script),
-           "--", str(xyz), str(blend)]
+    cmd = [args.blender_exe, "--background", "--python", str(script), "--", str(xyz), str(blend)]
     log.info("Running: %s", " ".join(cmd))
     result = subprocess.run(cmd)
     if result.returncode != 0:

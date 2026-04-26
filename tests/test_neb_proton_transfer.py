@@ -1,4 +1,5 @@
 """Proton transfer end-to-end NEB test (HCl + NH3 -> Cl- + NH4+)."""
+
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,8 @@ from reactx.rxn_parser import parse_rxn
 
 @pytest.mark.slow
 def test_proton_transfer_neb_H_moves_from_Cl_to_N(
-    tmp_path: Path, proton_transfer_rxn_path: Path,
+    tmp_path: Path,
+    proton_transfer_rxn_path: Path,
 ):
     pytest.importorskip("fairchem.core")
 
@@ -28,21 +30,37 @@ def test_proton_transfer_neb_H_moves_from_Cl_to_N(
 
     calc = make_calculator("uma")
     reactant = embed_mol_to_atoms(
-        r_mol, calculator=calc, seed=1, bond_changes=bc, side="reactant",
+        r_mol,
+        calculator=calc,
+        seed=1,
+        bond_changes=bc,
+        side="reactant",
     )
     product_raw = embed_mol_to_atoms(
-        p_mol, calculator=calc, seed=2, bond_changes=bc, side="product",
+        p_mol,
+        calculator=calc,
+        seed=2,
+        bond_changes=bc,
+        side="product",
         index_translation=expanded,
     )
     product = align_product_to_reactant(
-        reactant, product_raw, expanded,
+        reactant,
+        product_raw,
+        expanded,
         swappable_h_groups=build_swappable_h_groups(r_h),
     )
 
     out = tmp_path / "traj.xyz"
     meta = run_neb(
-        reactant=reactant, product=product, calculator=calc,
-        n_images=13, output_xyz=out, fmax=0.05, max_steps=200, pad_frames=0,
+        reactant=reactant,
+        product=product,
+        calculator=calc,
+        n_images=13,
+        output_xyz=out,
+        fmax=0.05,
+        max_steps=200,
+        pad_frames=0,
     )
     frames = read(str(out), index=":")
     syms = frames[0].get_chemical_symbols()

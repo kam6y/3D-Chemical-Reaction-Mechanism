@@ -1,4 +1,5 @@
 """ASE IDPP + CI-NEB driver. Writes multi-frame XYZ with optional end padding."""
+
 from __future__ import annotations
 
 import logging
@@ -19,8 +20,11 @@ log = logging.getLogger(__name__)
 
 def _make_neb(images: list[Atoms], *, climb: bool) -> NEB:
     return NEB(
-        images, k=1.0, climb=climb,
-        allow_shared_calculator=True, method="improvedtangent",
+        images,
+        k=1.0,
+        climb=climb,
+        allow_shared_calculator=True,
+        method="improvedtangent",
     )
 
 
@@ -60,9 +64,7 @@ def run_neb(
     Uses FIRE optimizer (more robust than BFGS on rough reactive PES).
     """
     if n_images < 3:
-        raise ValueError(
-            f"n_images must be >= 3 (reactant + >=1 middle + product), got {n_images}"
-        )
+        raise ValueError(f"n_images must be >= 3 (reactant + >=1 middle + product), got {n_images}")
 
     images = [reactant.copy()]
     for _ in range(n_images - 2):

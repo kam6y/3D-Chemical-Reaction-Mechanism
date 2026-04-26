@@ -3,6 +3,7 @@
 Replaces Phase 0's SN2-hardcoded backside-attack placement
 (_find_c_lg_bond / _place_nucleophile_backside in embed3d).
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,7 +16,7 @@ from reactx.reaction_topology import BondChange, BondChanges
 
 log = logging.getLogger(__name__)
 
-DEFAULT_D_FORM = 3.0    # Å — formed bond でのアプローチ距離
+DEFAULT_D_FORM = 3.0  # Å — formed bond でのアプローチ距離
 DEFAULT_D_DISSOC = 4.0  # Å — broken bond による product 側分離距離
 
 
@@ -60,13 +61,19 @@ def place_fragments_generic(
         if i == primary_idx:
             continue
         anchors = _collect_anchors(
-            primary_set, set(frag), relevant, out, bc,
-            side=side, distance=distance,
+            primary_set,
+            set(frag),
+            relevant,
+            out,
+            bc,
+            side=side,
+            distance=distance,
         )
         if not anchors:
             log.warning(
                 "Fragment %d has no anchor bond change to primary fragment; "
-                "placing naively along +x", i,
+                "placing naively along +x",
+                i,
             )
             out = _place_naively(out, primary, frag, distance)
             continue
@@ -75,38 +82,39 @@ def place_fragments_generic(
 
 
 def _translate_bond_changes(
-    bc: BondChanges, index_map: dict[int, int] | None,
+    bc: BondChanges,
+    index_map: dict[int, int] | None,
 ) -> BondChanges:
     if index_map is None:
         return bc
     return BondChanges(
         broken=[
             BondChange(
-                a=index_map[c.a], b=index_map[c.b],
-                order_before=c.order_before, order_after=c.order_after,
+                a=index_map[c.a],
+                b=index_map[c.b],
+                order_before=c.order_before,
+                order_after=c.order_after,
             )
             for c in bc.broken
         ],
         formed=[
             BondChange(
-                a=index_map[c.a], b=index_map[c.b],
-                order_before=c.order_before, order_after=c.order_after,
+                a=index_map[c.a],
+                b=index_map[c.b],
+                order_before=c.order_before,
+                order_after=c.order_after,
             )
             for c in bc.formed
         ],
     )
 
 
-def _pick_primary_fragment(
-    mol_h: Chem.Mol, frag_indices: tuple[tuple[int, ...], ...]
-) -> int:
+def _pick_primary_fragment(mol_h: Chem.Mol, frag_indices: tuple[tuple[int, ...], ...]) -> int:
     """Largest fragment by heavy-atom count; ties broken by lowest index."""
     best_size = -1
     best_idx = 0
     for i, frag in enumerate(frag_indices):
-        n_heavy = sum(
-            1 for idx in frag if mol_h.GetAtomWithIdx(idx).GetAtomicNum() > 1
-        )
+        n_heavy = sum(1 for idx in frag if mol_h.GetAtomWithIdx(idx).GetAtomicNum() > 1)
         if n_heavy > best_size:
             best_size = n_heavy
             best_idx = i
@@ -130,8 +138,13 @@ def _collect_anchors(
         if a is None or b is None:
             continue
         ideal_b = _compute_ideal_position(
-            a=a, b=b, positions=positions, primary_set=primary_set,
-            bond_changes=bond_changes, side=side, distance=distance,
+            a=a,
+            b=b,
+            positions=positions,
+            primary_set=primary_set,
+            bond_changes=bond_changes,
+            side=side,
+            distance=distance,
         )
         anchors.append((b, ideal_b))
     return anchors
@@ -148,8 +161,14 @@ def _split_bond_across_boundary(
 
 
 def _compute_ideal_position(
-    *, a: int, b: int, positions: np.ndarray, primary_set: set[int],
-    bond_changes: BondChanges, side: str, distance: float,
+    *,
+    a: int,
+    b: int,
+    positions: np.ndarray,
+    primary_set: set[int],
+    bond_changes: BondChanges,
+    side: str,
+    distance: float,
 ) -> np.ndarray:
     p_a = positions[a]
     if side == "reactant":
