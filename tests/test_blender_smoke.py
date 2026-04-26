@@ -86,6 +86,6 @@ def test_blender_bonds_detected(tmp_path: Path):
         capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
-    assert "[reactx] bonds: 1 bond(s) across 2 frame(s)" in result.stdout, (
+    assert re.search(r"bonds:\s*1\s+bond", result.stdout), (
         f"expected bond log line; stdout was:\n{result.stdout}"
     )

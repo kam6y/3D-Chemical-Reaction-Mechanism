@@ -83,6 +83,10 @@ def run_neb(
     warmup_steps = max(1, max_steps // 2)
     climb_steps = max(1, max_steps - warmup_steps)
 
+    # `images` is shared between the warmup and climb NEB objects. ASE's
+    # NEB optimizer mutates image positions in place, so the climb band
+    # automatically inherits the warmup-relaxed path — no second
+    # interpolate() call is needed (and would in fact overwrite warmup work).
     neb_warm = _make_neb(images, climb=False)
     neb_warm.interpolate(method="idpp")
     warm_converged = _run_phase("warmup", neb_warm, fmax=fmax, steps=warmup_steps)

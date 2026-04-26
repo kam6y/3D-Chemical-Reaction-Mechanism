@@ -96,7 +96,7 @@ docs/
   - `IDPP` (`neb.idpp_interpolate()`) で初期パスを生成
   - 全 images に UMA Calculator を装着
   - `NEB.climb = True` (CI-NEB)
-  - `BFGS` で Fmax < 0.05 eV/Å, maxiter 200
+  - `FIRE` で Fmax < 0.05 eV/Å, maxiter 200（反応 PES の凹凸では BFGS が発散しやすく FIRE のほうが堅牢だったため変更）
   - 収束後、各 image の `ase.Atoms` を `ase.io.write` で連結 XYZ に出力
   - 前後に reactant/product の静止フレームを数枚パディング（動画の「間」を作る）
 - 非収束時: ベストエフォートで保存、`converged=False` をログと JSON メタデータに記録。

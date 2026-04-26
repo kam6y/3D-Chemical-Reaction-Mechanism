@@ -44,7 +44,7 @@ def align_product_to_reactant(
                 f"hydrogen count mismatch for heavy atom {r_idx}->{p_idx}: "
                 f"{len(r_hs)} vs {len(p_hs)}"
             )
-        for r_h, p_h in zip(r_hs, p_hs):
+        for r_h, p_h in zip(r_hs, p_hs, strict=True):
             permutation[r_h] = p_h
 
     if any(x < 0 for x in permutation):

@@ -6,12 +6,16 @@ on the same AddHs(mol) result.
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from ase import Atoms
 from ase.calculators.calculator import Calculator
 from ase.optimize import BFGS
 from rdkit import Chem
 from rdkit.Chem import AllChem
+
+log = logging.getLogger(__name__)
 
 MAX_EMBED_RETRIES = 5
 FRAGMENT_SEPARATION = 3.5  # Å — attack distance for multi-fragment placement
@@ -41,7 +45,7 @@ def embed_mol_to_atoms(
     frag_mols = Chem.GetMolFrags(mol_h, asMols=True, sanitizeFrags=True)
 
     positions = np.zeros((n_atoms, 3))
-    for i, (indices, frag) in enumerate(zip(frag_indices, frag_mols)):
+    for i, (indices, frag) in enumerate(zip(frag_indices, frag_mols, strict=True)):
         _embed_in_place(frag, seed=seed + i * MAX_EMBED_RETRIES)
         conf = frag.GetConformer()
         for j, orig_idx in enumerate(indices):
@@ -75,6 +79,7 @@ def _find_c_lg_bond(mol_h: Chem.Mol, substrate_indices: list[int]) -> tuple[int,
     ever sees sp3 substrates; broader inputs are out of scope (see spec §11).
     """
     best: tuple[int, int, int] | None = None
+    candidates: list[tuple[int, int, int]] = []
     substrate_set = set(substrate_indices)
     for atom in mol_h.GetAtoms():
         if atom.GetIdx() not in substrate_set or atom.GetSymbol() != "C":
@@ -85,8 +90,18 @@ def _find_c_lg_bond(mol_h: Chem.Mol, substrate_indices: list[int]) -> tuple[int,
             if nb.GetSymbol() == "C":
                 continue
             z = nb.GetAtomicNum()
+            candidates.append((z, atom.GetIdx(), nb.GetIdx()))
             if best is None or z > best[0]:
                 best = (z, atom.GetIdx(), nb.GetIdx())
+    if len(candidates) > 1:
+        # Beyond Phase 0's CH3X scope: max-Z is a guess, not a derivation.
+        log.warning(
+            "Substrate has %d C–heteroatom bonds; picking highest-Z (Z=%d, "
+            "atom %d) as leaving group. This heuristic is reliable only for "
+            "single-heteroatom SN2 substrates — review the choice for "
+            "multi-heteroatom inputs.",
+            len(candidates), best[0], best[2],
+        )
     if best is None:
         raise RuntimeError(
             "No C–leaving-group bond found in substrate fragment. Phase 0 expects "

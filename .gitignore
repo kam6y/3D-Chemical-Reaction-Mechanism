@@ -7,3 +7,4 @@ out/
 out_*/
 *.log
 .DS_Store
+.claude

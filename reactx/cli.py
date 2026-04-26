@@ -68,11 +68,14 @@ def _sanitize_for_json(obj):
 
 
 def _check_hf_auth() -> int:
-    """Verify the user is logged in to Hugging Face before downloading UMA.
+    """Verify a Hugging Face token is present before downloading UMA.
 
-    Returns 0 if authenticated, 1 with a friendly error if not. UMA models
-    are gated, so a missing token surfaces deep inside FAIRChemCalculator
-    construction otherwise — catch it early per design spec §8.
+    Returns 0 if a token resolves via ``HfApi().whoami()``, 1 otherwise.
+    NOTE: this only checks token *presence/validity*, not whether the
+    account has accepted the UMA model gate. A user with a valid token
+    but unaccepted gate will still 403 inside FAIRChemCalculator
+    construction — the deeper failure mode design spec §8 cannot fully
+    pre-empt without an extra `model_info("facebook/UMA-...")` round-trip.
     """
     try:
         from huggingface_hub import HfApi
