@@ -89,3 +89,42 @@ def test_blender_bonds_detected(tmp_path: Path):
     assert re.search(r"bonds:\s*1\s+bond", result.stdout), (
         f"expected bond log line; stdout was:\n{result.stdout}"
     )
+
+
+@pytest.mark.blender
+@pytest.mark.parametrize("rxn_name", [
+    "sn2", "sn1_step1", "e2", "e1_step2", "proton_transfer",
+])
+def test_blender_renders_all_phase1_reactions(
+    tmp_path: Path, examples_dir: Path, rxn_name: str,
+):
+    """End-to-end: each Phase 1 reaction generates trajectory.xyz + scene.blend.
+
+    Uses LJ backend so the test is fast (no UMA). Only checks that Blender
+    successfully produces a non-empty .blend file. Chemistry accuracy is
+    verified by the slow UMA tests (test_neb_*).
+    """
+    if shutil.which(BLENDER) is None:
+        pytest.skip(f"Blender executable not found: {BLENDER}")
+
+    from reactx import cli
+    out = tmp_path / rxn_name
+    rc = cli.main([
+        "run", str(examples_dir / f"{rxn_name}.rxn"), "-o", str(out),
+        "--backend", "lj", "--images", "5", "--fmax", "0.5", "--max-steps", "10",
+    ])
+    assert rc == 0, f"reactx CLI failed for {rxn_name}"
+    xyz = out / "trajectory.xyz"
+    assert xyz.exists()
+
+    blend = out / "scene.blend"
+    script = Path(__file__).resolve().parent.parent / "blender" / "render.py"
+    result = subprocess.run(
+        [BLENDER, "--background", "--python", str(script),
+         "--", str(xyz), str(blend)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"blender failed for {rxn_name}: {result.stderr}"
+    )
+    assert blend.exists() and blend.stat().st_size > 0
