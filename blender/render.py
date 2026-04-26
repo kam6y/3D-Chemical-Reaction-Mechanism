@@ -89,7 +89,7 @@ COVALENT_RADII_ANGSTROM: dict[str, float] = {
 }
 
 # A pair (i, j) is bonded if dist <= (rcov_i + rcov_j) * BOND_TOLERANCE.
-BOND_TOLERANCE = 1.05
+BOND_TOLERANCE = 1.07
 # Skin modifier cross-section radius for bond cylinders (A).
 BOND_RADIUS = 0.10
 
@@ -252,12 +252,17 @@ def _build_bonds(xyz: Path) -> None:
 
     for bond_idx, (i, j) in enumerate(bond_pairs):
         bpy.ops.mesh.primitive_cylinder_add(
-            vertices=16, radius=BOND_RADIUS, depth=2.0,
+            vertices=32, radius=BOND_RADIUS, depth=2.0,
             enter_editmode=False, location=(0, 0, 0),
         )
         cyl = bpy.context.object
         cyl.name = f"Bond_{bond_idx}_{i}_{j}"
         cyl.data.materials.append(bond_mat)
+        # Smooth shading on the side faces gives a rounded silhouette without
+        # adding geometry. Top/bottom caps (normal aligned with Z) stay flat
+        # so the cap-side seam keeps a clean edge.
+        for poly in cyl.data.polygons:
+            poly.use_smooth = abs(poly.normal.z) < 0.5
 
         for k, frame in enumerate(frames):
             scene.frame_current = k
