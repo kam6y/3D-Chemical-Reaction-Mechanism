@@ -35,6 +35,14 @@ DoD は以下の手順で確認する:
 2. `out/scene.blend` を Blender GUI で開き、再生して **F⁻ が CH₃Cl の背面から接近 → C 中心の sp³ 反転 → Cl⁻ が脱離** する Walden 反転シーケンスが視認できることを確認する。
 3. `pytest -m slow` で `test_neb_sn2` を実行し、TS の C–F–Cl 角度が一定値以上であることを確認する。
 
+## レンダリング: 原子球サイズ
+
+`blender/render.py` は `atomic-blender-pdb-xyz` アドオンで XYZ を読み込んだ後、各元素ボールの半径を **Alvarez (2013) *Dalton Trans.* 42, 8617 の van der Waals 半径 × 0.25** で上書きする (ball-and-stick 風スケール)。比率は実際の vdW 半径比と一致する。
+
+- 環境変数 `REACTX_VDW_SCALE` で全体倍率を上書き可 (例: `REACTX_VDW_SCALE=0.4 reactx run ...` で CPK 寄り)
+- 対応元素は UMA `omol` タスクの訓練範囲 = OMol25 = **Z=1 (H) 〜 Z=83 (Bi)** の連続 83 元素。Po (84) 以降、Fr/Ra および全アクチノイドは UMA 訓練外 → 入力 XYZ に出現しない想定。万一現れた場合はリスケール対象外 (アドオン既定半径のまま) で警告ログを出す。
+- 詳細仕様: `docs/superpowers/specs/2026-04-26-vdw-radii-design.md`
+
 ## Phase 0 の既知の制約
 
 - **TS の線形性閾値が 170° → 120° に緩和**。`uma-m-1p1` (omol task) では SN2 の TS が安定して 170° (ほぼ線形) に到達しないため、Phase 0 では背面攻撃の方向性確認に留める。詳細は `docs/superpowers/specs/2026-04-20-reactx-phase-0-design.md` §9。Phase 1 でモデル/最適化チューニング後に再引き締め予定。
