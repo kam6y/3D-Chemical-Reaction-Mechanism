@@ -13,9 +13,21 @@ from reactx.align import align_product_to_reactant
 from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
+from reactx.reaction_topology import BondChanges, compute_bond_changes
 from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
 
 log = logging.getLogger("reactx")
+
+
+def recommend_n_images(bond_changes: BondChanges) -> int:
+    """Default NEB image count from bond-change complexity.
+
+    Formula: max(11, 9 + 2 * n_broken + 2 * n_formed). Override with --images.
+    """
+    return max(
+        11,
+        9 + 2 * len(bond_changes.broken) + 2 * len(bond_changes.formed),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
