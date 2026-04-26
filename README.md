@@ -35,6 +35,46 @@ DoD は以下の手順で確認する:
 2. `out/scene.blend` を Blender GUI で開き、再生して **F⁻ が CH₃Cl の背面から接近 → C 中心の sp³ 反転 → Cl⁻ が脱離** する Walden 反転シーケンスが視認できることを確認する。
 3. `pytest -m slow` で `test_neb_sn2` を実行し、TS の C–F–Cl 角度が一定値以上であることを確認する。
 
+## Phase 1: 多反応対応
+
+Phase 1 では `.rxn` の atom mapping から **bond change (broken / formed)** を抽出し、それに応じた幾何配置で fragment を初期化する generic engine を導入した。これにより SN2 以外の極性二分子反応 (および解離型 elementary step) を反応分類なしで処理できる。
+
+### 対応反応
+
+| 反応 | 例 | example |
+|---|---|---|
+| SN2 | CH₃Cl + F⁻ → CH₃F + Cl⁻ | `examples/sn2.rxn` |
+| Heterolytic dissociation (SN1/E1 step 1) | (CH₃)₃C–Br → (CH₃)₃C⁺ + Br⁻ | `examples/sn1_step1.rxn` |
+| E2 elimination | CH₃CH₂Br + OH⁻ → CH₂=CH₂ + H₂O + Br⁻ | `examples/e2.rxn` |
+| β-H elimination from cation (E1 step 2) | (CH₃)₃C⁺ → (CH₃)₂C=CH₂ + H⁺ | `examples/e1_step2.rxn` |
+| Proton transfer | HCl + NH₃ → Cl⁻ + NH₄⁺ | `examples/proton_transfer.rxn` |
+
+### 使用方法
+
+```bash
+reactx run examples/proton_transfer.rxn -o out/proton/ --backend uma --render
+reactx run examples/e2.rxn               -o out/e2/     --backend uma --render
+reactx run examples/sn1_step1.rxn        -o out/sn1/    --backend uma --render
+reactx run examples/e1_step2.rxn         -o out/e1/     --backend uma --render
+```
+
+`--images` を省略すると bond change の数から自動計算される: `max(11, 9 + 2 * n_broken + 2 * n_formed)`。SN2 → 13、解離 → 11、E2 → 17。
+
+### 慣習: multi-step 反応の表現
+
+NEB は 1 つの elementary step (= 1 saddle point) を扱う前提のため、SN1 や E1 のような multi-step 反応はステップごとに別 `.rxn` ファイルとして表現する。例えば SN1 全体は `sn1_step1.rxn` (heterolytic dissociation) と既存 `sn2.rxn` 相当の置換ステップを別個に走らせる。
+
+migrating H (proton transfer の H、E2 の β-H、E1 step 2 の β-H 等) は両側で **explicit な map number 付き H** として `.rxn` に書く必要がある。Implicit Hs は AddHs で位置的に対応付けされる。
+
+### Phase 1 の制約
+
+- **反応タイプの自動分類は行わない**: `.rxn` の bond change のみで配置を決める (Approach 2)。
+- ラジカル / open-shell 反応は対象外 (UMA omol task は closed-shell 前提)。
+- aromatic 結合の bond change は `NotImplementedError` で停止する。
+
+詳細仕様: `docs/superpowers/specs/2026-04-26-reactx-phase-1-design.md`
+実装計画: `docs/superpowers/plans/2026-04-26-reactx-phase-1-implementation.md`
+
 ## レンダリング: 原子球サイズと結合棒
 
 `blender/render.py` は `atomic-blender-pdb-xyz` アドオンで XYZ を読み込んだ後、`render.py` 側で 2 つの後処理を行う:
