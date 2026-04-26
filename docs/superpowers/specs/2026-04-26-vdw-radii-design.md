@@ -10,23 +10,22 @@
 
 化学的な視認性を高めるため、球サイズの **相対比** を実際の vdW 半径比へ揃える。これにより、たとえば F⁻ や Cl⁻ といった求核種・脱離基が対応する周辺原子と比べて適切な大きさで表示される。
 
-UMA (`uma-m-1p1`) の分子タスク (`omol`) は OMol25 データセットで訓練されており、訓練元素は明示された 83 元素のみ (最大 Z=83, Bi)。アクチノイドは含まれない。アーキテクチャ上の embedding は `max_num_elements=100` だが訓練外元素の精度は保証されないため、本仕様は OMol25 が含む 83 元素を一級対応とし、追加で Z=84〜92 もテーブルに載せて表示時のフォールバックを安全側に倒す (UMA 出力が無い元素を XYZ に書き込むことはそもそも無いが、ユーザーが手書きの XYZ をレンダする場合への保険)。
+UMA (`uma-m-1p1`) の分子タスク (`omol`) は OMol25 データセットで訓練されており、訓練元素は **Z=1 (H) から Z=83 (Bi) までの連続した 83 元素** (アクチノイドおよび Po, At, Rn, Fr, Ra は対象外)。本仕様の vdW テーブルもこれと同じ範囲 Z=1〜83 を一対一でカバーする。
 
-OMol25 が含む 83 元素 (出典: ColabFit OMol25 Family ページ):
+OMol25 が含む 83 元素 (出典: ColabFit OMol25 Family ページ; Z=1〜83 と一致することを確認済):
 ```
 Ag Al Ar As Au B Ba Be Bi Br C Ca Cd Ce Cl Co Cr Cs Cu Dy Er Eu F Fe Ga
 Gd Ge H He Hf Hg Ho I In Ir K Kr La Li Lu Mg Mn Mo N Na Nb Nd Ne Ni O
 Os P Pb Pd Pm Pr Pt Rb Re Rh Ru S Sb Sc Se Si Sm Sn Sr Ta Tb Tc Te Ti
 Tl Tm V W Xe Y Yb Zn Zr
 ```
-含まれないもの: Po, At, Rn, Fr, Ra および全アクチノイド。
 
 ## 2. 設計上の判断
 
 | 項目 | 採用案 | 検討した代替 | 採用理由 |
 |---|---|---|---|
 | 絶対サイズ | vdW 半径 × 0.25 (ball-and-stick) | C を現状 0.77 Å に固定 / vdW そのまま (CPK) | 結合棒が見え続けて Walden 反転が視認しやすく、現状の見た目とほぼ同スケール |
-| データソース | Alvarez (2013) *Dalton Trans.* 42, 8617 (Z=1-96) | Bondi (1964) + Mantina (2009) 拡張 / RDKit `GetRvdw` | 単一論文で Z=92 まで一貫した方法論。継ぎ接ぎ不要 |
+| データソース | Alvarez (2013) *Dalton Trans.* 42, 8617 (Z=1-96) | Bondi (1964) + Mantina (2009) 拡張 / RDKit `GetRvdw` | 単一論文で UMA 対応上限 Z=83 まで一貫した方法論。継ぎ接ぎ不要 |
 | 差し替え方式 | Import 後の post-processing | アドオンの `datafile` 引数 / `ELEMENTS` の monkey-patch | コード量最少、アドオンの内部 API に依存しない、未知元素を素直にスキップできる |
 | 設定方式 | 環境変数 `REACTX_VDW_SCALE` | CLI フラグ / モジュール分割 | Phase 0 では Blender 側だけで完結させ、CLI 配管に手を入れない |
 
@@ -40,17 +39,17 @@ Tl Tm V W Xe Y Yb Zn Zr
 ### 3.2 モジュール定数
 
 ```python
-# Alvarez (2013) Dalton Trans. 42, 8617. Values in Å, Z=1..92.
+# Alvarez (2013) Dalton Trans. 42, 8617. Values in Å, Z=1..83 (OMol25 coverage).
 VDW_RADII_ANGSTROM: dict[str, float] = {
-    "H": 1.20, "He": 1.43, "Li": 2.12, ... "U": 1.86,
+    "H": 1.20, "He": 1.43, "Li": 2.12, ... "Bi": 2.07,
 }
 DEFAULT_VDW_SCALE = 0.25
 ```
 
 - キーは元素記号 (大文字始まり)
-- Z=1〜92 全て埋める。OMol25 が訓練対応するのは Bi (Z=83) までだが、テーブルは Z=92 までを Alvarez 2013 から拾って入れておく (将来 UMA が拡張された場合や手書き XYZ をレンダする場合への保険)
+- Z=1〜83 を **欠落なく** 埋める。OMol25 = Z=1〜83 の連続レンジと一致するため、辞書サイズもちょうど 83 エントリ
 - Alvarez 2013 Table 9 (および Z=96 までの集計表) は対象元素全てに値を割り当てているので欠損補完は不要
-- アドオン側のオブジェクト名は元素フルネーム (`"Hydrogen"`, `"Carbon"`, ...) なので、フルネーム → 記号の逆引き辞書 `_ELEMENT_NAME_TO_SYMBOL` を併設する
+- アドオン側のオブジェクト名は元素フルネーム (`"Hydrogen"`, `"Carbon"`, ...) なので、フルネーム → 記号の逆引き辞書 `_ELEMENT_NAME_TO_SYMBOL` を併設する (こちらも 83 エントリ)
 
 ### 3.3 スケール解決
 
@@ -105,11 +104,10 @@ def main(argv: list[str]) -> int:
 
 | ケース | 期待挙動 |
 |---|---|
-| Z=1〜92 で `VDW_RADII_ANGSTROM` にエントリあり | `obj.scale` を `radius * scale` で完全上書き |
+| Z=1〜83 で `VDW_RADII_ANGSTROM` にエントリあり (OMol25 訓練対応) | `obj.scale` を `radius * scale` で完全上書き |
 | アドオン由来のオブジェクト名が `Vacancy_cube` (vacancy) | suffix が `_cube` なのでマッチせずスキップ |
 | アドオン由来の `Default_ball` / `Stick_ball` | 元素記号への逆引きで失敗 → スキップ + ログ |
-| Z>92 (Np〜Lr 等) | 逆引きで失敗 → スキップ + ログ。アドオン既定の半径がそのまま使われる |
-| Z=84〜92 (OMol25 範囲外だがテーブル収録済) | テーブルから引いて vdW × scale を適用。UMA 訓練外元素なので分子配置の方は別途注意が必要 (本仕様の責務外) |
+| Z>83 (Po, At, Rn, Fr, Ra および全アクチノイド) | 逆引きで失敗 → スキップ + ログ。アドオン既定の半径がそのまま使われる。UMA 訓練範囲外なのでそもそも入力 XYZ に出現しない想定 |
 | `REACTX_VDW_SCALE` 未設定 | `DEFAULT_VDW_SCALE = 0.25` を使用 |
 | `REACTX_VDW_SCALE=0.4` | `0.4` を使用 |
 | `REACTX_VDW_SCALE=foo` | デフォルトにフォールバック + 警告ログ |
@@ -138,4 +136,6 @@ def main(argv: list[str]) -> int:
 
 ## 7. ドキュメント更新
 
-- `README.md` の「Phase 0 の既知の制約」直前に短い節を追加し、「球半径は Alvarez 2013 vdW × 0.25。`REACTX_VDW_SCALE` で上書き可」の旨を 2-3 行で記す
+- `README.md` の「Phase 0 の既知の制約」直前に短い節を追加し、以下を記載:
+  - 球半径は Alvarez 2013 の vdW 半径 × 0.25 (`REACTX_VDW_SCALE` で上書き可能)
+  - 対応元素は OMol25 訓練対応の **Z=1〜83 (H〜Bi)**。Po/At/Rn/Fr/Ra および全アクチノイドは UMA 訓練外
