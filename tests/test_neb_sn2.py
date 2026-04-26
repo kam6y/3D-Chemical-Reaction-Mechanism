@@ -55,21 +55,30 @@ def test_sn2_neb_ts_has_walden_inversion(tmp_path: Path):
     pytest.importorskip("fairchem.core")
     from rdkit import Chem
 
-    from reactx.align import align_product_to_reactant
+    from reactx.align import align_product_to_reactant, build_swappable_h_groups
     from reactx.embed3d import embed_mol_to_atoms
-    from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
+    from reactx.reaction_topology import compute_bond_changes, expanded_atom_mapping
+    from reactx.rxn_parser import parse_rxn
 
     rxn = Path(__file__).parent.parent / "examples" / "sn2.rxn"
     r_mol, p_mol, mapping = parse_rxn(rxn)
     r_mol_h = Chem.AddHs(r_mol)
     p_mol_h = Chem.AddHs(p_mol)
-    rH = heavy_to_hydrogen_groups(r_mol_h)
-    pH = heavy_to_hydrogen_groups(p_mol_h)
+    bc = compute_bond_changes(r_mol_h, p_mol_h, mapping)
+    expanded = expanded_atom_mapping(r_mol_h, p_mol_h, mapping)
 
     calc = make_calculator("uma")
-    reactant = embed_mol_to_atoms(r_mol, calculator=calc, seed=1)
-    product_raw = embed_mol_to_atoms(p_mol, calculator=calc, seed=2)
-    product = align_product_to_reactant(reactant, product_raw, mapping, rH, pH)
+    reactant = embed_mol_to_atoms(
+        r_mol, calculator=calc, seed=1, bond_changes=bc, side="reactant",
+    )
+    product_raw = embed_mol_to_atoms(
+        p_mol, calculator=calc, seed=2, bond_changes=bc, side="product",
+        index_translation=expanded,
+    )
+    product = align_product_to_reactant(
+        reactant, product_raw, expanded,
+        swappable_h_groups=build_swappable_h_groups(r_mol_h),
+    )
 
     out = tmp_path / "traj.xyz"
     meta = run_neb(
