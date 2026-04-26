@@ -170,32 +170,35 @@ def _compute_ideal_position(
     side: str,
     distance: float,
 ) -> np.ndarray:
-    p_a = positions[a]
-    if side == "reactant":
-        # If atom a *also* participates in a broken bond with a partner inside
-        # the primary fragment, place b on the backside of that (a, partner)
-        # axis. This reproduces Phase 0 SN2 backside-attack geometry.
-        for broken in bond_changes.broken:
-            partner: int | None = None
-            if broken.a == a and broken.b in primary_set:
-                partner = broken.b
-            elif broken.b == a and broken.a in primary_set:
-                partner = broken.a
-            if partner is not None:
-                direction = p_a - positions[partner]
-                norm = float(np.linalg.norm(direction))
-                if norm < 1e-6:
-                    break
-                return p_a + direction / norm * distance
-        return _away_from_centroid(p_a, positions, primary_set, distance)
+    """Find anchor atom b's ideal position relative to primary atom a.
 
-    # side == "product": preserve embedded direction p_b -> p_a, scale to d_dissoc
-    direction = positions[b] - p_a
-    norm = float(np.linalg.norm(direction))
-    if norm < 1e-6:
-        direction = np.array([1.0, 0.0, 0.0])
-        norm = 1.0
-    return p_a + direction / norm * distance
+    Reactant side: b is the "incoming" atom (formed bond endpoint outside
+    primary). If a also has a broken bond to a partner in primary, place b on
+    the backside of (a, partner) — reproduces SN2 backside attack.
+
+    Product side: b is the "leaving" atom (broken bond endpoint outside
+    primary). If a also has a formed bond to a partner in primary, place b on
+    the backside of (a, partner) — reproduces Walden-inverted product (e.g.
+    Cl⁻ opposite from the new C–F).
+
+    Without a partner-in-primary anchor, fall back to a direction that
+    pushes b away from the primary fragment centroid.
+    """
+    p_a = positions[a]
+    candidate_changes = bond_changes.broken if side == "reactant" else bond_changes.formed
+    for change in candidate_changes:
+        partner: int | None = None
+        if change.a == a and change.b in primary_set:
+            partner = change.b
+        elif change.b == a and change.a in primary_set:
+            partner = change.a
+        if partner is not None:
+            direction = p_a - positions[partner]
+            norm = float(np.linalg.norm(direction))
+            if norm < 1e-6:
+                break
+            return p_a + direction / norm * distance
+    return _away_from_centroid(p_a, positions, primary_set, distance)
 
 
 def _away_from_centroid(
