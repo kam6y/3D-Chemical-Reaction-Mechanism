@@ -26,9 +26,10 @@ def align_product_to_reactant(
         )
 
     permutation: list[int] = [-1] * len(reactant)
+    reactant_symbols = reactant.get_chemical_symbols()
 
     for r_idx in range(len(reactant)):
-        sym_r = reactant.get_chemical_symbols()[r_idx]
+        sym_r = reactant_symbols[r_idx]
         if sym_r == "H":
             continue
         if r_idx not in heavy_mapping:

@@ -20,7 +20,7 @@ def test_run_neb_with_lj_produces_xyz_with_expected_images(tmp_path: Path):
     meta = run_neb(
         reactant=reactant,
         product=product,
-        calculator_factory=lambda: make_calculator("lj"),
+        calculator=make_calculator("lj"),
         n_images=5,
         output_xyz=out,
         fmax=0.2,
@@ -40,7 +40,7 @@ def test_run_neb_pads_endpoints(tmp_path: Path):
     out = tmp_path / "traj.xyz"
     run_neb(
         reactant=reactant, product=product,
-        calculator_factory=lambda: make_calculator("lj"),
+        calculator=make_calculator("lj"),
         n_images=5, output_xyz=out, fmax=0.5, max_steps=10,
         pad_frames=3,
     )
@@ -73,7 +73,7 @@ def test_sn2_neb_ts_has_walden_inversion(tmp_path: Path):
     out = tmp_path / "traj.xyz"
     meta = run_neb(
         reactant=reactant, product=product,
-        calculator_factory=lambda: make_calculator("uma"),
+        calculator=calc,
         n_images=11, output_xyz=out, fmax=0.05, max_steps=200, pad_frames=0,
     )
     frames = read(str(out), index=":")
@@ -103,6 +103,6 @@ def test_run_neb_rejects_too_few_images(tmp_path: Path):
     with pytest.raises(ValueError, match="n_images must be >= 3"):
         run_neb(
             reactant=reactant, product=product,
-            calculator_factory=lambda: make_calculator("lj"),
+            calculator=make_calculator("lj"),
             n_images=2, output_xyz=out, fmax=0.5, max_steps=10,
         )

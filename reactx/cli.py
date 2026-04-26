@@ -40,9 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.cmd == "run":
-        return _cmd_run(args)
-    return 2
+    return _cmd_run(args)
 
 
 def _configure_reactx_logging() -> None:
@@ -82,24 +80,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
     r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
 
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
-    # Single calculator reused across the entire pipeline (embed × 2 + NEB).
-    # UMA models are ~11 GB each; constructing one per stage would peak at 3×
-    # residency right when NEB allocates its own and OOM on consumer hardware.
+    # Reuse one calculator across embed+NEB; UMA models (~11 GB) OOM if rebuilt.
     calc = make_calculator(args.backend, **model_kwargs)
     reactant = embed_mol_to_atoms(r_mol, calculator=calc, seed=1)
     product_raw = embed_mol_to_atoms(p_mol, calculator=calc, seed=2)
 
-    r_mol_h = Chem.AddHs(r_mol)
-    p_mol_h = Chem.AddHs(p_mol)
-    rH = heavy_to_hydrogen_groups(r_mol_h)
-    pH = heavy_to_hydrogen_groups(p_mol_h)
+    rH = heavy_to_hydrogen_groups(Chem.AddHs(r_mol))
+    pH = heavy_to_hydrogen_groups(Chem.AddHs(p_mol))
     product = align_product_to_reactant(reactant, product_raw, mapping, rH, pH)
 
     xyz = args.output / "trajectory.xyz"
     meta = run_neb(
         reactant=reactant,
         product=product,
-        calculator_factory=lambda: calc,
+        calculator=calc,
         n_images=args.images,
         output_xyz=xyz,
         fmax=args.fmax,

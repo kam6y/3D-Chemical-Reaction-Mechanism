@@ -89,7 +89,7 @@ COVALENT_RADII_ANGSTROM: dict[str, float] = {
 }
 
 # A pair (i, j) is bonded if dist <= (rcov_i + rcov_j) * BOND_TOLERANCE.
-BOND_TOLERANCE = 1.07
+BOND_TOLERANCE = 1.1
 # Skin modifier cross-section radius for bond cylinders (A).
 BOND_RADIUS = 0.10
 
@@ -228,13 +228,12 @@ def _make_bond_material():
     return mat
 
 
-def _build_bonds(xyz: Path) -> None:
+def _build_bonds(frames: list[_AtomFrame]) -> None:
     """For each candidate bond (union over all frames), create a cylinder whose
     transform tracks the two atoms via per-frame keyframes, and whose visibility
     flips on/off per frame based on the covalent-distance criterion. This means
     bonds form and break dynamically: at any given trajectory frame, only pairs
     that satisfy the criterion in that frame are visible."""
-    frames = _center_frames(_parse_xyz_trajectory(xyz))
     if not frames:
         print("[reactx] bonds: no frames parsed")
         return
@@ -345,17 +344,7 @@ def _add_camera_looking_at_origin() -> None:
     bpy.context.scene.camera = bpy.context.object
 
 
-def _count_xyz_frames(xyz: Path) -> int:
-    """Number of frames in an extxyz trajectory (each frame = n_atoms + 2 lines)."""
-    lines = xyz.read_text().splitlines()
-    if not lines:
-        return 0
-    n_atoms = int(lines[0].strip())
-    return len(lines) // (n_atoms + 2)
-
-
-def _set_timeline_to_trajectory(xyz: Path) -> None:
-    n_frames = _count_xyz_frames(xyz)
+def _set_timeline_to_trajectory(n_frames: int) -> None:
     scene = bpy.context.scene
     scene.frame_start = 1
     scene.frame_end = max(1, n_frames)
@@ -366,10 +355,11 @@ def main(argv: list[str]) -> int:
     _reset_scene()
     _import_trajectory(xyz)
     _rescale_atoms_to_vdw()
-    _build_bonds(xyz)
+    frames = _center_frames(_parse_xyz_trajectory(xyz))
+    _build_bonds(frames)
     _add_three_point_lighting()
     _add_camera_looking_at_origin()
-    _set_timeline_to_trajectory(xyz)
+    _set_timeline_to_trajectory(len(frames))
     out.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(out))
     print(f"Saved: {out}")

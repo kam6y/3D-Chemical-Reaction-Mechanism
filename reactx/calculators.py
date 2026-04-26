@@ -44,10 +44,7 @@ def _build_uma_calculator(
         ) from exc
 
     if device is None:
-        if torch.cuda.is_available():
-            device = "cuda"
-        else:
-            device = "cpu"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
     log.info("UMA calculator: model=%s, device=%s", model_name, device)
     return FAIRChemCalculator.from_model_checkpoint(
