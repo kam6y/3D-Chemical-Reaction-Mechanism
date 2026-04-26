@@ -42,3 +42,61 @@ def test_sn2_bond_changes(sn2_rxn_path: Path):
     assert changes.broken[0].order_after == 0.0
     assert changes.formed[0].order_before == 0.0
     assert changes.formed[0].order_after == 1.0
+
+
+def test_sn1_step1_bond_changes(sn1_step1_rxn_path: Path):
+    r_mol, p_mol, mapping = parse_rxn(sn1_step1_rxn_path)
+    r_h = Chem.AddHs(r_mol)
+    p_h = Chem.AddHs(p_mol)
+    changes = compute_bond_changes(r_h, p_h, mapping)
+
+    assert len(changes.broken) == 1
+    assert len(changes.formed) == 0
+    assert _pair_syms(changes.broken[0], r_h) == ("Br", "C")
+
+
+def test_proton_transfer_bond_changes(proton_transfer_rxn_path: Path):
+    r_mol, p_mol, mapping = parse_rxn(proton_transfer_rxn_path)
+    r_h = Chem.AddHs(r_mol)
+    p_h = Chem.AddHs(p_mol)
+    changes = compute_bond_changes(r_h, p_h, mapping)
+
+    assert len(changes.broken) == 1
+    assert len(changes.formed) == 1
+    assert _pair_syms(changes.broken[0], r_h) == ("Cl", "H")
+    assert _pair_syms(changes.formed[0], r_h) == ("H", "N")
+
+
+def test_e2_bond_changes(e2_rxn_path: Path):
+    r_mol, p_mol, mapping = parse_rxn(e2_rxn_path)
+    r_h = Chem.AddHs(r_mol)
+    p_h = Chem.AddHs(p_mol)
+    changes = compute_bond_changes(r_h, p_h, mapping)
+
+    assert len(changes.broken) == 2
+    assert len(changes.formed) == 2
+
+    broken_pairs = sorted(_pair_syms(b, r_h) for b in changes.broken)
+    formed_pairs = sorted(_pair_syms(f, r_h) for f in changes.formed)
+    assert ("Br", "C") in broken_pairs
+    assert ("C", "H") in broken_pairs
+    assert ("H", "O") in formed_pairs
+    cc_formed = [f for f in changes.formed if _pair_syms(f, r_h) == ("C", "C")]
+    assert len(cc_formed) == 1
+    assert cc_formed[0].order_before == 1.0
+    assert cc_formed[0].order_after == 2.0
+
+
+def test_e1_step2_bond_changes(e1_step2_rxn_path: Path):
+    r_mol, p_mol, mapping = parse_rxn(e1_step2_rxn_path)
+    r_h = Chem.AddHs(r_mol)
+    p_h = Chem.AddHs(p_mol)
+    changes = compute_bond_changes(r_h, p_h, mapping)
+
+    assert len(changes.broken) == 1
+    assert len(changes.formed) == 1
+    assert _pair_syms(changes.broken[0], r_h) == ("C", "H")
+    formed = changes.formed[0]
+    assert _pair_syms(formed, r_h) == ("C", "C")
+    assert formed.order_before == 1.0
+    assert formed.order_after == 2.0
