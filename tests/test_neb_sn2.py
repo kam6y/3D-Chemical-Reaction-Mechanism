@@ -53,10 +53,11 @@ def test_run_neb_pads_endpoints(tmp_path: Path):
 def test_sn2_neb_ts_has_walden_inversion(tmp_path: Path):
     """Real UMA + SN2 end-to-end. Skipped by default — run with `pytest -m slow`."""
     pytest.importorskip("fairchem.core")
-    from reactx.rxn_parser import parse_rxn, heavy_to_hydrogen_groups
-    from reactx.embed3d import embed_mol_to_atoms
-    from reactx.align import align_product_to_reactant
     from rdkit import Chem
+
+    from reactx.align import align_product_to_reactant
+    from reactx.embed3d import embed_mol_to_atoms
+    from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
 
     rxn = Path(__file__).parent.parent / "examples" / "sn2.rxn"
     r_mol, p_mol, mapping = parse_rxn(rxn)

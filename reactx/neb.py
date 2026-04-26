@@ -17,7 +17,7 @@ except ImportError:  # ASE < 3.23
 log = logging.getLogger(__name__)
 
 
-def _make_neb(images: list[Atoms], *, climb: bool) -> "NEB":
+def _make_neb(images: list[Atoms], *, climb: bool) -> NEB:
     return NEB(
         images, k=1.0, climb=climb,
         allow_shared_calculator=True, method="improvedtangent",

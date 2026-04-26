@@ -12,7 +12,6 @@ import bpy  # type: ignore[import-not-found]
 import mathutils  # type: ignore[import-not-found]
 import numpy as np
 
-
 # Alvarez (2013) "A cartography of the van der Waals territories"
 # Dalton Trans. 42, 8617. Values in Angstrom for Z=1..83 (H..Bi),
 # matching OMol25 / UMA omol task element coverage exactly.
