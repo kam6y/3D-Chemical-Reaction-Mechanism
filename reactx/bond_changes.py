@@ -3,6 +3,7 @@
 Phase Re1 supports only this minimal topology. Generic multi-bond reactions
 (E2, dissociation, etc.) raise NotImplementedError and are deferred to Phase 2.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ class SimpleBondChanges:
     Atom indices are in the **reactant_mol_h** coordinate system
     (Chem.AddHs(reactant_mol).GetAtoms() ordering).
     """
+
     formed: tuple[int, int]
     broken: tuple[int, int]
 
@@ -53,15 +55,12 @@ def compute_simple_bond_changes(
             f"{reactant_mol_h.GetNumAtoms()} vs {product_mol_h.GetNumAtoms()}"
         )
 
-    full_mapping = _build_full_atom_mapping(
-        reactant_mol_h, product_mol_h, heavy_mapping
-    )
+    full_mapping = _build_full_atom_mapping(reactant_mol_h, product_mol_h, heavy_mapping)
     inv_mapping = {p: r for r, p in full_mapping.items()}
 
     r_bonds = _bond_set_in_self_idx(reactant_mol_h)
     p_bonds_in_r_space = {
-        _ordered(inv_mapping[a], inv_mapping[b])
-        for a, b in _bond_set_in_self_idx(product_mol_h)
+        _ordered(inv_mapping[a], inv_mapping[b]) for a, b in _bond_set_in_self_idx(product_mol_h)
     }
 
     formed = sorted(p_bonds_in_r_space - r_bonds)
@@ -77,9 +76,7 @@ def compute_simple_bond_changes(
 
 
 def _bond_set_in_self_idx(mol: Chem.Mol) -> set[tuple[int, int]]:
-    return {
-        _ordered(b.GetBeginAtomIdx(), b.GetEndAtomIdx()) for b in mol.GetBonds()
-    }
+    return {_ordered(b.GetBeginAtomIdx(), b.GetEndAtomIdx()) for b in mol.GetBonds()}
 
 
 def _ordered(a: int, b: int) -> tuple[int, int]:
@@ -108,11 +105,13 @@ def _build_full_atom_mapping(
             continue  # explicit-mapped H itself, not a heavy atom group
 
         r_implicit_hs = [
-            n.GetIdx() for n in r_atom.GetNeighbors()
+            n.GetIdx()
+            for n in r_atom.GetNeighbors()
             if n.GetSymbol() == "H" and n.GetIdx() not in full
         ]
         p_implicit_hs = [
-            n.GetIdx() for n in p_atom.GetNeighbors()
+            n.GetIdx()
+            for n in p_atom.GetNeighbors()
             if n.GetSymbol() == "H" and n.GetIdx() not in used_p
         ]
         if len(r_implicit_hs) != len(p_implicit_hs):
