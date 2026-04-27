@@ -15,7 +15,7 @@ def _atom_index_by_symbol(mol_h: Chem.Mol, sym: str) -> int:
     raise AssertionError(f"no {sym} atom in mol")
 
 
-def test_sn2_bond_changes(tmp_path):
+def test_sn2_bond_changes():
     r_mol, p_mol, mapping = parse_rxn("examples/sn2.rxn")
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
