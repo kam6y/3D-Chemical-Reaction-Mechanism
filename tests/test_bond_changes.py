@@ -1,6 +1,7 @@
 """Unit tests for reactx.bond_changes."""
-from rdkit import Chem
+
 import pytest
+from rdkit import Chem
 
 from reactx.bond_changes import SimpleBondChanges, compute_simple_bond_changes
 from reactx.rxn_parser import parse_rxn
@@ -40,9 +41,7 @@ def test_proton_transfer_bond_changes():
     n_idx = _atom_index_by_symbol(r_h, "N")
     cl_idx = _atom_index_by_symbol(r_h, "Cl")
     # The migrating proton has atom map=1; find it via map number
-    proton_idx = next(
-        a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 1
-    )
+    proton_idx = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 1)
 
     assert set(bc.formed) == {n_idx, proton_idx}
     assert set(bc.broken) == {proton_idx, cl_idx}
