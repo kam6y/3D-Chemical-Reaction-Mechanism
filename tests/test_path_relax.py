@@ -1,6 +1,5 @@
 """Unit tests for reactx.path_relax (no UMA dependency)."""
 import numpy as np
-import pytest
 from ase import Atoms
 from ase.calculators.lj import LennardJones
 from ase.constraints import Hookean
