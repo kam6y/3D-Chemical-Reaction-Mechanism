@@ -10,6 +10,7 @@ from pathlib import Path
 from rdkit import Chem
 
 from reactx.align import align_product_to_reactant
+from reactx.bond_changes import compute_simple_bond_changes
 from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
@@ -117,11 +118,27 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
 
+    r_mol_h = Chem.AddHs(r_mol)
+    p_mol_h = Chem.AddHs(p_mol)
+    bc_r = compute_simple_bond_changes(r_mol_h, p_mol_h, mapping)
+
+    # Derive product-space bond_changes: swap formed/broken roles and remap indices.
+    # In product space the "formed" connection is what was broken in reactant
+    # (the departing group, now to be placed back on the substrate backside),
+    # and the "broken" connection is what was formed (the stable anchor bond).
+    a_form_r, b_form_r = bc_r.formed
+    a_brk_r, b_brk_r = bc_r.broken
+    from reactx.bond_changes import SimpleBondChanges as _SBC
+    bc_p = _SBC(
+        formed=(mapping[a_brk_r], mapping[b_brk_r]),
+        broken=(mapping[a_form_r], mapping[b_form_r]),
+    )
+
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
     # Reuse one calculator across embed+NEB; UMA models (~11 GB) OOM if rebuilt.
     calc = make_calculator(args.backend, **model_kwargs)
-    reactant = embed_mol_to_atoms(r_mol, calculator=calc, seed=1)
-    product_raw = embed_mol_to_atoms(p_mol, calculator=calc, seed=2)
+    reactant = embed_mol_to_atoms(r_mol, calculator=calc, seed=1, bond_changes=bc_r)
+    product_raw = embed_mol_to_atoms(p_mol, calculator=calc, seed=2, bond_changes=bc_p)
 
     rH = heavy_to_hydrogen_groups(Chem.AddHs(r_mol))
     pH = heavy_to_hydrogen_groups(Chem.AddHs(p_mol))
