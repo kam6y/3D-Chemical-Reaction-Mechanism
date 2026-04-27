@@ -39,7 +39,11 @@ def relax_with_restraints(
     frames: list[Atoms] = [_snapshot(atoms)]
     energies: list[float] = [float(atoms.get_potential_energy())]
 
-    opt = FIRE(atoms, logfile=None, dt=0.05, a=0.1)
+    # `maxstep=0.1` Å caps per-step displacement to suppress overshoot when
+    # Hookean restraints pull strongly across long distances; `dtmax=0.2` fs
+    # prevents FIRE from accelerating the integration timestep, which was the
+    # source of spring-like bouncing observed in early SN2 trajectories.
+    opt = FIRE(atoms, logfile=None, dt=0.05, a=0.1, maxstep=0.1, dtmax=0.2)
 
     def _record():
         frames.append(_snapshot(atoms))

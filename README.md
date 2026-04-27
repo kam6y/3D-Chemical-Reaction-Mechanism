@@ -71,8 +71,8 @@ NVIDIA GPU + UMA-m-1p1 で実測 (default `--n-angles 8`):
 
 | Reaction | wall-clock | trials reached_product | best peak energy |
 |---|---|---|---|
-| SN2 (`examples/sn2.rxn`) | ~78 s | 8 / 8 | -16314.95 eV |
-| Proton transfer (`examples/proton_transfer.rxn --r-form 1.05`) | ~131 s | 8 / 8 | -14062.41 eV |
+| SN2 (`examples/sn2.rxn`) | ~67 s | 8 / 8 | -16322.74 eV |
+| Proton transfer (`examples/proton_transfer.rxn --r-form 1.05`) | ~116 s | 8 / 8 | -14072.91 eV |
 
 `--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (DoD 用テスト `test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 

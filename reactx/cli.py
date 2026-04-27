@@ -48,8 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Override formed-bond target distance (Å). "
                           "Default: auto from element pair table.")
     run.add_argument("--r-broken", type=float, default=4.0)
-    run.add_argument("--k-form", type=float, default=5.0)
-    run.add_argument("--k-broken", type=float, default=3.0)
+    run.add_argument("--k-form", type=float, default=1.5)
+    run.add_argument("--k-broken", type=float, default=1.0)
 
     run.add_argument("--max-relax-steps", type=int, default=100)
     run.add_argument("--relax-fmax", type=float, default=0.1)

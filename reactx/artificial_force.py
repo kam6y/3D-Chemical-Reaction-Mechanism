@@ -83,8 +83,8 @@ def build_restraints(
     *,
     r_form: float | None = None,
     r_broken: float = 4.0,
-    k_form: float = 5.0,
-    k_broken: float = 3.0,
+    k_form: float = 1.5,
+    k_broken: float = 1.0,
 ) -> list:
     """Return a list of ASE constraints driving formed bonds together and
     broken bonds apart.

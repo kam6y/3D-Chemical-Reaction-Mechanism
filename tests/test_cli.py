@@ -11,8 +11,8 @@ def test_default_flags_parse():
     assert a.seed == 0
     assert a.r_form is None  # auto-derive from element pair
     assert a.r_broken == 4.0
-    assert a.k_form == 5.0
-    assert a.k_broken == 3.0
+    assert a.k_form == 1.5
+    assert a.k_broken == 1.0
     assert a.max_relax_steps == 100
     assert a.relax_fmax == 0.1
     assert a.traj_stride == 5
