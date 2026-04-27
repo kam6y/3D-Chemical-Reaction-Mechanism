@@ -107,37 +107,55 @@ def test_e2_reactant_places_OH_near_beta_H(e2_rxn_path: Path):
     assert 2.5 <= oh_dist <= 4.5, f"|O-Hβ| = {oh_dist:.2f} Å, expected ~3.5±1.0"
 
 
-def test_sn1_step1_product_separates_Br_from_C(sn1_step1_rxn_path: Path):
-    r_mol, p_mol, mapping = parse_rxn(sn1_step1_rxn_path)
+def test_sn1_reactant_places_water_near_C(sn1_rxn_path: Path):
+    """SN1 hydrolysis: water O approaches Cα backside of Cα-Br in reactant."""
+    r_mol, p_mol, mapping = parse_rxn(sn1_rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
     bc = compute_bond_changes(r_h, p_h, mapping)
-    expanded = expanded_atom_mapping(r_h, p_h, mapping)
-    frag_indices, positions = _embed_for_test(p_h)
+    frag_indices, positions = _embed_for_test(r_h)
 
     placed = place_fragments_generic(
-        p_h,
+        r_h,
         frag_indices,
         positions,
         bc,
-        side="product",
-        index_translation=expanded,
+        side="reactant",
     )
-    syms = [a.GetSymbol() for a in p_h.GetAtoms()]
-    c_central = next(a.GetIdx() for a in p_h.GetAtoms() if a.GetAtomMapNum() == 1)
-    br = syms.index("Br")
-    cbr = float(np.linalg.norm(placed[c_central] - placed[br]))
-    assert 3.0 <= cbr <= 5.0, f"|C-Br| in product = {cbr:.2f} Å, expected ~4.0±1.0"
+    c_central = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 1)
+    o = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 6)
+    co = float(np.linalg.norm(placed[c_central] - placed[o]))
+    assert 2.5 <= co <= 4.5, f"|C-O| reactant = {co:.2f} Å, expected ~3.5±1.0"
 
 
-def test_e1_step2_product_separates_H_from_Cb(e1_step2_rxn_path: Path):
+def test_e1_step2_reactant_places_OH_near_beta_H(e1_step2_rxn_path: Path):
+    """E1 step 2 with OH-: migrating beta-H is captured by OH-."""
+    r_mol, p_mol, mapping = parse_rxn(e1_step2_rxn_path)
+    r_h = Chem.AddHs(r_mol)
+    p_h = Chem.AddHs(p_mol)
+    bc = compute_bond_changes(r_h, p_h, mapping)
+    frag_indices, positions = _embed_for_test(r_h)
+    placed = place_fragments_generic(
+        r_h,
+        frag_indices,
+        positions,
+        bc,
+        side="reactant",
+    )
+    o = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 5)
+    h_beta = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 6)
+    oh_dist = float(np.linalg.norm(placed[o] - placed[h_beta]))
+    assert 2.5 <= oh_dist <= 4.5, f"|O-Hβ| reactant = {oh_dist:.2f} Å, expected ~3.5±1.0"
+
+
+def test_e1_step2_product_separates_H2O_from_alkene(e1_step2_rxn_path: Path):
+    """Product: H2O fragment placed away from isobutene."""
     r_mol, p_mol, mapping = parse_rxn(e1_step2_rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
     bc = compute_bond_changes(r_h, p_h, mapping)
     expanded = expanded_atom_mapping(r_h, p_h, mapping)
     frag_indices, positions = _embed_for_test(p_h)
-
     placed = place_fragments_generic(
         p_h,
         frag_indices,
@@ -146,7 +164,7 @@ def test_e1_step2_product_separates_H_from_Cb(e1_step2_rxn_path: Path):
         side="product",
         index_translation=expanded,
     )
-    h_leaving = next(a.GetIdx() for a in p_h.GetAtoms() if a.GetAtomMapNum() == 5)
+    h_migrated = next(a.GetIdx() for a in p_h.GetAtoms() if a.GetAtomMapNum() == 6)
     cb = next(a.GetIdx() for a in p_h.GetAtoms() if a.GetAtomMapNum() == 2)
-    hcb = float(np.linalg.norm(placed[h_leaving] - placed[cb]))
-    assert 3.0 <= hcb <= 5.0, f"|H-Cβ| in product = {hcb:.2f} Å, expected ~4.0±1.0"
+    hcb = float(np.linalg.norm(placed[h_migrated] - placed[cb]))
+    assert 3.0 <= hcb <= 5.0, f"|H(H2O)-Cβ| in product = {hcb:.2f} Å, expected ~4.0±1.0"

@@ -95,7 +95,7 @@ def test_blender_bonds_detected(tmp_path: Path):
     "rxn_name",
     [
         "sn2",
-        "sn1_step1",
+        "sn1",
         "e2",
         "e1_step2",
         "proton_transfer",

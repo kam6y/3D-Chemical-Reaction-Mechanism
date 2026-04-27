@@ -1,8 +1,10 @@
-"""SN1 step 1 (heterolytic dissociation) end-to-end NEB test."""
+"""SN1 hydrolysis end-to-end NEB test.
+
+Concerted (CH3)3CBr + H2O -> (CH3)3COH + HBr — 2 broken / 2 formed.
+"""
 
 from pathlib import Path
 
-import numpy as np
 import pytest
 from ase.io import read
 from rdkit import Chem
@@ -16,10 +18,10 @@ from reactx.rxn_parser import parse_rxn
 
 
 @pytest.mark.slow
-def test_dissociation_neb_separates_C_and_Br(tmp_path: Path, sn1_step1_rxn_path: Path):
+def test_sn1_hydrolysis_neb(tmp_path: Path, sn1_rxn_path: Path):
     pytest.importorskip("fairchem.core")
 
-    r_mol, p_mol, mapping = parse_rxn(sn1_step1_rxn_path)
+    r_mol, p_mol, mapping = parse_rxn(sn1_rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
     bc = compute_bond_changes(r_h, p_h, mapping)
@@ -49,23 +51,26 @@ def test_dissociation_neb_separates_C_and_Br(tmp_path: Path, sn1_step1_rxn_path:
     )
 
     out = tmp_path / "traj.xyz"
-    meta = run_neb(
+    run_neb(
         reactant=reactant,
         product=product,
         calculator=calc,
-        n_images=11,
+        n_images=15,
         output_xyz=out,
         fmax=0.05,
-        max_steps=200,
+        max_steps=400,
         pad_frames=0,
     )
     frames = read(str(out), index=":")
-    syms = frames[0].get_chemical_symbols()
     c = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 1)
-    br = syms.index("Br")
-    d_start = frames[0].get_distance(c, br)
-    d_end = frames[-1].get_distance(c, br)
-    assert d_start < 2.3, f"reactant C-Br too long: {d_start:.2f}"
-    assert d_end > 3.0, f"product C-Br too short: {d_end:.2f}"
-    energies = np.array(meta["image_energies"])
-    assert energies[-1] > energies[0] - 0.5
+    br = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 2)
+    o = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 6)
+    h_mig = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 8)
+    cbr_r = frames[0].get_distance(c, br)
+    cbr_p = frames[-1].get_distance(c, br)
+    co_r = frames[0].get_distance(c, o)
+    co_p = frames[-1].get_distance(c, o)
+    hbr_p = frames[-1].get_distance(h_mig, br)
+    assert cbr_p > cbr_r * 1.4, f"C-Br should lengthen: {cbr_r:.2f} -> {cbr_p:.2f}"
+    assert co_p < co_r, f"C-O should form: {co_r:.2f} -> {co_p:.2f}"
+    assert hbr_p < 2.0, f"H-Br should form: {hbr_p:.2f} (expected ~1.4)"

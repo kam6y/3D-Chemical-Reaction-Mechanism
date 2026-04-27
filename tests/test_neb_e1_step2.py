@@ -61,11 +61,15 @@ def test_e1_step2_neb_extracts_beta_H(tmp_path: Path, e1_step2_rxn_path: Path):
     frames = read(str(out), index=":")
     c_alpha = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 1)
     c_beta = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 2)
-    h_beta = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 5)
+    o = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 5)
+    h_beta = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 6)
 
     cab_r = frames[0].get_distance(c_alpha, c_beta)
     cab_p = frames[-1].get_distance(c_alpha, c_beta)
     cbh_r = frames[0].get_distance(c_beta, h_beta)
     cbh_p = frames[-1].get_distance(c_beta, h_beta)
-    assert cab_p < cab_r, f"Cα-Cβ should shorten: {cab_r:.2f} -> {cab_p:.2f}"
+    oh_r = frames[0].get_distance(o, h_beta)
+    oh_p = frames[-1].get_distance(o, h_beta)
+    assert cab_p < cab_r, f"Cα-Cβ should shorten (alkene formation): {cab_r:.2f} -> {cab_p:.2f}"
     assert cbh_p > cbh_r * 1.5, f"Cβ-H should break: {cbh_r:.2f} -> {cbh_p:.2f}"
+    assert oh_p < oh_r, f"O-H should form: {oh_r:.2f} -> {oh_p:.2f}"

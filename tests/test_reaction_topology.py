@@ -49,15 +49,28 @@ def test_sn2_bond_changes(sn2_rxn_path: Path):
     assert changes.formed[0].order_after == 1.0
 
 
-def test_sn1_step1_bond_changes(sn1_step1_rxn_path: Path):
-    r_mol, p_mol, mapping = parse_rxn(sn1_step1_rxn_path)
+def test_sn1_bond_changes(sn1_rxn_path: Path):
+    """SN1 hydrolysis (CH3)3CBr + H2O -> (CH3)3COH + HBr.
+
+    Concerted 1-step picture: 2 broken (C-Br, O-H), 2 formed (C-O, H-Br).
+    """
+    r_mol, p_mol, mapping = parse_rxn(sn1_rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
     changes = compute_bond_changes(r_h, p_h, mapping)
 
-    assert len(changes.broken) == 1
-    assert len(changes.formed) == 0
-    assert _pair_syms(changes.broken[0], r_h) == ("Br", "C")
+    assert len(changes.broken) == 2
+    assert len(changes.formed) == 2
+    broken_syms = sorted(_pair_syms(c, r_h) for c in changes.broken)
+    formed_syms = sorted(_pair_syms(c, r_h) for c in changes.formed)
+    assert broken_syms == [("Br", "C"), ("H", "O")] or broken_syms == [
+        ("C", "Br"),
+        ("O", "H"),
+    ]
+    assert formed_syms == [("Br", "H"), ("C", "O")] or formed_syms == [
+        ("C", "O"),
+        ("H", "Br"),
+    ]
 
 
 def test_proton_transfer_bond_changes(proton_transfer_rxn_path: Path):
@@ -93,15 +106,18 @@ def test_e2_bond_changes(e2_rxn_path: Path):
 
 
 def test_e1_step2_bond_changes(e1_step2_rxn_path: Path):
+    """E1 step2 with OH-: deprotonation + Cα=Cβ formation + O-H formation."""
     r_mol, p_mol, mapping = parse_rxn(e1_step2_rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
     changes = compute_bond_changes(r_h, p_h, mapping)
 
+    # Cβ–H broken
     assert len(changes.broken) == 1
-    assert len(changes.formed) == 1
     assert _pair_syms(changes.broken[0], r_h) == ("C", "H")
-    formed = changes.formed[0]
-    assert _pair_syms(formed, r_h) == ("C", "C")
-    assert formed.order_before == 1.0
-    assert formed.order_after == 2.0
+    # Two formed entries: (Cα–Cβ single→double) + (O–H new)
+    assert len(changes.formed) == 2
+    cc = next(c for c in changes.formed if _pair_syms(c, r_h) == ("C", "C"))
+    assert cc.order_before == 1.0 and cc.order_after == 2.0
+    oh = next(c for c in changes.formed if {_pair_syms(c, r_h)} & {("O", "H"), ("H", "O")})
+    assert oh.order_before == 0.0 and oh.order_after == 1.0

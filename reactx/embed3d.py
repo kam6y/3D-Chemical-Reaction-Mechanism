@@ -38,6 +38,8 @@ def embed_mol_to_atoms(
     bond_changes: BondChanges | None = None,
     side: Literal["reactant", "product"] = "reactant",
     index_translation: dict[int, int] | None = None,
+    d_form: float | None = None,
+    d_dissoc: float | None = None,
 ) -> Atoms:
     """Embed a 2D Mol into 3D and return an ase.Atoms with implicit Hs added.
 
@@ -70,13 +72,17 @@ def embed_mol_to_atoms(
 
     if len(frag_indices) > 1:
         bc = bond_changes if bond_changes is not None else BondChanges(broken=[], formed=[])
+        place_kwargs = {"side": side, "index_translation": index_translation}
+        if d_form is not None:
+            place_kwargs["d_form"] = d_form
+        if d_dissoc is not None:
+            place_kwargs["d_dissoc"] = d_dissoc
         positions = place_fragments_generic(
             mol_h,
             frag_indices,
             positions,
             bc,
-            side=side,
-            index_translation=index_translation,
+            **place_kwargs,
         )
 
     symbols = [a.GetSymbol() for a in mol_h.GetAtoms()]

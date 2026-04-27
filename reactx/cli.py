@@ -53,6 +53,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--pad-frames", type=int, default=3)
     run.add_argument(
+        "--d-form",
+        type=float,
+        default=None,
+        help="Encounter distance for forming-bond fragments (default: 3.5 A)",
+    )
+    run.add_argument(
+        "--d-dissoc",
+        type=float,
+        default=None,
+        help="Separation distance for dissociating-bond fragments (default: 4.0 A)",
+    )
+    run.add_argument(
         "--render", action="store_true", help="Also invoke blender/render.py after NEB"
     )
     run.add_argument("--blender-exe", type=str, default="blender")
@@ -160,6 +172,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         seed=1,
         bond_changes=bond_changes,
         side="reactant",
+        d_form=args.d_form,
+        d_dissoc=args.d_dissoc,
     )
     product_raw = embed_mol_to_atoms(
         p_mol,
@@ -168,6 +182,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         bond_changes=bond_changes,
         side="product",
         index_translation=expanded,
+        d_form=args.d_form,
+        d_dissoc=args.d_dissoc,
     )
 
     swappable = build_swappable_h_groups(r_mol_h)
@@ -229,3 +245,7 @@ def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
         log.error("Error: blender exited with code %d", result.returncode)
         return 1
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

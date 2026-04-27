@@ -16,8 +16,8 @@ def sn2_rxn_path(examples_dir: Path) -> Path:
 
 
 @pytest.fixture()
-def sn1_step1_rxn_path(examples_dir: Path) -> Path:
-    return examples_dir / "sn1_step1.rxn"
+def sn1_rxn_path(examples_dir: Path) -> Path:
+    return examples_dir / "sn1.rxn"
 
 
 @pytest.fixture()

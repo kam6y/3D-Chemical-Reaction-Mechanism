@@ -77,8 +77,26 @@ def place_fragments_generic(
             )
             out = _place_naively(out, primary, frag, distance)
             continue
+        anchors = _prefer_heavy_anchors(anchors, mol_h)
         out = _apply_kabsch(out, frag, anchors)
     return out
+
+
+def _prefer_heavy_anchors(
+    anchors: list[tuple[int, np.ndarray]], mol_h: Chem.Mol
+) -> list[tuple[int, np.ndarray]]:
+    """Drop H anchors when at least one heavy anchor exists.
+
+    Migrating Hs and heavy nucleophiles in the same fragment generate
+    contradictory ideal positions (their target separation is far larger than
+    the rigid intra-fragment distance), making 2-anchor Kabsch collapse the
+    fragment near the primary. Single heavy-atom anchor + ETKDG internal
+    geometry recovers a usable initial placement; NEB then finds the saddle.
+    """
+    heavy = [a for a in anchors if mol_h.GetAtomWithIdx(a[0]).GetAtomicNum() > 1]
+    if heavy and len(heavy) < len(anchors):
+        return heavy
+    return anchors
 
 
 def _translate_bond_changes(
