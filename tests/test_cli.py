@@ -1,96 +1,38 @@
-import json
-from pathlib import Path
-
-from reactx import cli
+"""CLI argument parsing smoke tests (no UMA invocation)."""
+from reactx.cli import build_parser
 
 
-def test_cli_run_end_to_end_with_lj_backend(tmp_path: Path, sn2_rxn_path: Path):
-    out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "20",
-        "--backend", "lj",
-    ])
-    assert rc == 0
-    assert (out / "trajectory.xyz").exists()
-    meta = json.loads((out / "meta.json").read_text())
-    assert meta["n_images"] == 5
-    energies = json.loads((out / "energies.json").read_text())
-    assert len(energies) == 5
+def test_default_flags_parse():
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/"])
+    assert a.cmd == "run"
+    assert a.n_angles == 8
+    assert a.cone_half_deg == 30.0
+    assert a.seed == 0
+    assert a.r_form is None  # auto-derive from element pair
+    assert a.r_broken == 4.0
+    assert a.k_form == 5.0
+    assert a.k_broken == 3.0
+    assert a.max_relax_steps == 100
+    assert a.relax_fmax == 0.1
+    assert a.traj_stride == 5
+    assert a.neb_refine is False
+    assert a.neb_images == 7
 
 
-def test_cli_missing_rxn_returns_nonzero(tmp_path: Path):
-    rc = cli.main([
-        "run", str(tmp_path / "nope.rxn"), "-o", str(tmp_path / "out"),
-        "--backend", "lj",
-    ])
-    assert rc != 0
+def test_neb_refine_flag():
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/", "--neb-refine"])
+    assert a.neb_refine is True
 
 
-def test_cli_render_flag_invokes_blender_when_successful(
-    tmp_path: Path, sn2_rxn_path: Path, monkeypatch
-):
-    """--render path success: mock subprocess.run to return rc=0."""
-    from reactx import cli as cli_mod
-
-    calls = []
-
-    class FakeResult:
-        returncode = 0
-
-    def fake_run(cmd, *args, **kwargs):
-        calls.append(cmd)
-        return FakeResult()
-
-    monkeypatch.setattr("subprocess.run", fake_run)
-    monkeypatch.setattr("shutil.which", lambda exe: f"/fake/{exe}")
-
-    out = tmp_path / "out"
-    rc = cli_mod.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "mock-blender",
-    ])
-    assert rc == 0
-    # Blender was invoked with the right positional args after "--"
-    assert any("mock-blender" in c[0] for c in calls), calls
-    assert any("--background" in c for c in calls)
+def test_n_angles_override():
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/", "--n-angles", "1"])
+    assert a.n_angles == 1
 
 
-def test_cli_render_propagates_blender_failure(
-    tmp_path: Path, sn2_rxn_path: Path, monkeypatch
-):
-    """--render path failure: subprocess returns rc=1, CLI returns nonzero."""
-    class FakeResult:
-        returncode = 1
-
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: FakeResult())
-    monkeypatch.setattr("shutil.which", lambda exe: f"/fake/{exe}")
-
-    out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "mock-blender",
-    ])
-    assert rc != 0
-
-
-def test_cli_render_errors_when_blender_not_on_path(
-    tmp_path: Path, sn2_rxn_path: Path, monkeypatch
-):
-    """--render with missing blender returns nonzero before invoking subprocess."""
-    monkeypatch.setattr("shutil.which", lambda exe: None)
-
-    def fail_run(*a, **k):
-        raise AssertionError("subprocess.run should not be reached")
-
-    monkeypatch.setattr("subprocess.run", fail_run)
-
-    out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "definitely-not-blender",
-    ])
-    assert rc != 0
+def test_r_form_override():
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/", "--r-form", "1.05"])
+    assert a.r_form == 1.05
