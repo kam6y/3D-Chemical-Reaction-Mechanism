@@ -139,16 +139,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
     p_h = Chem.AddHs(p_mol)
     bond_changes = compute_simple_bond_changes(r_h, p_h, mapping)
 
-    # bond_changes is reactant-space; for product embedding (neb-refine path) we
-    # need a product-space version. In product, what was "broken" in reactant
-    # (e.g. C-Cl) is what defines substrate cohesion (CH3F now contains C-F as
-    # the formed bond). So we swap formed↔broken roles AND translate indices via
-    # the heavy_mapping (which is reactant_idx -> product_idx).
+    # bond_changes is reactant-space; for product embedding (neb-refine path)
+    # we feed embed3d a product-space SimpleBondChanges constructed by
+    # swapping roles + remapping indices. embed3d identifies the substrate as
+    # the fragment containing both atoms of `broken`, so for product we set
+    # `broken` = the reactant-formed bond (e.g. C-F in CH3F), which keeps the
+    # substrate fragment correctly grouped. `formed` then defines where the
+    # nucleophile-side fragment (Cl- in product) is placed via backside.
     a_form_r, b_form_r = bond_changes.formed
     a_brk_r, b_brk_r = bond_changes.broken
     bond_changes_product = SimpleBondChanges(
-        formed=(mapping[a_brk_r], mapping[b_brk_r]),   # was-broken -> now substrate-defining bond
-        broken=(mapping[a_form_r], mapping[b_form_r]),  # was-formed -> now broken from substrate
+        formed=(mapping[a_brk_r], mapping[b_brk_r]),    # nucleophile-fragment placement direction
+        broken=(mapping[a_form_r], mapping[b_form_r]),  # substrate-cohesion bond (intact in product)
     )
 
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}

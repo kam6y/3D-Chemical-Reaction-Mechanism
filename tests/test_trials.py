@@ -1,7 +1,6 @@
 """Unit tests for reactx.trials."""
 
 import numpy as np
-import pytest
 
 from reactx.trials import sample_attack_rotations
 
