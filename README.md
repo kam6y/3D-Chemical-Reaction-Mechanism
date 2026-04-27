@@ -65,11 +65,18 @@ DoD は以下の手順で確認する:
 - ラジカル / open-shell / 溶媒効果は対象外
 - 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md`
 
-## Wall-clock (SN2 default)
+## Wall-clock (実測)
 
-SN2 reaction with default settings (--n-angles 8) on a typical dev GPU:
-- Phase Re1 multi-angle pipeline: TBD (run `pytest -m slow tests/test_wallclock_sn2.py -s` to measure)
-- Phase 0 NEB baseline (legacy): N/A on this branch (use `git checkout phase-0-spike` to compare)
+NVIDIA GPU + UMA-m-1p1 で実測 (default `--n-angles 8`):
+
+| Reaction | wall-clock | trials reached_product | best peak energy |
+|---|---|---|---|
+| SN2 (`examples/sn2.rxn`) | ~78 s | 8 / 8 | -16314.95 eV |
+| Proton transfer (`examples/proton_transfer.rxn --r-form 1.05`) | ~131 s | 8 / 8 | -14062.41 eV |
+
+`--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (DoD 用テスト `test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
+
+各実行の trial 全件スコアと wall_clock_seconds は `out/<rxn>/meta.json` に残る。
 
 ## テスト
 
