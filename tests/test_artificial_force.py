@@ -1,13 +1,11 @@
 """Unit tests for reactx.artificial_force."""
 import numpy as np
-import pytest
 from ase import Atoms
 from ase.calculators.calculator import Calculator
 from ase.calculators.lj import LennardJones
 
 from reactx.artificial_force import (
     DEFAULT_R_FORM,
-    PullApart,
     build_restraints,
     lookup_r_form,
 )

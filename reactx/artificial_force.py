@@ -95,10 +95,7 @@ def build_restraints(
     syms = atoms.get_chemical_symbols()
     constraints: list = []
     for a, b in formed:
-        if r_form is None:
-            rt = lookup_r_form(syms[a], syms[b])
-        else:
-            rt = float(r_form)
+        rt = lookup_r_form(syms[a], syms[b]) if r_form is None else float(r_form)
         constraints.append(Hookean(a1=a, a2=b, rt=rt, k=k_form))
     for a, b in broken:
         constraints.append(PullApart(a1=a, a2=b, k=k_broken, rt=r_broken))
