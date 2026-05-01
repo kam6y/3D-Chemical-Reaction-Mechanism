@@ -19,6 +19,7 @@ from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
 from reactx.path_relax import relax_with_restraints
+from reactx.presets import get_preset
 from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
 from reactx.scoring import TrialResult, reached_product, score_trials
 from reactx.trials import sample_attack_rotations
@@ -127,6 +128,40 @@ def _check_hf_auth() -> int:
         )
         return 1
     return 0
+
+
+def _resolve_effective_params(
+    args, syms: list[str], formed_pair: tuple[int, int],
+) -> dict:
+    """Merge preset + individual-flag overrides into a flat dict.
+
+    Resolution order for each scalar:
+        individual flag (not None) > preset value > (r_form only) element table
+
+    Returns keys: reaction_type, k_form, k_broken, r_broken, max_relax_steps, r_form.
+    """
+    preset = get_preset(args.reaction_type)
+    k_form = preset.k_form if args.k_form is None else float(args.k_form)
+    k_broken = preset.k_broken if args.k_broken is None else float(args.k_broken)
+    r_broken = preset.r_broken if args.r_broken is None else float(args.r_broken)
+    max_relax_steps = (
+        preset.max_relax_steps if args.max_relax_steps is None
+        else int(args.max_relax_steps)
+    )
+    if args.r_form is not None:
+        r_form = float(args.r_form)
+    elif preset.r_form is not None:
+        r_form = float(preset.r_form)
+    else:
+        r_form = lookup_r_form(syms[formed_pair[0]], syms[formed_pair[1]])
+    return {
+        "reaction_type": preset.name,
+        "k_form": k_form,
+        "k_broken": k_broken,
+        "r_broken": r_broken,
+        "max_relax_steps": max_relax_steps,
+        "r_form": r_form,
+    }
 
 
 def _cmd_run(args: argparse.Namespace) -> int:

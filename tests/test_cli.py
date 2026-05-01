@@ -1,7 +1,7 @@
 """CLI argument parsing smoke tests (no UMA invocation)."""
 import pytest
 
-from reactx.cli import build_parser
+from reactx.cli import _resolve_effective_params, build_parser
 
 
 def test_default_flags_parse():
@@ -60,3 +60,62 @@ def test_reaction_type_unknown_rejected():
             "run", "examples/sn2.rxn", "-o", "out/",
             "--reaction-type", "not_a_preset",
         ])
+
+
+def _make_args(**overrides):
+    """Build argparse Namespace for tests by parsing then overriding."""
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/"])
+    for k, v in overrides.items():
+        setattr(a, k, v)
+    return a
+
+
+def test_resolve_defaults_to_sn2_anion_preset():
+    args = _make_args()
+    syms = ["C", "Cl", "H", "H", "H", "F"]  # formed = (0, 5) -> C-F
+    eff = _resolve_effective_params(args, syms, formed_pair=(0, 5))
+    assert eff["reaction_type"] == "sn2_anion"
+    assert eff["k_form"] == 0.5
+    assert eff["k_broken"] == 1.0
+    assert eff["r_broken"] == 4.0
+    assert eff["max_relax_steps"] == 100
+    # sn2_anion has no r_form override -> element-table lookup C-F = 1.39
+    assert eff["r_form"] == pytest.approx(1.39)
+
+
+def test_resolve_menshutkin_preset():
+    args = _make_args(reaction_type="menshutkin")
+    syms = ["N", "C", "Cl", "H", "H", "H", "H", "H", "H"]
+    eff = _resolve_effective_params(args, syms, formed_pair=(0, 1))  # N-C
+    assert eff["reaction_type"] == "menshutkin"
+    assert eff["k_form"] == 2.0
+    assert eff["k_broken"] == 2.0
+    assert eff["r_broken"] == 5.0
+    assert eff["max_relax_steps"] == 200
+    # menshutkin r_form = None -> element table N-C = 1.47
+    assert eff["r_form"] == pytest.approx(1.47)
+
+
+def test_resolve_proton_transfer_preset_uses_r_form_1_05():
+    args = _make_args(reaction_type="proton_transfer")
+    syms = ["H", "Cl", "N", "H", "H"]
+    eff = _resolve_effective_params(args, syms, formed_pair=(2, 0))  # N-H
+    assert eff["r_form"] == pytest.approx(1.05)
+
+
+def test_individual_flag_overrides_preset():
+    args = _make_args(reaction_type="menshutkin", k_form=3.5, r_broken=6.0)
+    syms = ["N", "C", "Cl"]
+    eff = _resolve_effective_params(args, syms, formed_pair=(0, 1))
+    assert eff["k_form"] == 3.5  # overridden
+    assert eff["r_broken"] == 6.0  # overridden
+    assert eff["k_broken"] == 2.0  # from preset
+    assert eff["max_relax_steps"] == 200  # from preset
+
+
+def test_r_form_individual_flag_overrides_preset_r_form():
+    args = _make_args(reaction_type="proton_transfer", r_form=1.10)
+    syms = ["H", "Cl", "N"]
+    eff = _resolve_effective_params(args, syms, formed_pair=(2, 0))
+    assert eff["r_form"] == pytest.approx(1.10)  # individual flag wins over preset 1.05
