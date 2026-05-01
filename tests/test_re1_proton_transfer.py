@@ -50,3 +50,26 @@ def test_re1_proton_transfer_end_to_end(
     assert d_h_n_last < d_h_n_first - 0.5, (
         f"H-N should shrink: {d_h_n_first:.2f} -> {d_h_n_last:.2f}"
     )
+
+
+@pytest.mark.slow
+def test_re1_proton_transfer_via_preset(
+    tmp_path: Path, proton_transfer_rxn_path: Path,
+):
+    """Verify --reaction-type proton_transfer is equivalent to --r-form 1.05."""
+    out = tmp_path / "proton_transfer_preset"
+    rc = main([
+        "run", str(proton_transfer_rxn_path), "-o", str(out),
+        "--backend", "uma",
+        "--reaction-type", "proton_transfer",
+        "--n-angles", "4",
+        "--k-form", "0.6",  # individual flag overrides preset's 0.5
+    ])
+    assert rc == 0
+
+    meta = json.loads((out / "meta.json").read_text())
+    assert meta["reaction_type"] == "proton_transfer"
+    assert meta["effective_params"]["r_form"] == pytest.approx(1.05)
+    assert meta["effective_params"]["k_form"] == pytest.approx(0.6)  # override won
+    assert meta["effective_params"]["max_relax_steps"] == 100  # preset default
+    assert any(t["reached_product"] for t in meta["trials"])
