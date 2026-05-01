@@ -12,3 +12,8 @@ def examples_dir() -> Path:
 @pytest.fixture()
 def sn2_rxn_path(examples_dir: Path) -> Path:
     return examples_dir / "sn2.rxn"
+
+
+@pytest.fixture()
+def menshutkin_rxn_path(examples_dir: Path) -> Path:
+    return examples_dir / "menshutkin.rxn"
