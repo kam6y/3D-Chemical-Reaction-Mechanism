@@ -33,28 +33,28 @@ def test_re1_sn2_end_to_end(tmp_path: Path, sn2_rxn_path: Path):
     syms = frames[0].get_chemical_symbols()
     c_idx = syms.index("C")
     cl_idx = syms.index("Cl")
-    f_idx = syms.index("F")
+    o_idx = syms.index("O")
 
-    # Walden inversion check #1: F-C-Cl angle peaks ≥ 120° somewhere on the path
+    # Walden inversion check #1: O-C-Cl angle peaks ≥ 120° somewhere on the path
     angles = []
     for f in frames:
-        v_cf = f.positions[f_idx] - f.positions[c_idx]
+        v_co = f.positions[o_idx] - f.positions[c_idx]
         v_ccl = f.positions[cl_idx] - f.positions[c_idx]
-        cos_t = float(np.dot(v_cf, v_ccl) / (
-            np.linalg.norm(v_cf) * np.linalg.norm(v_ccl)
+        cos_t = float(np.dot(v_co, v_ccl) / (
+            np.linalg.norm(v_co) * np.linalg.norm(v_ccl)
         ))
         angles.append(float(np.degrees(np.arccos(np.clip(cos_t, -1.0, 1.0)))))
     assert max(angles) >= 120.0, (
-        f"F-C-Cl angle never reached 120° on the trajectory: max={max(angles):.1f}°"
+        f"O-C-Cl angle never reached 120° on the trajectory: max={max(angles):.1f}°"
     )
 
-    # Walden inversion check #2: C-F shrinks, C-Cl grows (compare endpoints)
-    d_cf_first = frames[0].get_distance(c_idx, f_idx)
-    d_cf_last = frames[-1].get_distance(c_idx, f_idx)
+    # Walden inversion check #2: C-O shrinks, C-Cl grows (compare endpoints)
+    d_co_first = frames[0].get_distance(c_idx, o_idx)
+    d_co_last = frames[-1].get_distance(c_idx, o_idx)
     d_ccl_first = frames[0].get_distance(c_idx, cl_idx)
     d_ccl_last = frames[-1].get_distance(c_idx, cl_idx)
-    assert d_cf_last < d_cf_first - 0.5, (
-        f"C-F should shrink: {d_cf_first:.2f} -> {d_cf_last:.2f}"
+    assert d_co_last < d_co_first - 0.5, (
+        f"C-O should shrink: {d_co_first:.2f} -> {d_co_last:.2f}"
     )
     assert d_ccl_last > d_ccl_first + 0.5, (
         f"C-Cl should grow: {d_ccl_first:.2f} -> {d_ccl_last:.2f}"
