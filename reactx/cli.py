@@ -198,20 +198,24 @@ def _cmd_run(args: argparse.Namespace) -> int:
         broken=(mapping[a_form_r], mapping[b_form_r]),  # substrate-cohesion bond (intact in product)
     )
 
+    formed_pair = bond_changes.formed
+    broken_pair = bond_changes.broken
+    syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
+    eff = _resolve_effective_params(args, syms_r, formed_pair)
+    r_form_target = eff["r_form"]
+    log.info(
+        "preset=%s effective: k_form=%.2f k_broken=%.2f r_broken=%.2f "
+        "max_relax_steps=%d r_form=%.3f",
+        eff["reaction_type"], eff["k_form"], eff["k_broken"],
+        eff["r_broken"], eff["max_relax_steps"], eff["r_form"],
+    )
+
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
     calc = make_calculator(args.backend, **model_kwargs)
 
     rotations = sample_attack_rotations(
         n=args.n_angles, cone_half_deg=args.cone_half_deg, seed=args.seed,
     )
-
-    formed_pair = bond_changes.formed
-    broken_pair = bond_changes.broken
-    syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
-    if args.r_form is None:
-        r_form_target = lookup_r_form(syms_r[formed_pair[0]], syms_r[formed_pair[1]])
-    else:
-        r_form_target = float(args.r_form)
 
     trials: list[TrialResult] = []
     for i, R in enumerate(rotations):
@@ -235,14 +239,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
             formed=[formed_pair],
             broken=[broken_pair],
             r_form=r_form_target,
-            r_broken=args.r_broken,
-            k_form=args.k_form,
-            k_broken=args.k_broken,
+            r_broken=eff["r_broken"],
+            k_form=eff["k_form"],
+            k_broken=eff["k_broken"],
         )
         try:
             frames, energies = relax_with_restraints(
                 atoms_init, restraints, calc,
-                max_steps=args.max_relax_steps,
+                max_steps=eff["max_relax_steps"],
                 fmax=args.relax_fmax,
                 traj_stride=args.traj_stride,
             )
@@ -259,7 +263,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             formed=[formed_pair],
             broken=[broken_pair],
             r_form_targets=[r_form_target],
-            r_broken_target=args.r_broken,
+            r_broken_target=eff["r_broken"],
         )
         peak = max(energies) if energies else float("inf")
         trials.append(TrialResult(
@@ -271,7 +275,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     if not any(t.frames for t in trials):
         log.error("All trials failed. See meta.json for details.")
-        return _write_outputs_and_exit(args, trials, t_start, neb_refined=False, rc=1)
+        return _write_outputs_and_exit(args, trials, t_start, neb_refined=False, rc=1, effective=eff)
 
     best = score_trials(trials)
     log.info(
@@ -310,7 +314,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     xyz = args.output / "trajectory.xyz"
     write(str(xyz), final_frames, format="extxyz")
 
-    rc = _write_outputs_and_exit(args, trials, t_start, neb_refined=neb_refined, rc=0)
+    rc = _write_outputs_and_exit(args, trials, t_start, neb_refined=neb_refined, rc=0, effective=eff)
     if rc != 0:
         return rc
 
@@ -336,6 +340,7 @@ def _write_outputs_and_exit(
     *,
     neb_refined: bool,
     rc: int,
+    effective: dict | None = None,
 ) -> int:
     selected = -1
     converged = False
@@ -348,6 +353,7 @@ def _write_outputs_and_exit(
             pass
     meta = {
         "backend": args.backend,
+        "reaction_type": (effective or {}).get("reaction_type", args.reaction_type),
         "converged": converged,
         "selected_trial": selected,
         "trials": [
@@ -363,6 +369,13 @@ def _write_outputs_and_exit(
         ],
         "wall_clock_seconds": float(time.monotonic() - t_start),
         "neb_refined": neb_refined,
+        "effective_params": (
+            {
+                k: effective[k]
+                for k in ("k_form", "k_broken", "r_broken", "max_relax_steps", "r_form")
+            }
+            if effective is not None else None
+        ),
     }
     meta_clean = _sanitize_for_json(meta)
     (args.output / "meta.json").write_text(json.dumps(meta_clean, indent=2))

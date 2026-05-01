@@ -1,7 +1,13 @@
 """CLI argument parsing smoke tests (no UMA invocation)."""
+import argparse
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
-from reactx.cli import _resolve_effective_params, build_parser
+from reactx.cli import _resolve_effective_params, _write_outputs_and_exit, build_parser
+from reactx.scoring import TrialResult
 
 
 def test_default_flags_parse():
@@ -119,3 +125,35 @@ def test_r_form_individual_flag_overrides_preset_r_form():
     syms = ["H", "Cl", "N"]
     eff = _resolve_effective_params(args, syms, formed_pair=(2, 0))
     assert eff["r_form"] == pytest.approx(1.10)  # individual flag wins over preset 1.05
+
+
+def test_meta_json_includes_reaction_type_and_effective_params(tmp_path: Path):
+    args = argparse.Namespace(
+        backend="lj",
+        output=tmp_path,
+        reaction_type="menshutkin",
+    )
+    eff = {
+        "reaction_type": "menshutkin",
+        "k_form": 2.0, "k_broken": 2.0,
+        "r_broken": 5.0, "max_relax_steps": 200,
+        "r_form": 1.47,
+    }
+    trials = [TrialResult(
+        trial_idx=0, rotation_deg=0.0, frames=[], energies=[1.0, 2.0],
+        reached_product=True, peak_energy=2.0, n_steps=2,
+    )]
+    # Patch score_trials to avoid relying on its internals here.
+    with patch("reactx.cli.score_trials", return_value=trials[0]):
+        rc = _write_outputs_and_exit(
+            args, trials, t_start=0.0,
+            neb_refined=False, rc=0, effective=eff,
+        )
+    assert rc == 0
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    assert meta["reaction_type"] == "menshutkin"
+    assert meta["effective_params"] == {
+        "k_form": 2.0, "k_broken": 2.0,
+        "r_broken": 5.0, "max_relax_steps": 200,
+        "r_form": 1.47,
+    }
