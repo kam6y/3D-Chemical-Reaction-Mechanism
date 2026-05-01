@@ -44,14 +44,24 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Half-angle of cone within which trials are sampled")
     run.add_argument("--seed", type=int, default=0)
 
+    from reactx.presets import PRESETS as _PRESETS
+    run.add_argument("--reaction-type", choices=sorted(_PRESETS), default="sn2_anion",
+                     help="Built-in restraint preset for the reaction class. "
+                          "Individual --k-* / --r-* / --max-relax-steps flags override.")
+
     run.add_argument("--r-form", type=float, default=None,
                      help="Override formed-bond target distance (Å). "
-                          "Default: auto from element pair table.")
-    run.add_argument("--r-broken", type=float, default=4.0)
-    run.add_argument("--k-form", type=float, default=0.5)
-    run.add_argument("--k-broken", type=float, default=1.0)
+                          "Default: from preset, then element pair table.")
+    run.add_argument("--r-broken", type=float, default=None,
+                     help="Override repulsion target distance (Å). "
+                          "Default: from preset.")
+    run.add_argument("--k-form", type=float, default=None,
+                     help="Override Hookean k for formed bonds. Default: from preset.")
+    run.add_argument("--k-broken", type=float, default=None,
+                     help="Override repulsion k for broken bonds. Default: from preset.")
 
-    run.add_argument("--max-relax-steps", type=int, default=100)
+    run.add_argument("--max-relax-steps", type=int, default=None,
+                     help="Override FIRE max steps. Default: from preset.")
     run.add_argument("--relax-fmax", type=float, default=0.1)
     run.add_argument("--traj-stride", type=int, default=5)
 
