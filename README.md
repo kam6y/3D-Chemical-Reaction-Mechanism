@@ -37,6 +37,33 @@ reactx run examples/proton_transfer.rxn -o out/pt/ \
 - `out/<rxn>/meta.json` — trial 全件の score, wall_clock_seconds, neb_refined フラグ
 - `out/<rxn>/scene.blend` — Blender シーン
 
+## Reaction-type presets
+
+`--reaction-type` で反応クラスごとにチューニング済みの拘束パラメータをまとめて適用できる。個別フラグ (`--k-form` / `--k-broken` / `--r-broken` / `--max-relax-steps` / `--r-form`) を併指定するとプリセット値を **常に上書き** する。`--reaction-type` 省略時は `sn2_anion` (現 default 相当)。
+
+| name | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form (Å) | 想定反応 |
+|---|---|---|---|---|---|---|
+| `sn2_anion` (default) | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 陰イオン求核剤の SN2 (例: O⁻ + CH₃Cl) |
+| `proton_transfer` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 中性間 PT (例: HCl + NH₃) |
+| `menshutkin` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 中性求核剤 → イオン対 (例: NH₃ + CH₃Cl) |
+
+```bash
+# SN2 (sn2_anion is the default; the flag is optional)
+reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
+
+# Proton transfer
+reactx run examples/proton_transfer.rxn -o out/pt/ \
+  --reaction-type proton_transfer --backend uma --render
+
+# Menshutkin (NH3 + CH3Cl -> CH3NH3+ + Cl-)
+reactx run examples/menshutkin.rxn -o out/men/ \
+  --reaction-type menshutkin --backend uma --render
+```
+
+**Menshutkin プリセットの根拠**: 既定値は陰イオン求核剤の外部熱的反応 (SN2 / PT) 用にチューニングされている。中性求核剤 + イオン対生成のような **内部熱的反応** では QM のバリア勾配が default の Hookean に勝って TS 手前で停滞するため、`k_form` / `k_broken` を倍化して引力・斥力を強化し、`r_broken` を 5.0 Å まで引き伸ばし、`max_relax_steps` を 200 に拡大している。
+
+各実行で実際に適用された effective parameters は `out/<rxn>/meta.json` の `effective_params` に記録され、再現性を担保する。
+
 ## Phase Re1 動作確認
 
 DoD は以下の手順で確認する:
