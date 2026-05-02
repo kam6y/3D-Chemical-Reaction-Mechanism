@@ -74,7 +74,9 @@ def test_re1_proton_transfer_via_preset(
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["reaction_type"] == "proton_transfer"
-    assert meta["effective_params"]["r_form"] == pytest.approx(1.05)
+    assert isinstance(meta["effective_params"]["r_form_targets"], list)
+    assert len(meta["effective_params"]["r_form_targets"]) == 1
+    assert meta["effective_params"]["r_form_targets"][0] == pytest.approx(1.05)
     assert meta["effective_params"]["k_form"] == pytest.approx(0.6)  # override won
     assert meta["effective_params"]["max_relax_steps"] == 100  # preset default
     assert any(t["reached_product"] for t in meta["trials"])

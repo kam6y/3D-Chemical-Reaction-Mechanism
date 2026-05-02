@@ -10,6 +10,47 @@ from reactx.cli import _resolve_effective_params, _write_outputs_and_exit, build
 from reactx.scoring import TrialResult
 
 
+def test_resolve_effective_params_returns_list_for_r_form_targets():
+    """_resolve_effective_params returns r_form_targets as list[float] (Phase 3)."""
+    from reactx.cli import _resolve_effective_params
+    import argparse
+    args = argparse.Namespace(
+        reaction_type="sn2_anion",
+        k_form=None, k_broken=None, r_broken=None, r_form=None,
+        max_relax_steps=None,
+    )
+    syms = ["C", "Cl", "O"]
+    formed_pairs = [(0, 2)]  # C-O formed
+    eff = _resolve_effective_params(args, syms, formed_pairs)
+    assert isinstance(eff["r_form_targets"], list)
+    assert len(eff["r_form_targets"]) == 1
+    assert abs(eff["r_form_targets"][0] - 1.43) < 1e-3  # C-O table value
+
+
+def test_resolve_effective_params_empty_formed_returns_empty_list():
+    from reactx.cli import _resolve_effective_params
+    import argparse
+    args = argparse.Namespace(
+        reaction_type="sn1_dissoc",
+        k_form=None, k_broken=None, r_broken=None, r_form=None,
+        max_relax_steps=None,
+    )
+    eff = _resolve_effective_params(args, ["C", "Br"], [])
+    assert eff["r_form_targets"] == []
+
+
+def test_resolve_effective_params_scalar_r_form_broadcasts():
+    from reactx.cli import _resolve_effective_params
+    import argparse
+    args = argparse.Namespace(
+        reaction_type="sn2_anion",
+        k_form=None, k_broken=None, r_broken=None, r_form=1.10,
+        max_relax_steps=None,
+    )
+    eff = _resolve_effective_params(args, ["C", "Cl", "O", "F"], [(0, 2), (0, 3)])
+    assert eff["r_form_targets"] == [1.10, 1.10]
+
+
 def test_default_flags_parse():
     p = build_parser()
     a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/"])
@@ -108,40 +149,40 @@ def _make_args(**overrides):
 def test_resolve_defaults_to_sn2_anion_preset():
     args = _make_args()
     syms = ["C", "Cl", "H", "H", "H", "F"]  # formed = (0, 5) -> C-F
-    eff = _resolve_effective_params(args, syms, formed_pair=(0, 5))
+    eff = _resolve_effective_params(args, syms, formed_pairs=[(0, 5)])
     assert eff["reaction_type"] == "sn2_anion"
     assert eff["k_form"] == 0.5
     assert eff["k_broken"] == 1.0
     assert eff["r_broken"] == 4.0
     assert eff["max_relax_steps"] == 100
     # sn2_anion has no r_form override -> element-table lookup C-F = 1.39
-    assert eff["r_form"] == pytest.approx(1.39)
+    assert eff["r_form_targets"][0] == pytest.approx(1.39)
 
 
 def test_resolve_menshutkin_preset():
     args = _make_args(reaction_type="menshutkin")
     syms = ["N", "C", "Cl", "H", "H", "H", "H", "H", "H"]
-    eff = _resolve_effective_params(args, syms, formed_pair=(0, 1))  # N-C
+    eff = _resolve_effective_params(args, syms, formed_pairs=[(0, 1)])  # N-C
     assert eff["reaction_type"] == "menshutkin"
     assert eff["k_form"] == 2.0
     assert eff["k_broken"] == 2.0
     assert eff["r_broken"] == 5.0
     assert eff["max_relax_steps"] == 200
     # menshutkin r_form = None -> element table N-C = 1.47
-    assert eff["r_form"] == pytest.approx(1.47)
+    assert eff["r_form_targets"][0] == pytest.approx(1.47)
 
 
 def test_resolve_proton_transfer_preset_uses_r_form_1_05():
     args = _make_args(reaction_type="proton_transfer")
     syms = ["H", "Cl", "N", "H", "H"]
-    eff = _resolve_effective_params(args, syms, formed_pair=(2, 0))  # N-H
-    assert eff["r_form"] == pytest.approx(1.05)
+    eff = _resolve_effective_params(args, syms, formed_pairs=[(2, 0)])  # N-H
+    assert eff["r_form_targets"][0] == pytest.approx(1.05)
 
 
 def test_individual_flag_overrides_preset():
     args = _make_args(reaction_type="menshutkin", k_form=3.5, r_broken=6.0)
     syms = ["N", "C", "Cl"]
-    eff = _resolve_effective_params(args, syms, formed_pair=(0, 1))
+    eff = _resolve_effective_params(args, syms, formed_pairs=[(0, 1)])
     assert eff["k_form"] == 3.5  # overridden
     assert eff["r_broken"] == 6.0  # overridden
     assert eff["k_broken"] == 2.0  # from preset
@@ -151,8 +192,8 @@ def test_individual_flag_overrides_preset():
 def test_r_form_individual_flag_overrides_preset_r_form():
     args = _make_args(reaction_type="proton_transfer", r_form=1.10)
     syms = ["H", "Cl", "N"]
-    eff = _resolve_effective_params(args, syms, formed_pair=(2, 0))
-    assert eff["r_form"] == pytest.approx(1.10)  # individual flag wins over preset 1.05
+    eff = _resolve_effective_params(args, syms, formed_pairs=[(2, 0)])
+    assert eff["r_form_targets"][0] == pytest.approx(1.10)  # individual flag wins over preset 1.05
 
 
 def test_meta_json_includes_reaction_type_and_effective_params(tmp_path: Path):
@@ -165,7 +206,7 @@ def test_meta_json_includes_reaction_type_and_effective_params(tmp_path: Path):
         "reaction_type": "menshutkin",
         "k_form": 2.0, "k_broken": 2.0,
         "r_broken": 5.0, "max_relax_steps": 200,
-        "r_form": 1.47,
+        "r_form_targets": [1.47],
     }
     trials = [TrialResult(
         trial_idx=0, rotation_deg=0.0, frames=[], energies=[1.0, 2.0],
@@ -183,7 +224,7 @@ def test_meta_json_includes_reaction_type_and_effective_params(tmp_path: Path):
     assert meta["effective_params"] == {
         "k_form": 2.0, "k_broken": 2.0,
         "r_broken": 5.0, "max_relax_steps": 200,
-        "r_form": 1.47,
+        "r_form_targets": [1.47],
     }
 
 
