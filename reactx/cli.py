@@ -195,6 +195,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
     p_h = Chem.AddHs(p_mol)
     bond_changes = compute_bond_changes(r_h, p_h, mapping)
 
+    if args.neb_refine and (
+        len(bond_changes.formed) != 1 or len(bond_changes.broken) != 1
+    ):
+        log.error(
+            "--neb-refine is only supported for 1 formed + 1 broken bond "
+            "reactions in Phase 3 (got formed=%d, broken=%d). Multi-bond NEB "
+            "endpoint construction is Phase 4+. Re-run without --neb-refine.",
+            len(bond_changes.formed), len(bond_changes.broken),
+        )
+        return 2
+
     # bond_changes is reactant-space; for product embedding (neb-refine path)
     # we feed embed3d a product-space BondChanges constructed by
     # swapping roles + remapping indices. embed3d identifies the substrate as
