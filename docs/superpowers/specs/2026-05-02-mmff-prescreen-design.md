@@ -375,7 +375,7 @@ def test_prescreen_keep_override():
 | `tests/test_re1_sn2.py` | default で prescreen ON。`meta.json.prescreen.kept` 長 == 3 / `trials[]` 長 == 3 を assertion 追加 |
 | `tests/test_re1_proton_transfer.py` | 同上 |
 | `tests/test_re1_menshutkin.py` | 同上、ただし `mmff_failed=True` のケースも許容 (中性 → ion pair の MMFF 評価は境界条件)。`reached_product` を満たす trial が UMA で出ることだけ要求 |
-| `tests/test_wallclock_sn2.py` | 閾値 60s → **40s** に更新 |
+| `tests/test_wallclock_sn2.py` | 閾値 60s 据え置き (UMA model load ~25-30s が固定コストで支配的のため、prescreen 短縮分は表に出にくい。実測 ~25-30s に対しハードウェア変動の余裕として 60s を維持) |
 | `tests/test_prescreen_disabled_sn2.py` (新規) | `--no-mmff-prescreen` で `meta.json.prescreen.enabled=false` かつ `len(trials) == n_angles` を確認 |
 
 ### 5.3 Blender
@@ -405,7 +405,7 @@ def test_prescreen_keep_override():
 
 1. fast suite 全 pass (新規 `test_prescreen.py` + 拡張 `test_cli.py`)
 2. slow suite 全 pass (3 反応統合 + new `test_prescreen_disabled_sn2`)
-3. SN2 default 実走で `wall_clock_seconds < 40` (= `test_wallclock_sn2` の新閾値)
+3. SN2 default 実走で `wall_clock_seconds < 60` (= `test_wallclock_sn2` の現行閾値。UMA model load コストにより理論短縮値より緩めに設定)
 4. `reactx run examples/sn2.rxn -o out/sn2/ --backend uma` で `meta.json.prescreen.enabled=true` / `kept` 長 == 3 / `trials` 長 == 3
 5. `reactx run ... --no-mmff-prescreen` で `meta.json.prescreen.enabled=false` / `trials` 長 == 8
 6. Menshutkin 実走で `mmff_failed=true` でも完走、`reached_product=True` の trial が ≥ 1 件 (fallback 経路の動作確認)

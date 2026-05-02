@@ -19,7 +19,7 @@ from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
 from reactx.path_relax import relax_with_restraints
-from reactx.prescreen import PrescreenResult, prescreen_trials
+from reactx.prescreen import prescreen_trials
 from reactx.presets import get_preset
 from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
 from reactx.scoring import TrialResult, reached_product, score_trials
@@ -226,7 +226,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
 
     # Phase 1: embed every rotation; collect successful embeds with their angles.
+    # Embed failures still get a stub TrialResult so meta.json.trials[] length
+    # stays invariant at --n-angles (pre-Phase-2 contract).
     embedded_by_idx: dict[int, tuple] = {}
+    failed_embed_stubs: list[TrialResult] = []
     for i, R in enumerate(rotations):
         rot_deg = _angle_from_identity_deg(R)
         try:
@@ -237,6 +240,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             embedded_by_idx[i] = (atoms_init, rot_deg)
         except Exception as exc:  # noqa: BLE001
             log.warning("trial %d embed failed: %s", i, exc)
+            failed_embed_stubs.append(TrialResult(
+                trial_idx=i, rotation_deg=rot_deg, frames=[], energies=[],
+                reached_product=False, peak_energy=float("inf"), n_steps=0,
+            ))
 
     # Phase 2: optionally prescreen with MMFF94 to pick top-K of N for UMA.
     prescreen_meta: dict | None = None
@@ -318,6 +325,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
             n_steps=len(frames),
         ))
 
+    # Merge embed-failure stubs back so meta.json.trials covers every rotation.
+    if failed_embed_stubs:
+        trials.extend(failed_embed_stubs)
+        trials.sort(key=lambda t: t.trial_idx)
+
     if not any(t.frames for t in trials):
         log.error("All trials failed. See meta.json for details.")
         return _write_outputs_and_exit(
@@ -394,15 +406,14 @@ def _write_outputs_and_exit(
     effective: dict | None = None,
     prescreen_meta: dict | None = None,
 ) -> int:
-    selected = -1
-    converged = False
+    best: TrialResult | None = None
     if rc == 0 and trials:
         try:
             best = score_trials(trials)
-            selected = best.trial_idx
-            converged = best.reached_product
         except ValueError:
-            pass
+            best = None
+    selected = best.trial_idx if best is not None else -1
+    converged = best.reached_product if best is not None else False
     meta = {
         "backend": args.backend,
         "reaction_type": (effective or {}).get("reaction_type", args.reaction_type),
@@ -433,8 +444,7 @@ def _write_outputs_and_exit(
     meta_clean = _sanitize_for_json(meta)
     (args.output / "meta.json").write_text(json.dumps(meta_clean, indent=2))
 
-    if rc == 0 and trials:
-        best = score_trials(trials)
+    if best is not None:
         (args.output / "energies.json").write_text(json.dumps(best.energies))
     return rc
 

@@ -32,7 +32,7 @@ reactx run examples/proton_transfer.rxn -o out/pt/ \
 - `--r-form` (default: 元素ペアから自動): 形成結合の目標距離 (Å)
 - `--prescreen-keep 3` (default): MMFF prescreen で UMA に渡す trial 数 (top-K)
 - `--prescreen-steps 30` (default): prescreen 内の MMFF FIRE step 数
-- `--no-mmff-prescreen`: MMFF prescreen を無効化、全 trial を UMA に流す (Phase Re1 default 挙動)
+- `--no-mmff-prescreen`: MMFF prescreen を無効化、全 trial を UMA に流す (Phase Re1 default 挙動)。`meta.json.trials[]` 長を `--n-angles` と一致させたい場合 (旧スクリプトの後方互換) はこれを併用
 - `--neb-refine` (default off): best trajectory を NEB で refinement (実行時間延長)
 
 生成物:
