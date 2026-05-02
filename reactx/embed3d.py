@@ -72,7 +72,7 @@ def embed_mol_to_atoms(
                 "Multi-fragment Mol requires bond_changes to determine placement; "
                 "got None. Compute via reactx.bond_changes.compute_bond_changes."
             )
-        positions = _place_nucleophile_backside(
+        positions = _place_fragments(
             mol_h, frag_indices, positions, bond_changes,
             rotation_perturbation=rotation_perturbation,
         )
@@ -92,72 +92,143 @@ def embed_mol_to_atoms(
     return atoms
 
 
-def _place_nucleophile_backside(
+def _place_fragments(
     mol_h: Chem.Mol,
     frag_indices: tuple[tuple[int, ...], ...],
     positions: np.ndarray,
     bond_changes: BondChanges,
     *,
-    rotation_perturbation: np.ndarray | None = None,
+    rotation_perturbation: np.ndarray | None,
 ) -> np.ndarray:
-    """Place non-substrate fragments along the rotated backside direction.
+    """Dispatch to the appropriate placement strategy.
 
-    Substrate fragment = the one containing both atoms of the broken bond.
-    Anchor (= shared atom of formed and broken) and leaving (= other end of
-    broken) live in the substrate. Incoming (= other end of formed) lives in
-    the nucleophile fragment, which is shifted so its centroid aligns with
-    `anchor + R @ (-unit(anchor->leaving)) * FRAGMENT_SEPARATION`.
+    Tier 1 (directional, Phase 3): broken bond の方向情報がある反応 (E2 / SN2 / PT)。
+    Tier 2 (centroid, future):     broken=0 / multi-substrate metathesis。Phase 4+。
     """
-    # Phase Re1 (1 formed + 1 broken) shape; Task 2 dispatcher will replace this
-    # with multi-bond _directional_placement.
-    a_form, b_form = bond_changes.formed[0]
-    a_brk, b_brk = bond_changes.broken[0]
-    common = (set((a_form, b_form)) & set((a_brk, b_brk)))
-    if len(common) != 1:
-        raise ValueError(
-            f"formed {bond_changes.formed[0]} and broken {bond_changes.broken[0]} "
-            f"must share exactly one atom; got {common}"
+    substrate = _find_substrate_fragment(frag_indices, bond_changes.broken)
+    if substrate is not None and bond_changes.broken:
+        return _directional_placement(
+            frag_indices, positions, bond_changes, substrate,
+            rotation_perturbation=rotation_perturbation,
         )
-    shared = next(iter(common))
-    anchor = shared
-    leaving = b_brk if a_brk == shared else a_brk
-    incoming = b_form if a_form == shared else a_form
-
-    substrate_frag = next(
-        (fi for fi in frag_indices if anchor in fi and leaving in fi), None
+    raise NotImplementedError(
+        "centroid-based placement (broken=0 / multi-substrate metathesis) is "
+        f"Phase 4+. Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
+        f"frags={len(frag_indices)}."
     )
-    if substrate_frag is None:
-        raise ValueError(
-            f"Anchor {anchor} and leaving {leaving} are not in the same fragment; "
-            f"Phase Re1 expects the broken bond's two atoms to be co-fragmented."
+
+
+def _find_substrate_fragment(
+    frag_indices: tuple[tuple[int, ...], ...],
+    broken: tuple[tuple[int, int], ...],
+) -> tuple[int, ...] | None:
+    """Return the unique fragment containing both atoms of every broken bond.
+
+    None when broken is empty, or when broken bonds span multiple fragments.
+    """
+    if not broken:
+        return None
+    candidates: list[tuple[int, ...]] = []
+    for frag in frag_indices:
+        frag_set = set(frag)
+        if all(a in frag_set and b in frag_set for a, b in broken):
+            candidates.append(frag)
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def _directional_placement(
+    frag_indices: tuple[tuple[int, ...], ...],
+    positions: np.ndarray,
+    bond_changes: BondChanges,
+    substrate: tuple[int, ...],
+    *,
+    rotation_perturbation: np.ndarray | None,
+) -> np.ndarray:
+    """Tier 1: anchor + leaving direction for each non-substrate fragment."""
+    substrate_set = set(substrate)
+    non_substrate = [f for f in frag_indices if f is not substrate]
+    if len(non_substrate) >= 2:
+        log.warning(
+            "termolecular placement (%d non-substrate fragments); geometric "
+            "quality may be reduced", len(non_substrate),
         )
 
-    nuc_fragments = [fi for fi in frag_indices if fi is not substrate_frag]
-    if not nuc_fragments:
-        raise ValueError(
-            "Only one fragment found, but multi-fragment placement was invoked. "
-            "(Internal inconsistency: did embed_mol_to_atoms call this for n_frags=1?)"
-        )
+    bridging_by_anchor: dict[int, list[tuple[int, ...]]] = {}
+    for f_idx, f in enumerate(non_substrate):
+        f_set = set(f)
+        bridging = [
+            (a, b) for a, b in bond_changes.formed
+            if (a in substrate_set and b in f_set) or (b in substrate_set and a in f_set)
+        ]
+        if not bridging:
+            raise ValueError(
+                f"fragment {f_idx} has no formed bond bridging to substrate; "
+                f"check input atom mapping (formed={bond_changes.formed}, "
+                f"substrate atoms={sorted(substrate_set)})"
+            )
+        for bond in bridging:
+            anchor = bond[0] if bond[0] in substrate_set else bond[1]
+            bridging_by_anchor.setdefault(anchor, []).append((f, bond))
 
-    a_pos = positions[anchor]
-    c_pos = positions[leaving]
-    a_c = c_pos - a_pos
-    a_c_norm = float(np.linalg.norm(a_c))
-    if a_c_norm < 1e-6:
-        raise RuntimeError(
-            "Anchor and leaving atoms coincide after MMFF — embedding is broken."
-        )
-    backside = -a_c / a_c_norm
-    if rotation_perturbation is not None:
-        backside = rotation_perturbation @ backside
+    for anchor, hits in bridging_by_anchor.items():
+        unique_frags = {id(f) for f, _ in hits}
+        if len(unique_frags) > 1:
+            raise NotImplementedError(
+                f"multi-base attack on single anchor {anchor} not supported "
+                f"(Phase 3 supports at most one fragment per anchor)"
+            )
 
-    target = a_pos + backside * FRAGMENT_SEPARATION
-    for nuc in nuc_fragments:
-        if incoming in nuc:
+    for fragment in non_substrate:
+        f_set = set(fragment)
+        anchor: int | None = None
+        bridging_bond: tuple[int, int] | None = None
+        for a, hits in bridging_by_anchor.items():
+            for f, bond in hits:
+                if f is fragment:
+                    anchor, bridging_bond = a, bond
+                    break
+            if anchor is not None:
+                break
+        assert anchor is not None and bridging_bond is not None
+
+        relevant_broken = sorted(
+            [(a, b) for a, b in bond_changes.broken if anchor in (a, b)],
+            key=lambda ab: ab[1] if ab[0] == anchor else ab[0],
+        )
+        if relevant_broken:
+            chosen = relevant_broken[0]
+            leaving = chosen[1] if chosen[0] == anchor else chosen[0]
+        else:
+            substrate_centroid = positions[list(substrate)].mean(axis=0)
+            distances = [
+                float(np.linalg.norm(positions[i] - substrate_centroid))
+                for i in substrate if i != anchor
+            ]
+            leaving_candidates = [i for i in substrate if i != anchor]
+            leaving = leaving_candidates[int(np.argmax(distances))]
+
+        a_pos = positions[anchor]
+        c_pos = positions[leaving]
+        a_c = c_pos - a_pos
+        a_c_norm = float(np.linalg.norm(a_c))
+        if a_c_norm < 1e-6:
+            raise RuntimeError(
+                "Anchor and leaving atoms coincide after MMFF — embedding is broken."
+            )
+        backside = -a_c / a_c_norm
+        if rotation_perturbation is not None:
+            backside = rotation_perturbation @ backside
+        target = a_pos + backside * FRAGMENT_SEPARATION
+
+        incoming = bridging_bond[1] if bridging_bond[0] == anchor else bridging_bond[0]
+        if incoming in f_set:
             nuc_centroid_anchor = positions[incoming]
         else:
-            nuc_centroid_anchor = positions[list(nuc)].mean(axis=0)
-        positions[list(nuc)] += target - nuc_centroid_anchor
+            nuc_centroid_anchor = positions[list(fragment)].mean(axis=0)
+        positions[list(fragment)] += target - nuc_centroid_anchor
+
     return positions
 
 
