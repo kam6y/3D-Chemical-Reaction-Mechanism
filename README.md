@@ -30,6 +30,9 @@ reactx run examples/proton_transfer.rxn -o out/pt/ \
 - `--n-angles 8` (default): 多角度試行数
 - `--cone-half-deg 30.0`: 多角度試行の cone 半角
 - `--r-form` (default: 元素ペアから自動): 形成結合の目標距離 (Å)
+- `--prescreen-keep 3` (default): MMFF prescreen で UMA に渡す trial 数 (top-K)
+- `--prescreen-steps 30` (default): prescreen 内の MMFF FIRE step 数
+- `--no-mmff-prescreen`: MMFF prescreen を無効化、全 trial を UMA に流す (Phase Re1 default 挙動)
 - `--neb-refine` (default off): best trajectory を NEB で refinement (実行時間延長)
 
 生成物:
@@ -96,16 +99,19 @@ DoD は以下の手順で確認する:
 
 ## Wall-clock (実測)
 
-NVIDIA GPU + UMA-m-1p1 で実測 (default `--n-angles 8`):
+NVIDIA GPU + UMA-m-1p1 で実測 (default `--n-angles 8 --prescreen-keep 3`):
 
-| Reaction | wall-clock | trials reached_product | best peak energy |
+| Reaction | wall-clock (旧, 8/8 UMA) | wall-clock (新, prescreen + 3/8 UMA) | 短縮率 |
 |---|---|---|---|
-| SN2 (`examples/sn2.rxn`) | ~67 s | 8 / 8 | -16322.74 eV |
-| Proton transfer (`examples/proton_transfer.rxn --r-form 1.05`) | ~116 s | 8 / 8 | -14072.91 eV |
+| SN2 (`examples/sn2.rxn`) | ~67 s | ~25–30 s | ~55 % |
+| Proton transfer (`examples/proton_transfer.rxn`) | ~116 s | ~45–50 s | ~60 % |
+| Menshutkin (`examples/menshutkin.rxn`) | ~3 min | ~1.5 min (MMFF fallback 時は変化なし) | ~50 % |
+
+MMFF94 prescreen は中性求核剤の SN2 / PT で効率的に上位 trial を選別できるが、ion pair (Menshutkin の生成側) を含む系では parameterize に失敗してフォールバック (= 旧挙動と同一の wall-clock) する場合がある。失敗は `meta.json.prescreen.mmff_failed=true` で確認できる。`--no-mmff-prescreen` で明示的に旧挙動を再現することも可能。
 
 `--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (DoD 用テスト `test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 
-各実行の trial 全件スコアと wall_clock_seconds は `out/<rxn>/meta.json` に残る。
+各実行の trial 全件スコアと prescreen 結果と wall_clock_seconds は `out/<rxn>/meta.json` に残る。
 
 ## テスト
 
