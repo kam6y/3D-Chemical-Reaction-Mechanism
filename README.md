@@ -16,12 +16,14 @@ Blender 4.x と `atomic-blender-pdb-xyz` アドオンを別途インストール
 ## 使い方
 
 ```bash
-# SN2 (default settings)
+# SN2 (default; --reaction-type sn2_anion is implicit)
 reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
 # Proton transfer (HCl + NH3 -> Cl- + NH4+)
 reactx run examples/proton_transfer.rxn -o out/pt/ \
-  --backend uma --r-form 1.05 --render
+  --reaction-type proton_transfer --backend uma --render
 ```
+
+反応クラスごとに別途チューニング済みプリセットがある (下節 [Reaction-type presets](#reaction-type-presets) 参照)。`--reaction-type` 省略時は `sn2_anion` 相当の挙動。
 
 主要フラグ:
 
@@ -70,7 +72,7 @@ DoD は以下の手順で確認する:
 
 1. `reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render` を実行 → `meta.json` の `selected_trial >= 0`, `trials[].reached_product` で少なくとも 1 件 True を確認
 2. `out/sn2/scene.blend` を Blender GUI で開いて Walden 反転を視認
-3. `reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --r-form 1.05 --render` を実行 → 同様に視認
+3. `reactx run examples/proton_transfer.rxn -o out/pt/ --reaction-type proton_transfer --backend uma --render` を実行 → 同様に視認
 4. `pytest -m slow` で SN2 + proton_transfer 統合テストが pass
 
 ## レンダリング: 原子球サイズと結合棒

@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 out/
 out_*/
+examples_out/
 *.log
 .DS_Store
 .claude

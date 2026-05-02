@@ -25,9 +25,9 @@ def test_sn2_bond_changes():
 
     c_idx = _atom_index_by_symbol(r_h, "C")
     cl_idx = _atom_index_by_symbol(r_h, "Cl")
-    f_idx = _atom_index_by_symbol(r_h, "F")
+    o_idx = _atom_index_by_symbol(r_h, "O")
 
-    assert set(bc.formed) == {c_idx, f_idx}
+    assert set(bc.formed) == {c_idx, o_idx}
     assert set(bc.broken) == {c_idx, cl_idx}
 
 

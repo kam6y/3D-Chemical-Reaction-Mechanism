@@ -15,8 +15,8 @@ def test_parse_sn2_rxn_returns_combined_mols(sn2_rxn_path: Path):
 
     reactant_symbols = sorted(a.GetSymbol() for a in reactant.GetAtoms())
     product_symbols = sorted(a.GetSymbol() for a in product.GetAtoms())
-    assert reactant_symbols == ["C", "Cl", "F"]
-    assert product_symbols == ["C", "Cl", "F"]
+    assert reactant_symbols == ["C", "Cl", "O"]
+    assert product_symbols == ["C", "Cl", "O"]
 
 
 def test_parse_sn2_rxn_has_two_fragments_each_side(sn2_rxn_path: Path):
