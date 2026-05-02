@@ -22,7 +22,7 @@ def test_re1_proton_transfer_end_to_end(
         "run", str(proton_transfer_rxn_path), "-o", str(out),
         "--backend", "uma",
         "--n-angles", "4",
-        "--max-relax-steps", "50",
+        "--max-relax-steps", "100",  # preset default; 50 was too short under k_form=0.5
         "--r-form", "1.05",  # N-H equilibrium
     ])
     assert rc == 0
