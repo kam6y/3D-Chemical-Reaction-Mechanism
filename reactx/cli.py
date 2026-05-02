@@ -231,8 +231,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
     calc = make_calculator(args.backend, **model_kwargs)
 
+    n_frags_reactant = len(Chem.GetMolFrags(r_h))
+    effective_n_angles = args.n_angles
+    if n_frags_reactant == 1 and args.n_angles > 1:
+        log.info(
+            "unimolecular reaction (1 reactant fragment); "
+            "n_angles forced from %d to 1, prescreen skipped",
+            args.n_angles,
+        )
+        effective_n_angles = 1
+
     rotations = sample_attack_rotations(
-        n=args.n_angles, cone_half_deg=args.cone_half_deg, seed=args.seed,
+        n=effective_n_angles, cone_half_deg=args.cone_half_deg, seed=args.seed,
     )
 
     # Phase 1: embed every rotation; collect successful embeds with their angles.
@@ -258,7 +268,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # Phase 2: optionally prescreen with MMFF94 to pick top-K of N for UMA.
     prescreen_meta: dict | None = None
     keep_trial_indices: list[int]
-    if args.no_mmff_prescreen:
+    if n_frags_reactant == 1:
+        log.info("prescreen: skipped (single trial / unimolecular)")
+        keep_trial_indices = sorted(embedded_by_idx.keys())
+        prescreen_meta = {
+            "enabled": False, "kept": None, "skipped": None,
+            "mmff_failed": None, "wall_clock_seconds": 0.0,
+        }
+    elif args.no_mmff_prescreen:
         log.info("prescreen: disabled (--no-mmff-prescreen)")
         keep_trial_indices = sorted(embedded_by_idx.keys())
         prescreen_meta = {
