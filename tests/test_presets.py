@@ -45,7 +45,13 @@ def test_get_preset_unknown_raises():
 
 
 def test_presets_dict_keys():
-    assert set(PRESETS) == {"sn2_anion", "proton_transfer", "menshutkin"}
+    assert set(PRESETS) == {
+        "sn2_anion",
+        "proton_transfer",
+        "menshutkin",
+        "e2",
+        "sn1_dissoc",
+    }
 
 
 def test_preset_is_frozen():
@@ -60,4 +66,24 @@ def test_reaction_preset_dataclass_signature():
         name="ad_hoc", k_form=1.0, k_broken=2.0,
         r_broken=4.5, max_relax_steps=120,
     )
+    assert p.r_form is None
+
+
+def test_e2_preset_values():
+    p = get_preset("e2")
+    assert p.name == "e2"
+    assert p.k_form == 1.0
+    assert p.k_broken == 1.0
+    assert p.r_broken == 4.0
+    assert p.max_relax_steps == 200
+    assert p.r_form is None  # element-pair table
+
+
+def test_sn1_dissoc_preset_values():
+    p = get_preset("sn1_dissoc")
+    assert p.name == "sn1_dissoc"
+    assert p.k_form == 0.0
+    assert p.k_broken == 2.0
+    assert p.r_broken == 6.0
+    assert p.max_relax_steps == 200
     assert p.r_form is None

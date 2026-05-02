@@ -45,6 +45,21 @@ PRESETS: dict[str, ReactionPreset] = {
     ),
 }
 
+PRESETS["e2"] = ReactionPreset(
+    name="e2",
+    k_form=1.0,
+    k_broken=1.0,
+    r_broken=4.0,
+    max_relax_steps=200,
+)
+PRESETS["sn1_dissoc"] = ReactionPreset(
+    name="sn1_dissoc",
+    k_form=0.0,
+    k_broken=2.0,
+    r_broken=6.0,
+    max_relax_steps=200,
+)
+
 
 def get_preset(name: str) -> ReactionPreset:
     """Return the built-in preset by name. Raises ValueError if unknown."""
