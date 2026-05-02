@@ -191,7 +191,11 @@ def _directional_placement(
                     break
             if anchor is not None:
                 break
-        assert anchor is not None and bridging_bond is not None
+        if anchor is None or bridging_bond is None:
+            raise RuntimeError(
+                f"fragment {fragment} has no entry in bridging_by_anchor — "
+                "this is a logic error in _directional_placement"
+            )
 
         relevant_broken = sorted(
             [(a, b) for a, b in bond_changes.broken if anchor in (a, b)],
