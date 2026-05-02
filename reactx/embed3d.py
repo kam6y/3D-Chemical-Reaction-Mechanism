@@ -1,8 +1,17 @@
 """Convert 2D RDKit Mol to 3D ase.Atoms via RDKit ETKDG + MMFF (+ optional UMA).
 
 Preserves the atom ordering of Chem.AddHs(mol) so that downstream consumers
-(align, NEB) can correlate atom indices with heavy_to_hydrogen_groups lookups
-on the same AddHs(mol) result.
+(align, NEB, restraints) can correlate atom indices with the same AddHs(mol)
+result.
+
+Multi-fragment placement (e.g. SN2 substrate + nucleophile) is driven by the
+caller-supplied SimpleBondChanges:
+- The substrate fragment is identified as the one containing both atoms of
+  the broken bond.
+- The nucleophile fragment(s) are placed along the backside direction
+  (-unit(anchor->leaving)) at FRAGMENT_SEPARATION distance.
+- An optional rotation_perturbation rotates the backside direction within
+  the cone of multi-angle trials.
 """
 from __future__ import annotations
 
@@ -14,6 +23,8 @@ from ase.calculators.calculator import Calculator
 from ase.optimize import BFGS
 from rdkit import Chem
 from rdkit.Chem import AllChem
+
+from reactx.bond_changes import SimpleBondChanges
 
 log = logging.getLogger(__name__)
 
@@ -28,15 +39,18 @@ def embed_mol_to_atoms(
     seed: int = 0xC0FFEE,
     fmax: float = 0.01,
     max_opt_steps: int = 300,
+    bond_changes: SimpleBondChanges | None = None,
+    rotation_perturbation: np.ndarray | None = None,
 ) -> Atoms:
     """Embed a 2D Mol into 3D and return an ase.Atoms with implicit Hs added.
 
-    Atom order in the returned Atoms matches Chem.AddHs(mol).GetAtoms() exactly.
-    For disconnected fragments, each is embedded independently and then placed
-    for backside attack geometry: the first fragment defines the substrate, and
-    subsequent fragments (nucleophile/leaving group) are placed on the -x side
-    of the first fragment so they approach anti to the leaving group (which MMFF
-    typically places along +x). This gives UMA a correct SN2 encounter complex.
+    For multi-fragment Mols, `bond_changes` MUST be provided; the substrate
+    fragment is identified as the one containing both broken-bond atoms, and
+    the remaining fragment(s) are placed along the backside direction.
+
+    `rotation_perturbation` (optional 3×3 numpy array) is left-multiplied
+    onto the computed backside direction before placement; identity = no
+    perturbation = Phase 0 baseline.
     """
     mol_h = Chem.AddHs(mol)
     n_atoms = mol_h.GetNumAtoms()
@@ -53,7 +67,15 @@ def embed_mol_to_atoms(
             positions[orig_idx] = (p.x, p.y, p.z)
 
     if len(frag_indices) > 1:
-        positions = _place_nucleophile_backside(mol_h, frag_indices, positions)
+        if bond_changes is None:
+            raise ValueError(
+                "Multi-fragment Mol requires bond_changes to determine placement; "
+                "got None. Compute via reactx.bond_changes.compute_simple_bond_changes."
+            )
+        positions = _place_nucleophile_backside(
+            mol_h, frag_indices, positions, bond_changes,
+            rotation_perturbation=rotation_perturbation,
+        )
 
     symbols = [a.GetSymbol() for a in mol_h.GetAtoms()]
     charges = [a.GetFormalCharge() for a in mol_h.GetAtoms()]
@@ -61,7 +83,7 @@ def embed_mol_to_atoms(
     atoms.set_initial_charges(charges)
 
     atoms.info["charge"] = int(sum(charges))
-    atoms.info["spin"] = 1  # Phase 0: assume closed-shell singlet
+    atoms.info["spin"] = 1  # Phase Re1: assume closed-shell singlet
 
     if calculator is not None:
         atoms.calc = calculator
@@ -70,72 +92,64 @@ def embed_mol_to_atoms(
     return atoms
 
 
-def _find_c_lg_bond(mol_h: Chem.Mol, substrate_indices: list[int]) -> tuple[int, int]:
-    """Locate the C and leaving-group (LG) atoms in the substrate fragment.
-
-    Phase 0 assumes an SN2-style substrate (CH3X). The heuristic picks the
-    C–heteroatom bond with the highest-Z heteroatom (F < Cl < Br < I; also
-    works for O, N, S). Hybridization is not enforced because Phase 0 only
-    ever sees sp3 substrates; broader inputs are out of scope (see spec §11).
-    """
-    best: tuple[int, int, int] | None = None
-    candidates: list[tuple[int, int, int]] = []
-    substrate_set = set(substrate_indices)
-    for atom in mol_h.GetAtoms():
-        if atom.GetIdx() not in substrate_set or atom.GetSymbol() != "C":
-            continue
-        for nb in atom.GetNeighbors():
-            if nb.GetIdx() not in substrate_set or nb.GetAtomicNum() <= 1:
-                continue
-            if nb.GetSymbol() == "C":
-                continue
-            z = nb.GetAtomicNum()
-            candidates.append((z, atom.GetIdx(), nb.GetIdx()))
-            if best is None or z > best[0]:
-                best = (z, atom.GetIdx(), nb.GetIdx())
-    if len(candidates) > 1:
-        # Beyond Phase 0's CH3X scope: max-Z is a guess, not a derivation.
-        log.warning(
-            "Substrate has %d C–heteroatom bonds; picking highest-Z (Z=%d, "
-            "atom %d) as leaving group. This heuristic is reliable only for "
-            "single-heteroatom SN2 substrates — review the choice for "
-            "multi-heteroatom inputs.",
-            len(candidates), best[0], best[2],
-        )
-    if best is None:
-        raise RuntimeError(
-            "No C–leaving-group bond found in substrate fragment. Phase 0 expects "
-            "an SN2-style substrate (sp3 C bonded to a halogen or heteroatom)."
-        )
-    return best[1], best[2]
-
-
 def _place_nucleophile_backside(
     mol_h: Chem.Mol,
     frag_indices: tuple[tuple[int, ...], ...],
     positions: np.ndarray,
+    bond_changes: SimpleBondChanges,
+    *,
+    rotation_perturbation: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Place nucleophile fragment(s) along -(C->LG) from the attacked carbon.
+    """Place non-substrate fragments along the rotated backside direction.
 
-    Uses the geometry of the substrate (fragment 0) to find the C-LG bond
-    direction, then places each nucleophile fragment's centroid at
-    ``C + (-unit(C->LG)) * FRAGMENT_SEPARATION``.
+    Substrate fragment = the one containing both atoms of the broken bond.
+    Anchor (= shared atom of formed and broken) and leaving (= other end of
+    broken) live in the substrate. Incoming (= other end of formed) lives in
+    the nucleophile fragment, which is shifted so its centroid aligns with
+    `anchor + R @ (-unit(anchor->leaving)) * FRAGMENT_SEPARATION`.
     """
-    substrate = list(frag_indices[0])
-    c_idx, lg_idx = _find_c_lg_bond(mol_h, substrate)
-    c_pos = positions[c_idx]
-    lg_pos = positions[lg_idx]
-    c_lg = lg_pos - c_pos
-    c_lg_norm = float(np.linalg.norm(c_lg))
-    if c_lg_norm < 1e-6:
-        raise RuntimeError("C and LG atoms coincide after MMFF — embedding is broken")
-    backside = -c_lg / c_lg_norm
+    a_form, b_form = bond_changes.formed
+    a_brk, b_brk = bond_changes.broken
+    shared = bond_changes.shared_atom
+    anchor = shared
+    leaving = b_brk if a_brk == shared else a_brk
+    incoming = b_form if a_form == shared else a_form
 
-    for i in range(1, len(frag_indices)):
-        nuc = list(frag_indices[i])
-        nuc_centroid = positions[nuc].mean(axis=0)
-        target = c_pos + backside * FRAGMENT_SEPARATION
-        positions[nuc] += target - nuc_centroid
+    substrate_frag = next(
+        (fi for fi in frag_indices if anchor in fi and leaving in fi), None
+    )
+    if substrate_frag is None:
+        raise ValueError(
+            f"Anchor {anchor} and leaving {leaving} are not in the same fragment; "
+            f"Phase Re1 expects the broken bond's two atoms to be co-fragmented."
+        )
+
+    nuc_fragments = [fi for fi in frag_indices if fi is not substrate_frag]
+    if not nuc_fragments:
+        raise ValueError(
+            "Only one fragment found, but multi-fragment placement was invoked. "
+            "(Internal inconsistency: did embed_mol_to_atoms call this for n_frags=1?)"
+        )
+
+    a_pos = positions[anchor]
+    c_pos = positions[leaving]
+    a_c = c_pos - a_pos
+    a_c_norm = float(np.linalg.norm(a_c))
+    if a_c_norm < 1e-6:
+        raise RuntimeError(
+            "Anchor and leaving atoms coincide after MMFF — embedding is broken."
+        )
+    backside = -a_c / a_c_norm
+    if rotation_perturbation is not None:
+        backside = rotation_perturbation @ backside
+
+    target = a_pos + backside * FRAGMENT_SEPARATION
+    for nuc in nuc_fragments:
+        if incoming in nuc:
+            nuc_centroid_anchor = positions[incoming]
+        else:
+            nuc_centroid_anchor = positions[list(nuc)].mean(axis=0)
+        positions[list(nuc)] += target - nuc_centroid_anchor
     return positions
 
 

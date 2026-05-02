@@ -89,3 +89,34 @@ def test_blender_bonds_detected(tmp_path: Path):
     assert re.search(r"bonds:\s*1\s+bond", result.stdout), (
         f"expected bond log line; stdout was:\n{result.stdout}"
     )
+
+
+@pytest.mark.blender
+@pytest.mark.slow
+@pytest.mark.parametrize("rxn_filename,extra_args", [
+    ("sn2.rxn", []),
+    ("proton_transfer.rxn", ["--r-form", "1.05"]),
+])
+def test_re1_blender_smoke_writes_blend(
+    tmp_path: Path, rxn_filename: str, extra_args: list[str],
+):
+    """End-to-end Phase Re1 pipeline + Blender renders for both reactions."""
+    from reactx.cli import main
+    if shutil.which(BLENDER) is None:
+        pytest.skip(f"Blender executable not found: {BLENDER}")
+
+    examples = Path(__file__).resolve().parent.parent / "examples"
+    rxn_path = examples / rxn_filename
+    out = tmp_path / rxn_filename.removesuffix(".rxn")
+    rc = main([
+        "run", str(rxn_path), "-o", str(out),
+        "--backend", "uma",
+        "--n-angles", "2",
+        "--max-relax-steps", "30",
+        "--render",
+        "--blender-exe", BLENDER,
+        *extra_args,
+    ])
+    assert rc == 0
+    assert (out / "scene.blend").exists()
+    assert (out / "trajectory.xyz").exists()

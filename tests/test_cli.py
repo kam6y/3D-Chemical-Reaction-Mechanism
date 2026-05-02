@@ -1,96 +1,159 @@
+"""CLI argument parsing smoke tests (no UMA invocation)."""
+import argparse
 import json
 from pathlib import Path
+from unittest.mock import patch
 
-from reactx import cli
+import pytest
+
+from reactx.cli import _resolve_effective_params, _write_outputs_and_exit, build_parser
+from reactx.scoring import TrialResult
 
 
-def test_cli_run_end_to_end_with_lj_backend(tmp_path: Path, sn2_rxn_path: Path):
-    out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "20",
-        "--backend", "lj",
+def test_default_flags_parse():
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/"])
+    assert a.cmd == "run"
+    assert a.n_angles == 8
+    assert a.cone_half_deg == 30.0
+    assert a.seed == 0
+    # Preset-overrideable flags now default to None (sentinel).
+    assert a.r_form is None
+    assert a.r_broken is None
+    assert a.k_form is None
+    assert a.k_broken is None
+    assert a.max_relax_steps is None
+    # Default reaction type:
+    assert a.reaction_type == "sn2_anion"
+    # Unchanged:
+    assert a.relax_fmax == 0.1
+    assert a.traj_stride == 5
+    assert a.neb_refine is False
+    assert a.neb_images == 7
+
+
+def test_neb_refine_flag():
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/", "--neb-refine"])
+    assert a.neb_refine is True
+
+
+def test_n_angles_override():
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/", "--n-angles", "1"])
+    assert a.n_angles == 1
+
+
+def test_r_form_override():
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/", "--r-form", "1.05"])
+    assert a.r_form == 1.05
+
+
+def test_reaction_type_explicit():
+    p = build_parser()
+    a = p.parse_args([
+        "run", "examples/sn2.rxn", "-o", "out/",
+        "--reaction-type", "menshutkin",
     ])
+    assert a.reaction_type == "menshutkin"
+
+
+def test_reaction_type_unknown_rejected():
+    p = build_parser()
+    with pytest.raises(SystemExit):
+        p.parse_args([
+            "run", "examples/sn2.rxn", "-o", "out/",
+            "--reaction-type", "not_a_preset",
+        ])
+
+
+def _make_args(**overrides):
+    """Build argparse Namespace for tests by parsing then overriding."""
+    p = build_parser()
+    a = p.parse_args(["run", "examples/sn2.rxn", "-o", "out/"])
+    for k, v in overrides.items():
+        setattr(a, k, v)
+    return a
+
+
+def test_resolve_defaults_to_sn2_anion_preset():
+    args = _make_args()
+    syms = ["C", "Cl", "H", "H", "H", "F"]  # formed = (0, 5) -> C-F
+    eff = _resolve_effective_params(args, syms, formed_pair=(0, 5))
+    assert eff["reaction_type"] == "sn2_anion"
+    assert eff["k_form"] == 0.5
+    assert eff["k_broken"] == 1.0
+    assert eff["r_broken"] == 4.0
+    assert eff["max_relax_steps"] == 100
+    # sn2_anion has no r_form override -> element-table lookup C-F = 1.39
+    assert eff["r_form"] == pytest.approx(1.39)
+
+
+def test_resolve_menshutkin_preset():
+    args = _make_args(reaction_type="menshutkin")
+    syms = ["N", "C", "Cl", "H", "H", "H", "H", "H", "H"]
+    eff = _resolve_effective_params(args, syms, formed_pair=(0, 1))  # N-C
+    assert eff["reaction_type"] == "menshutkin"
+    assert eff["k_form"] == 2.0
+    assert eff["k_broken"] == 2.0
+    assert eff["r_broken"] == 5.0
+    assert eff["max_relax_steps"] == 200
+    # menshutkin r_form = None -> element table N-C = 1.47
+    assert eff["r_form"] == pytest.approx(1.47)
+
+
+def test_resolve_proton_transfer_preset_uses_r_form_1_05():
+    args = _make_args(reaction_type="proton_transfer")
+    syms = ["H", "Cl", "N", "H", "H"]
+    eff = _resolve_effective_params(args, syms, formed_pair=(2, 0))  # N-H
+    assert eff["r_form"] == pytest.approx(1.05)
+
+
+def test_individual_flag_overrides_preset():
+    args = _make_args(reaction_type="menshutkin", k_form=3.5, r_broken=6.0)
+    syms = ["N", "C", "Cl"]
+    eff = _resolve_effective_params(args, syms, formed_pair=(0, 1))
+    assert eff["k_form"] == 3.5  # overridden
+    assert eff["r_broken"] == 6.0  # overridden
+    assert eff["k_broken"] == 2.0  # from preset
+    assert eff["max_relax_steps"] == 200  # from preset
+
+
+def test_r_form_individual_flag_overrides_preset_r_form():
+    args = _make_args(reaction_type="proton_transfer", r_form=1.10)
+    syms = ["H", "Cl", "N"]
+    eff = _resolve_effective_params(args, syms, formed_pair=(2, 0))
+    assert eff["r_form"] == pytest.approx(1.10)  # individual flag wins over preset 1.05
+
+
+def test_meta_json_includes_reaction_type_and_effective_params(tmp_path: Path):
+    args = argparse.Namespace(
+        backend="lj",
+        output=tmp_path,
+        reaction_type="menshutkin",
+    )
+    eff = {
+        "reaction_type": "menshutkin",
+        "k_form": 2.0, "k_broken": 2.0,
+        "r_broken": 5.0, "max_relax_steps": 200,
+        "r_form": 1.47,
+    }
+    trials = [TrialResult(
+        trial_idx=0, rotation_deg=0.0, frames=[], energies=[1.0, 2.0],
+        reached_product=True, peak_energy=2.0, n_steps=2,
+    )]
+    # Patch score_trials to avoid relying on its internals here.
+    with patch("reactx.cli.score_trials", return_value=trials[0]):
+        rc = _write_outputs_and_exit(
+            args, trials, t_start=0.0,
+            neb_refined=False, rc=0, effective=eff,
+        )
     assert rc == 0
-    assert (out / "trajectory.xyz").exists()
-    meta = json.loads((out / "meta.json").read_text())
-    assert meta["n_images"] == 5
-    energies = json.loads((out / "energies.json").read_text())
-    assert len(energies) == 5
-
-
-def test_cli_missing_rxn_returns_nonzero(tmp_path: Path):
-    rc = cli.main([
-        "run", str(tmp_path / "nope.rxn"), "-o", str(tmp_path / "out"),
-        "--backend", "lj",
-    ])
-    assert rc != 0
-
-
-def test_cli_render_flag_invokes_blender_when_successful(
-    tmp_path: Path, sn2_rxn_path: Path, monkeypatch
-):
-    """--render path success: mock subprocess.run to return rc=0."""
-    from reactx import cli as cli_mod
-
-    calls = []
-
-    class FakeResult:
-        returncode = 0
-
-    def fake_run(cmd, *args, **kwargs):
-        calls.append(cmd)
-        return FakeResult()
-
-    monkeypatch.setattr("subprocess.run", fake_run)
-    monkeypatch.setattr("shutil.which", lambda exe: f"/fake/{exe}")
-
-    out = tmp_path / "out"
-    rc = cli_mod.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "mock-blender",
-    ])
-    assert rc == 0
-    # Blender was invoked with the right positional args after "--"
-    assert any("mock-blender" in c[0] for c in calls), calls
-    assert any("--background" in c for c in calls)
-
-
-def test_cli_render_propagates_blender_failure(
-    tmp_path: Path, sn2_rxn_path: Path, monkeypatch
-):
-    """--render path failure: subprocess returns rc=1, CLI returns nonzero."""
-    class FakeResult:
-        returncode = 1
-
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: FakeResult())
-    monkeypatch.setattr("shutil.which", lambda exe: f"/fake/{exe}")
-
-    out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "mock-blender",
-    ])
-    assert rc != 0
-
-
-def test_cli_render_errors_when_blender_not_on_path(
-    tmp_path: Path, sn2_rxn_path: Path, monkeypatch
-):
-    """--render with missing blender returns nonzero before invoking subprocess."""
-    monkeypatch.setattr("shutil.which", lambda exe: None)
-
-    def fail_run(*a, **k):
-        raise AssertionError("subprocess.run should not be reached")
-
-    monkeypatch.setattr("subprocess.run", fail_run)
-
-    out = tmp_path / "out"
-    rc = cli.main([
-        "run", str(sn2_rxn_path), "-o", str(out),
-        "--images", "5", "--fmax", "0.5", "--max-steps", "10",
-        "--backend", "lj", "--render", "--blender-exe", "definitely-not-blender",
-    ])
-    assert rc != 0
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    assert meta["reaction_type"] == "menshutkin"
+    assert meta["effective_params"] == {
+        "k_form": 2.0, "k_broken": 2.0,
+        "r_broken": 5.0, "max_relax_steps": 200,
+        "r_form": 1.47,
+    }

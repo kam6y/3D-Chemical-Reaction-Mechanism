@@ -1,8 +1,8 @@
-# reactx — Phase 0 Spike
+# reactx — Phase Re1 Multi-Angle Path Engine
 
-2D 反応機構 (`.rxn`) から UMA + ASE NEB で 3D MEP を探索し、Blender で ball-and-stick アニメーションを再生するパイプラインのフェーズ 0 実装。
+2D 反応機構 (`.rxn`) から多角度サンプリング + Hookean/PullApart 拘束 + FIRE 緩和で 3D 反応経路を探索し、Blender で ball-and-stick アニメーションを生成するパイプライン。
 
-Phase 0 の範囲: SN2 反応 (CH₃Cl + F⁻ → CH₃F + Cl⁻) 1 件を end-to-end で貫通することに限定。
+**Phase Re1 の目標**: 正確な TS エネルギーではなく、妥当なアニメーション。NEB はオプション。対応反応: SN2 / proton transfer。
 
 ## セットアップ
 
@@ -16,24 +16,64 @@ Blender 4.x と `atomic-blender-pdb-xyz` アドオンを別途インストール
 ## 使い方
 
 ```bash
-reactx run examples/sn2.rxn -o out/ --images 15 --fmax 0.05 --backend uma
-blender --background --python blender/render.py -- out/trajectory.xyz out/scene.blend
+# SN2 (default; --reaction-type sn2_anion is implicit)
+reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
+# Proton transfer (HCl + NH3 -> Cl- + NH4+)
+reactx run examples/proton_transfer.rxn -o out/pt/ \
+  --reaction-type proton_transfer --backend uma --render
 ```
+
+反応クラスごとに別途チューニング済みプリセットがある (下節 [Reaction-type presets](#reaction-type-presets) 参照)。`--reaction-type` 省略時は `sn2_anion` 相当の挙動。
+
+主要フラグ:
+
+- `--n-angles 8` (default): 多角度試行数
+- `--cone-half-deg 30.0`: 多角度試行の cone 半角
+- `--r-form` (default: 元素ペアから自動): 形成結合の目標距離 (Å)
+- `--neb-refine` (default off): best trajectory を NEB で refinement (実行時間延長)
 
 生成物:
 
-- `out/trajectory.xyz` — 15+ フレームの NEB 軌跡 (default `--images 15`、padding 含む)
-- `out/energies.json` — 各 image のエネルギー
-- `out/meta.json` — 収束情報など
-- `out/scene.blend` — Blender シーン（GUI で開いて再生）
+- `out/<rxn>/trajectory.xyz` — best trial trajectory
+- `out/<rxn>/energies.json` — best trial エネルギー列
+- `out/<rxn>/meta.json` — trial 全件の score, wall_clock_seconds, neb_refined フラグ
+- `out/<rxn>/scene.blend` — Blender シーン
 
-## Phase 0 動作確認
+## Reaction-type presets
+
+`--reaction-type` で反応クラスごとにチューニング済みの拘束パラメータをまとめて適用できる。個別フラグ (`--k-form` / `--k-broken` / `--r-broken` / `--max-relax-steps` / `--r-form`) を併指定するとプリセット値を **常に上書き** する。`--reaction-type` 省略時は `sn2_anion` (現 default 相当)。
+
+| name | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form (Å) | 想定反応 |
+|---|---|---|---|---|---|---|
+| `sn2_anion` (default) | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 陰イオン求核剤の SN2 (例: O⁻ + CH₃Cl) |
+| `proton_transfer` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 中性間 PT (例: HCl + NH₃) |
+| `menshutkin` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 中性求核剤 → イオン対 (例: NH₃ + CH₃Cl) |
+
+```bash
+# SN2 (sn2_anion is the default; the flag is optional)
+reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
+
+# Proton transfer
+reactx run examples/proton_transfer.rxn -o out/pt/ \
+  --reaction-type proton_transfer --backend uma --render
+
+# Menshutkin (NH3 + CH3Cl -> CH3NH3+ + Cl-)
+reactx run examples/menshutkin.rxn -o out/men/ \
+  --reaction-type menshutkin --backend uma --render
+```
+
+**Menshutkin プリセットの根拠**: 既定値は陰イオン求核剤の外部熱的反応 (SN2 / PT) 用にチューニングされている。中性求核剤 + イオン対生成のような **内部熱的反応** では QM のバリア勾配が default の Hookean に勝って TS 手前で停滞するため、`k_form` / `k_broken` を倍化して引力・斥力を強化し、`r_broken` を 5.0 Å まで引き伸ばし、`max_relax_steps` を 200 に拡大している。
+
+各実行で実際に適用された effective parameters は `out/<rxn>/meta.json` の `effective_params` に記録され、再現性を担保する。
+
+## Phase Re1 動作確認
 
 DoD は以下の手順で確認する:
 
-1. `reactx run examples/sn2.rxn -o out/ --backend uma --render` を実行 → `out/trajectory.xyz`, `out/scene.blend` が生成される。
-2. `out/scene.blend` を Blender GUI で開き、再生して **F⁻ が CH₃Cl の背面から接近 → C 中心の sp³ 反転 → Cl⁻ が脱離** する Walden 反転シーケンスが視認できることを確認する。
-3. `pytest -m slow` で `test_neb_sn2` を実行し、TS の C–F–Cl 角度が一定値以上であることを確認する。
+1. `reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render` を実行 → `meta.json` の `selected_trial >= 0`, `trials[].reached_product` で少なくとも 1 件 True を確認
+2. `out/sn2/scene.blend` を Blender GUI で開いて Walden 反転を視認
+3. `reactx run examples/proton_transfer.rxn -o out/pt/ --reaction-type proton_transfer --backend uma --render` を実行 → 同様に視認
+4. `pytest -m slow` で SN2 + proton_transfer 統合テストが pass
 
 ## レンダリング: 原子球サイズと結合棒
 
@@ -46,18 +86,26 @@ DoD は以下の手順で確認する:
 
 詳細仕様: `docs/superpowers/specs/2026-04-26-vdw-radii-design.md`
 
-## Phase 0 の既知の制約
+## Phase Re1 の方針と限界
 
-- **TS の線形性閾値が 170° → 120° に緩和**。`uma-m-1p1` (omol task) では SN2 の TS が安定して 170° (ほぼ線形) に到達しないため、Phase 0 では背面攻撃の方向性確認に留める。詳細は `docs/superpowers/specs/2026-04-20-reactx-phase-0-design.md` §9。Phase 1 でモデル/最適化チューニング後に再引き締め予定。
-- **TS 付近のスローダウン再生** は Phase 1 で実装予定。Phase 0 の `blender/render.py` は軌跡を均一速度で再生する。
-- **Bond 形成・切断の dynamic fade (滑らかなフェード)** は Phase 1 で実装予定。Phase 0 の `render.py` はフレームごとに表示/非表示を切り替える (constant interpolation、ハードカット)。
-- **`.mp4` 最終レンダリング** は Phase 0 スコープ外。Blender GUI で `.blend` を開いて再生する。
+- 目的は妥当なアニメーション (TS エネルギーの正確さは目標としない)
+- NEB は default off。`--neb-refine` で smoothing 可能だが wall-clock が大幅に伸びる
+- 対応反応は形成 1 + 切断 1 の elementary step に限定 (SN2 / proton transfer 等)。E2 / SN1 step 1 / β-H elimination などは Phase 2 へ持ち越し
+- ラジカル / open-shell / 溶媒効果は対象外
+- 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md`
 
-`--render` フラグを付けると CLI から Blender を直接呼び出す:
+## Wall-clock (実測)
 
-```bash
-reactx run examples/sn2.rxn -o out/ --render --blender-exe /path/to/blender
-```
+NVIDIA GPU + UMA-m-1p1 で実測 (default `--n-angles 8`):
+
+| Reaction | wall-clock | trials reached_product | best peak energy |
+|---|---|---|---|
+| SN2 (`examples/sn2.rxn`) | ~67 s | 8 / 8 | -16322.74 eV |
+| Proton transfer (`examples/proton_transfer.rxn --r-form 1.05`) | ~116 s | 8 / 8 | -14072.91 eV |
+
+`--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (DoD 用テスト `test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
+
+各実行の trial 全件スコアと wall_clock_seconds は `out/<rxn>/meta.json` に残る。
 
 ## テスト
 
@@ -70,8 +118,18 @@ pytest -m blender        # Blender smoke test (ローカル環境のみ)
 ## アーキテクチャ
 
 ```
-.rxn → rxn_parser → embed3d → align → neb → trajectory.xyz → blender/render.py → .blend
+.rxn → rxn_parser → bond_changes (formed/broken) → embed3d (rotation perturb)
+                                                   ├ trial 1
+                                                   ├ trial 2  ─┐
+                                                   ├ ...        │ FIRE + Hookean/PullApart restraints
+                                                   └ trial N  ─┘
+                                                          ↓
+                                                   scoring → best trial
+                                                          ↓
+                                          (optional) neb refinement
+                                                          ↓
+                                                  trajectory.xyz → blender/render.py → .blend
 ```
 
-詳細設計: `docs/superpowers/specs/2026-04-20-reactx-phase-0-design.md`
-実装計画: `docs/superpowers/plans/2026-04-20-reactx-phase-0-implementation.md`
+詳細設計: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md`
+実装計画: `docs/superpowers/plans/2026-04-27-reactx-phase-Re1-implementation.md`

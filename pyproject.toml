@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "reactx"
 version = "0.0.1"
-description = "2D reaction scheme to 3D NEB trajectory and Blender animation (Phase 0 spike)"
+description = "2D reaction scheme to 3D reaction trajectory and Blender animation via multi-angle artificial-force path engine (Phase Re1)"
 requires-python = ">=3.11"
 dependencies = [
     "rdkit>=2025.3",
