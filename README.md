@@ -99,15 +99,17 @@ DoD は以下の手順で確認する:
 
 ## Wall-clock (実測)
 
-NVIDIA GPU + UMA-m-1p1 で実測 (default `--n-angles 8 --prescreen-keep 3`):
+RTX 5070 Ti + UMA-m-1p1 で実測 (default `--n-angles 8 --prescreen-keep 3`):
 
-| Reaction | wall-clock (旧, 8/8 UMA) | wall-clock (新, prescreen + 3/8 UMA) | 短縮率 |
+| Reaction | wall-clock (旧, 8/8 UMA) | wall-clock (新, prescreen + 3/8 UMA) | 備考 |
 |---|---|---|---|
-| SN2 (`examples/sn2.rxn`) | ~67 s | ~25–30 s | ~55 % |
-| Proton transfer (`examples/proton_transfer.rxn`) | ~116 s | ~45–50 s | ~60 % |
-| Menshutkin (`examples/menshutkin.rxn`) | ~3 min | ~1.5 min (MMFF fallback 時は変化なし) | ~50 % |
+| SN2 (`examples/sn2.rxn`) | ~67 s | **~54 s** | MMFF 動作、3/3 reached_product |
+| Proton transfer (`examples/proton_transfer.rxn`) | ~116 s | **~117 s** | HCl で MMFF parameterize 失敗 → 8/8 UMA に fallback |
+| Menshutkin (`examples/menshutkin.rxn`) | ~3 min | **~41 s** | MMFF 動作、3/3 reached_product |
 
-MMFF94 prescreen は中性求核剤の SN2 / PT で効率的に上位 trial を選別できるが、ion pair (Menshutkin の生成側) を含む系では parameterize に失敗してフォールバック (= 旧挙動と同一の wall-clock) する場合がある。失敗は `meta.json.prescreen.mmff_failed=true` で確認できる。`--no-mmff-prescreen` で明示的に旧挙動を再現することも可能。
+MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗してフォールバック (= 旧挙動と同一の wall-clock) する。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、`--no-mmff-prescreen` で明示的に旧挙動を再現することも可能。
+
+UMA model load (~25-30 s) が固定コストとして wall-clock を支配するため、prescreen による短縮幅は SN2 で ~20 %、Menshutkin で ~75 % など反応や trial 当たりの relax コストに依存する。
 
 `--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (DoD 用テスト `test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 
