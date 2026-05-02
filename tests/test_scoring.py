@@ -63,3 +63,31 @@ def test_score_trials_falls_back_to_least_bad_when_all_failed():
 def test_score_trials_empty_raises():
     with pytest.raises(ValueError):
         score_trials([])
+
+
+def test_reached_product_per_bond_r_form_targets():
+    """Phase 3: r_form_targets list で formed bond ごとに別個に判定する。"""
+    a = Atoms("OFCN", positions=[
+        [0, 0, 0], [1.5, 0, 0], [-3.0, 0, 0], [-3.0, 1.05, 0],
+    ])
+    # Two formed bonds with different targets (O-F: 1.5, C-N: 1.05).
+    assert reached_product(
+        a, formed=[(0, 1), (2, 3)], broken=[],
+        r_form_targets=[1.5, 1.05], r_broken_target=4.0,
+    ) is True
+
+    a.set_positions([[0, 0, 0], [3.0, 0, 0], [-3.0, 0, 0], [-3.0, 1.05, 0]])
+    assert reached_product(
+        a, formed=[(0, 1), (2, 3)], broken=[],
+        r_form_targets=[1.5, 1.05], r_broken_target=4.0,
+    ) is False
+
+
+def test_reached_product_mismatched_targets_length_raises():
+    a = Atoms("OF", positions=[[0, 0, 0], [1.5, 0, 0]])
+    with pytest.raises(ValueError, match="r_form_targets"):
+        reached_product(
+            a, formed=[(0, 1)], broken=[],
+            r_form_targets=[1.5, 1.05],
+            r_broken_target=4.0,
+        )

@@ -21,6 +21,12 @@ def test_neb_refine_rejected_for_e2_reaction(tmp_path, monkeypatch, caplog):
 
     out = tmp_path / "out"
     monkeypatch.setattr(cli, "_check_hf_auth", lambda: 0)
+    # Enable log propagation so caplog can capture reactx messages.
+    # _configure_reactx_logging() sets propagate=False, so neutralize it and
+    # restore propagate after.
+    monkeypatch.setattr(cli, "_configure_reactx_logging", lambda: None)
+    cli.log.propagate = True
+    caplog.set_level("INFO", logger="reactx")
 
     rc = cli.main([
         "run", str(rxn), "-o", str(out),
