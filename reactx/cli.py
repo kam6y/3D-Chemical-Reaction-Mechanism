@@ -19,6 +19,7 @@ from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
 from reactx.path_relax import relax_with_restraints
+from reactx.prescreen import PrescreenResult, prescreen_trials
 from reactx.presets import get_preset
 from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
 from reactx.scoring import TrialResult, reached_product, score_trials
@@ -65,6 +66,13 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Override FIRE max steps. Default: from preset.")
     run.add_argument("--relax-fmax", type=float, default=0.1)
     run.add_argument("--traj-stride", type=int, default=5)
+
+    run.add_argument("--no-mmff-prescreen", action="store_true",
+                     help="Disable MMFF94 prescreen and run all N trials through UMA.")
+    run.add_argument("--prescreen-keep", type=int, default=3,
+                     help="Top-K trials to pass to UMA after MMFF prescreen.")
+    run.add_argument("--prescreen-steps", type=int, default=30,
+                     help="MMFF FIRE step budget per prescreen trial.")
 
     run.add_argument("--neb-refine", action="store_true",
                      help="Refine the best trial trajectory with a short NEB")
@@ -217,23 +225,60 @@ def _cmd_run(args: argparse.Namespace) -> int:
         n=args.n_angles, cone_half_deg=args.cone_half_deg, seed=args.seed,
     )
 
-    trials: list[TrialResult] = []
+    # Phase 1: embed every rotation; collect successful embeds with their angles.
+    embedded_by_idx: dict[int, tuple] = {}
     for i, R in enumerate(rotations):
         rot_deg = _angle_from_identity_deg(R)
-        log.info("trial %d/%d (rotation_deg=%.1f)", i + 1, len(rotations), rot_deg)
         try:
             atoms_init = embed_mol_to_atoms(
                 r_mol, calculator=None, seed=1 + i,
                 bond_changes=bond_changes, rotation_perturbation=R,
             )
+            embedded_by_idx[i] = (atoms_init, rot_deg)
         except Exception as exc:  # noqa: BLE001
             log.warning("trial %d embed failed: %s", i, exc)
-            trials.append(TrialResult(
-                trial_idx=i, rotation_deg=rot_deg, frames=[], energies=[],
-                reached_product=False, peak_energy=float("inf"), n_steps=0,
-            ))
-            continue
 
+    # Phase 2: optionally prescreen with MMFF94 to pick top-K of N for UMA.
+    prescreen_meta: dict | None = None
+    keep_trial_indices: list[int]
+    if args.no_mmff_prescreen:
+        log.info("prescreen: disabled (--no-mmff-prescreen)")
+        keep_trial_indices = sorted(embedded_by_idx.keys())
+        prescreen_meta = {
+            "enabled": False, "kept": None, "skipped": None,
+            "mmff_failed": None, "wall_clock_seconds": 0.0,
+        }
+    elif embedded_by_idx:
+        ordered = sorted(embedded_by_idx.keys())
+        atoms_for_prescreen = [embedded_by_idx[i][0] for i in ordered]
+        mol_h_template = Chem.AddHs(r_mol)
+        pre = prescreen_trials(
+            atoms_list=atoms_for_prescreen,
+            mol_h_template=mol_h_template,
+            formed=[formed_pair], broken=[broken_pair],
+            r_form_target=r_form_target,
+            r_broken_target=eff["r_broken"],
+            k_form=eff["k_form"], k_broken=eff["k_broken"],
+            max_steps=args.prescreen_steps,
+            k_keep=args.prescreen_keep,
+        )
+        keep_trial_indices = [ordered[k] for k in pre.kept]
+        skipped_trial_indices = [ordered[s] for s in pre.skipped]
+        prescreen_meta = {
+            "enabled": True,
+            "kept": list(keep_trial_indices),
+            "skipped": list(skipped_trial_indices),
+            "mmff_failed": pre.mmff_failed,
+            "wall_clock_seconds": pre.wall_clock_seconds,
+        }
+    else:
+        keep_trial_indices = []
+
+    # Phase 3: UMA relax for the kept trials only.
+    trials: list[TrialResult] = []
+    for i in keep_trial_indices:
+        atoms_init, rot_deg = embedded_by_idx[i]
+        log.info("trial %d (rotation_deg=%.1f)", i, rot_deg)
         restraints = build_restraints(
             atoms_init,
             formed=[formed_pair],
@@ -275,7 +320,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     if not any(t.frames for t in trials):
         log.error("All trials failed. See meta.json for details.")
-        return _write_outputs_and_exit(args, trials, t_start, neb_refined=False, rc=1, effective=eff)
+        return _write_outputs_and_exit(
+            args, trials, t_start, neb_refined=False, rc=1,
+            effective=eff, prescreen_meta=prescreen_meta,
+        )
 
     best = score_trials(trials)
     log.info(
@@ -314,7 +362,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     xyz = args.output / "trajectory.xyz"
     write(str(xyz), final_frames, format="extxyz")
 
-    rc = _write_outputs_and_exit(args, trials, t_start, neb_refined=neb_refined, rc=0, effective=eff)
+    rc = _write_outputs_and_exit(
+        args, trials, t_start, neb_refined=neb_refined, rc=0,
+        effective=eff, prescreen_meta=prescreen_meta,
+    )
     if rc != 0:
         return rc
 
@@ -341,6 +392,7 @@ def _write_outputs_and_exit(
     neb_refined: bool,
     rc: int,
     effective: dict | None = None,
+    prescreen_meta: dict | None = None,
 ) -> int:
     selected = -1
     converged = False
@@ -367,6 +419,7 @@ def _write_outputs_and_exit(
             }
             for t in trials
         ],
+        "prescreen": prescreen_meta,
         "wall_clock_seconds": float(time.monotonic() - t_start),
         "neb_refined": neb_refined,
         "effective_params": (
