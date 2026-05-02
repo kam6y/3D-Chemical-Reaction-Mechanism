@@ -199,6 +199,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # `broken` = the reactant-formed bond (e.g. C-F in CH3F), which keeps the
     # substrate fragment correctly grouped. `formed` then defines where the
     # nucleophile-side fragment (Cl- in product) is placed via backside.
+    # Phase Re1 (1 formed + 1 broken) compatibility; Task 4 will iterate over
+    # bond_changes.formed/broken when formed_pairs/r_form_targets are wired in.
     a_form_r, b_form_r = bond_changes.formed[0]
     a_brk_r, b_brk_r = bond_changes.broken[0]
     bond_changes_product = BondChanges(

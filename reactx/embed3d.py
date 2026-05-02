@@ -108,6 +108,8 @@ def _place_nucleophile_backside(
     the nucleophile fragment, which is shifted so its centroid aligns with
     `anchor + R @ (-unit(anchor->leaving)) * FRAGMENT_SEPARATION`.
     """
+    # Phase Re1 (1 formed + 1 broken) shape; Task 2 dispatcher will replace this
+    # with multi-bond _directional_placement.
     a_form, b_form = bond_changes.formed[0]
     a_brk, b_brk = bond_changes.broken[0]
     common = (set((a_form, b_form)) & set((a_brk, b_brk)))

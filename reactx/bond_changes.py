@@ -83,6 +83,13 @@ def _build_full_atom_mapping(
     explicit-mapped H). Remaining unmapped Hs are paired by their bonded heavy
     atom group: reactant Hs of heavy_r <-> product Hs of heavy_p where
     heavy_r -> heavy_p in heavy_mapping.
+
+    Index-space assumption: heavy_mapping uses indices that are valid in BOTH
+    the pre-AddHs Mol and the post-AddHs Mol. This holds because Chem.AddHs
+    appends implicit Hs at indices >= original atom count, preserving every
+    pre-existing atom's index. Callers must pass a heavy_mapping derived from
+    parse_rxn (= pre-AddHs atom-map-number lookup) together with the AddHs'd
+    Mols.
     """
     full: dict[int, int] = dict(heavy_mapping)
     used_p: set[int] = set(full.values())
