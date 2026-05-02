@@ -42,14 +42,14 @@ def test_embed_ch3cl_has_reasonable_hch_angles():
 
 
 def test_embed_multifragment_places_fragments_apart():
-    from reactx.bond_changes import SimpleBondChanges
+    from reactx.bond_changes import BondChanges
     mol = Chem.MolFromSmiles("CCl.[F-]")
     mol_h = Chem.AddHs(mol)
     syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
     c_idx = syms.index("C")
     cl_idx = syms.index("Cl")
     f_idx = syms.index("F")
-    bc = SimpleBondChanges(formed=(c_idx, f_idx), broken=(c_idx, cl_idx))
+    bc = BondChanges(formed=((c_idx, f_idx),), broken=((c_idx, cl_idx),))
 
     atoms = embed_mol_to_atoms(mol, calculator=None, seed=42, bond_changes=bc)
     syms_out = atoms.get_chemical_symbols()
@@ -71,27 +71,27 @@ def test_embed_failure_raises_runtime_error(monkeypatch):
 def test_embed_multifragment_preserves_addhs_ordering():
     """Critical invariant: embed output atom order must match Chem.AddHs(mol)
     so downstream align + heavy_to_hydrogen_groups can share indices."""
-    from reactx.bond_changes import SimpleBondChanges
+    from reactx.bond_changes import BondChanges
     mol = Chem.MolFromSmiles("CCl.[F-]")
     mol_h = Chem.AddHs(mol)
     expected_symbols = [a.GetSymbol() for a in mol_h.GetAtoms()]
     syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
-    bc = SimpleBondChanges(
-        formed=(syms.index("C"), syms.index("F")),
-        broken=(syms.index("C"), syms.index("Cl")),
+    bc = BondChanges(
+        formed=((syms.index("C"), syms.index("F")),),
+        broken=((syms.index("C"), syms.index("Cl")),),
     )
     atoms = embed_mol_to_atoms(mol, calculator=None, seed=42, bond_changes=bc)
     assert atoms.get_chemical_symbols() == expected_symbols
 
 
 def test_embed_sets_total_charge_and_spin_in_info():
-    from reactx.bond_changes import SimpleBondChanges
+    from reactx.bond_changes import BondChanges
     mol = Chem.MolFromSmiles("CCl.[F-]")
     mol_h = Chem.AddHs(mol)
     syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
-    bc = SimpleBondChanges(
-        formed=(syms.index("C"), syms.index("F")),
-        broken=(syms.index("C"), syms.index("Cl")),
+    bc = BondChanges(
+        formed=((syms.index("C"), syms.index("F")),),
+        broken=((syms.index("C"), syms.index("Cl")),),
     )
     atoms = embed_mol_to_atoms(mol, calculator=None, seed=42, bond_changes=bc)
     assert atoms.info["charge"] == -1
@@ -108,13 +108,13 @@ def test_embed_neutral_molecule_has_zero_charge():
 def test_embed_rotation_perturbation_changes_nucleophile_position():
     """A non-identity rotation_perturbation should move the nucleophile fragment
     relative to the identity case."""
-    from reactx.bond_changes import SimpleBondChanges
+    from reactx.bond_changes import BondChanges
     mol = Chem.MolFromSmiles("CCl.[F-]")
     mol_h = Chem.AddHs(mol)
     syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
-    bc = SimpleBondChanges(
-        formed=(syms.index("C"), syms.index("F")),
-        broken=(syms.index("C"), syms.index("Cl")),
+    bc = BondChanges(
+        formed=((syms.index("C"), syms.index("F")),),
+        broken=((syms.index("C"), syms.index("Cl")),),
     )
     a_id = embed_mol_to_atoms(mol, calculator=None, seed=42, bond_changes=bc)
     # 30° rotation around y-axis
@@ -137,7 +137,7 @@ def test_embed_proton_transfer_substrate_is_hcl_fragment():
     """For HCl + NH3 → Cl- + NH4+, the broken bond is H-Cl. The substrate
     fragment must be HCl (containing both H and Cl), even though NH3 has
     more atoms after AddHs."""
-    from reactx.bond_changes import SimpleBondChanges
+    from reactx.bond_changes import BondChanges
     from reactx.rxn_parser import parse_rxn
     r_mol, _, _ = parse_rxn("examples/proton_transfer.rxn")
     r_h = Chem.AddHs(r_mol)
@@ -147,7 +147,7 @@ def test_embed_proton_transfer_substrate_is_hcl_fragment():
     proton_idx = next(
         a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 1
     )
-    bc = SimpleBondChanges(formed=(n_idx, proton_idx), broken=(proton_idx, cl_idx))
+    bc = BondChanges(formed=((n_idx, proton_idx),), broken=((proton_idx, cl_idx),))
     atoms = embed_mol_to_atoms(r_mol, calculator=None, seed=42, bond_changes=bc)
 
     # After placement, N should be on the opposite side of Cl from the proton

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from rdkit import Chem
 
-from reactx.bond_changes import compute_simple_bond_changes
+from reactx.bond_changes import compute_bond_changes
 from reactx.rxn_parser import parse_rxn
 
 
@@ -25,10 +25,12 @@ def test_menshutkin_bond_changes_n_c_formed_c_cl_broken(menshutkin_rxn_path: Pat
     r_mol, p_mol, mapping = parse_rxn(menshutkin_rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
-    bc = compute_simple_bond_changes(r_h, p_h, mapping)
+    bc = compute_bond_changes(r_h, p_h, mapping)
     # Symbols on reactant-side at the bond endpoints
     syms = [a.GetSymbol() for a in r_h.GetAtoms()]
-    formed_syms = sorted([syms[bc.formed[0]], syms[bc.formed[1]]])
-    broken_syms = sorted([syms[bc.broken[0]], syms[bc.broken[1]]])
+    assert len(bc.formed) == 1
+    assert len(bc.broken) == 1
+    formed_syms = sorted([syms[bc.formed[0][0]], syms[bc.formed[0][1]]])
+    broken_syms = sorted([syms[bc.broken[0][0]], syms[bc.broken[0][1]]])
     assert formed_syms == ["C", "N"]
     assert broken_syms == ["C", "Cl"]

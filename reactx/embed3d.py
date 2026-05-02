@@ -5,7 +5,7 @@ Preserves the atom ordering of Chem.AddHs(mol) so that downstream consumers
 result.
 
 Multi-fragment placement (e.g. SN2 substrate + nucleophile) is driven by the
-caller-supplied SimpleBondChanges:
+caller-supplied BondChanges:
 - The substrate fragment is identified as the one containing both atoms of
   the broken bond.
 - The nucleophile fragment(s) are placed along the backside direction
@@ -24,7 +24,7 @@ from ase.optimize import BFGS
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from reactx.bond_changes import SimpleBondChanges
+from reactx.bond_changes import BondChanges
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def embed_mol_to_atoms(
     seed: int = 0xC0FFEE,
     fmax: float = 0.01,
     max_opt_steps: int = 300,
-    bond_changes: SimpleBondChanges | None = None,
+    bond_changes: BondChanges | None = None,
     rotation_perturbation: np.ndarray | None = None,
 ) -> Atoms:
     """Embed a 2D Mol into 3D and return an ase.Atoms with implicit Hs added.
@@ -70,7 +70,7 @@ def embed_mol_to_atoms(
         if bond_changes is None:
             raise ValueError(
                 "Multi-fragment Mol requires bond_changes to determine placement; "
-                "got None. Compute via reactx.bond_changes.compute_simple_bond_changes."
+                "got None. Compute via reactx.bond_changes.compute_bond_changes."
             )
         positions = _place_nucleophile_backside(
             mol_h, frag_indices, positions, bond_changes,
@@ -96,7 +96,7 @@ def _place_nucleophile_backside(
     mol_h: Chem.Mol,
     frag_indices: tuple[tuple[int, ...], ...],
     positions: np.ndarray,
-    bond_changes: SimpleBondChanges,
+    bond_changes: BondChanges,
     *,
     rotation_perturbation: np.ndarray | None = None,
 ) -> np.ndarray:
@@ -108,9 +108,15 @@ def _place_nucleophile_backside(
     the nucleophile fragment, which is shifted so its centroid aligns with
     `anchor + R @ (-unit(anchor->leaving)) * FRAGMENT_SEPARATION`.
     """
-    a_form, b_form = bond_changes.formed
-    a_brk, b_brk = bond_changes.broken
-    shared = bond_changes.shared_atom
+    a_form, b_form = bond_changes.formed[0]
+    a_brk, b_brk = bond_changes.broken[0]
+    common = (set((a_form, b_form)) & set((a_brk, b_brk)))
+    if len(common) != 1:
+        raise ValueError(
+            f"formed {bond_changes.formed[0]} and broken {bond_changes.broken[0]} "
+            f"must share exactly one atom; got {common}"
+        )
+    shared = next(iter(common))
     anchor = shared
     leaving = b_brk if a_brk == shared else a_brk
     incoming = b_form if a_form == shared else a_form

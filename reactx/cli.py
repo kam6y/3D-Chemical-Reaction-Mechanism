@@ -14,7 +14,7 @@ from rdkit import Chem
 
 from reactx.align import align_product_to_reactant
 from reactx.artificial_force import build_restraints, lookup_r_form
-from reactx.bond_changes import SimpleBondChanges, compute_simple_bond_changes
+from reactx.bond_changes import BondChanges, compute_bond_changes
 from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
@@ -190,24 +190,24 @@ def _cmd_run(args: argparse.Namespace) -> int:
     r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
-    bond_changes = compute_simple_bond_changes(r_h, p_h, mapping)
+    bond_changes = compute_bond_changes(r_h, p_h, mapping)
 
     # bond_changes is reactant-space; for product embedding (neb-refine path)
-    # we feed embed3d a product-space SimpleBondChanges constructed by
+    # we feed embed3d a product-space BondChanges constructed by
     # swapping roles + remapping indices. embed3d identifies the substrate as
     # the fragment containing both atoms of `broken`, so for product we set
     # `broken` = the reactant-formed bond (e.g. C-F in CH3F), which keeps the
     # substrate fragment correctly grouped. `formed` then defines where the
     # nucleophile-side fragment (Cl- in product) is placed via backside.
-    a_form_r, b_form_r = bond_changes.formed
-    a_brk_r, b_brk_r = bond_changes.broken
-    bond_changes_product = SimpleBondChanges(
-        formed=(mapping[a_brk_r], mapping[b_brk_r]),    # nucleophile-fragment placement direction
-        broken=(mapping[a_form_r], mapping[b_form_r]),  # substrate-cohesion bond (intact in product)
+    a_form_r, b_form_r = bond_changes.formed[0]
+    a_brk_r, b_brk_r = bond_changes.broken[0]
+    bond_changes_product = BondChanges(
+        formed=((mapping[a_brk_r], mapping[b_brk_r]),),    # nucleophile-fragment placement direction
+        broken=((mapping[a_form_r], mapping[b_form_r]),),  # substrate-cohesion bond (intact in product)
     )
 
-    formed_pair = bond_changes.formed
-    broken_pair = bond_changes.broken
+    formed_pair = bond_changes.formed[0]
+    broken_pair = bond_changes.broken[0]
     syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
     eff = _resolve_effective_params(args, syms_r, formed_pair)
     r_form_target = eff["r_form"]
