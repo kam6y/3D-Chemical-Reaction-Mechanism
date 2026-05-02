@@ -119,3 +119,35 @@ def test_place_fragments_raises_for_multi_base_on_single_anchor():
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
         )
+
+
+def test_place_fragments_bystander_fragment_raises():
+    """Non-substrate fragment が formed bond で substrate と橋渡しされていない場合は ValueError。
+
+    例: 3 fragment 系で、substrate (broken intra) + 連結された base + bystander (どの bond にも関与しない)。
+    """
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.[F-].[Cl-]"))
+    frags = Chem.GetMolFrags(mol)
+    c0, c1 = frags[0][0], frags[0][1]
+    f_idx = frags[1][0]
+    cl_idx = frags[2][0]
+    # formed C-F は substrate-base 橋渡し、broken C-C は substrate intra。
+    # Cl- は formed/broken いずれにも関与しない bystander。
+    bc = BondChanges(
+        formed=((c0, f_idx),),
+        broken=((c0, c1),),
+    )
+    with pytest.raises(ValueError, match="bridging"):
+        _place_fragments(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
+        )
+
+
+def test_embed_mol_to_atoms_unimolecular_skips_dispatcher():
+    """unimolecular (1 fragment) では _place_fragments が呼ばれず、bond_changes も不要。"""
+    from reactx.embed3d import embed_mol_to_atoms
+    mol = Chem.MolFromSmiles("CCO")  # 1 fragment, no bond_changes needed
+    atoms = embed_mol_to_atoms(mol, calculator=None, seed=42)
+    # Embedded successfully without bond_changes (which would be required for multi-fragment).
+    assert len(atoms) > 0
