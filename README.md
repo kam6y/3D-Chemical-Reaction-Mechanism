@@ -4,6 +4,8 @@
 
 **Phase Re1 の目標**: 正確な TS エネルギーではなく、妥当なアニメーション。NEB はオプション。対応反応: SN2 / proton transfer。
 
+**Phase 3** で multi-bond 反応 (E2 elimination = 1 formed + 2 broken / SN1 step 1 解離 = 0 formed + 1 broken) に拡張。
+
 ## セットアップ
 
 ```bash
@@ -51,6 +53,8 @@ reactx run examples/proton_transfer.rxn -o out/pt/ \
 | `sn2_anion` (default) | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 陰イオン求核剤の SN2 (例: O⁻ + CH₃Cl) |
 | `proton_transfer` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 中性間 PT (例: HCl + NH₃) |
 | `menshutkin` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 中性求核剤 → イオン対 (例: NH₃ + CH₃Cl) |
+| `e2` | 1.0 | 1.0 | 4.0 | 200 | 元素表 (典型: O–H 0.97 / N–H 1.01) | E2 elimination, 1 formed + 2 broken (例: CH₃CH₂Cl + OH⁻) |
+| `sn1_dissoc` | 0.0 | 2.0 | 6.0 | 200 | — (formed=0) | SN1 step 1 解離, 0 formed + 1 broken (例: (CH₃)₃CBr → t-Bu⁺ + Br⁻) |
 
 ```bash
 # SN2 (sn2_anion is the default; the flag is optional)
@@ -69,7 +73,7 @@ reactx run examples/menshutkin.rxn -o out/men/ \
 
 各実行で実際に適用された effective parameters は `out/<rxn>/meta.json` の `effective_params` に記録され、再現性を担保する。
 
-## Phase Re1 動作確認
+## Phase Re1 + Phase 3 動作確認
 
 DoD は以下の手順で確認する:
 
@@ -77,6 +81,11 @@ DoD は以下の手順で確認する:
 2. `out/sn2/scene.blend` を Blender GUI で開いて Walden 反転を視認
 3. `reactx run examples/proton_transfer.rxn -o out/pt/ --reaction-type proton_transfer --backend uma --render` を実行 → 同様に視認
 4. `pytest -m slow` で SN2 + proton_transfer 統合テストが pass
+5. `reactx run examples/e2.rxn -o out/e2/ --reaction-type e2 --backend uma --render` を実行
+   → `meta.json` で `selected_trial >= 0`, `reached_product=True` の trial が ≥1 件、`out/e2/scene.blend` で C–H と C–Cl の同時切断 + base (OH⁻) 接近を視認
+6. `reactx run examples/sn1_dissoc.rxn -o out/sn1d/ --reaction-type sn1_dissoc --backend uma` を実行
+   → `meta.json.trials` が 1 件 (unimolecular auto-clamp), `trajectory.xyz` で C–Br 距離が ≥4.5 Å まで伸びる
+7. `pytest -m slow` で `test_re3_e2` + `test_re3_sn1_dissoc` + 既存 SN2/PT/Menshutkin が全 pass
 
 ## レンダリング: 原子球サイズと結合棒
 
@@ -89,13 +98,14 @@ DoD は以下の手順で確認する:
 
 詳細仕様: `docs/superpowers/specs/2026-04-26-vdw-radii-design.md`
 
-## Phase Re1 の方針と限界
+## Phase Re1 + Phase 3 の方針と限界
 
 - 目的は妥当なアニメーション (TS エネルギーの正確さは目標としない)
-- NEB は default off。`--neb-refine` で smoothing 可能だが wall-clock が大幅に伸びる
-- 対応反応は形成 1 + 切断 1 の elementary step に限定 (SN2 / proton transfer 等)。E2 / SN1 step 1 / β-H elimination などは Phase 2 へ持ち越し
+- NEB は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc では CLI が exit code 2 で reject)
+- 対応反応 (Phase 3 時点): SN2 / proton transfer / Menshutkin (1 formed + 1 broken) + **E2 elimination (1 formed + 2 broken)** + **SN1 step 1 解離 (0 formed + 1 broken)**。SN1 step 2 / cycloaddition / metathesis / Diels–Alder などは Phase 4+
 - ラジカル / open-shell / 溶媒効果は対象外
-- 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md`
+- multi-bond NEB endpoint construction は Phase 4+
+- 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md` (Phase Re1) / `docs/superpowers/specs/2026-05-03-phase-3-multibond-design.md` (Phase 3)
 
 ## Wall-clock (実測)
 
@@ -106,6 +116,8 @@ RTX 5070 Ti + UMA-m-1p1 で実測 (default `--n-angles 8 --prescreen-keep 3`):
 | SN2 (`examples/sn2.rxn`) | ~67 s | **~54 s** | MMFF 動作、3/3 reached_product |
 | Proton transfer (`examples/proton_transfer.rxn`) | ~116 s | **~117 s** | HCl で MMFF parameterize 失敗 → 8/8 UMA に fallback |
 | Menshutkin (`examples/menshutkin.rxn`) | ~3 min | **~41 s** | MMFF 動作、3/3 reached_product |
+| E2 (`examples/e2.rxn`) | — (新規) | **~54 s** | Phase 3, 1 formed + 2 broken、3/3 reached_product |
+| SN1 dissoc (`examples/sn1_dissoc.rxn`) | — (新規) | **~21 s** | Phase 3, unimolecular → n_angles=1 強制、prescreen skipped |
 
 MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗してフォールバック (= 旧挙動と同一の wall-clock) する。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、`--no-mmff-prescreen` で明示的に旧挙動を再現することも可能。
 

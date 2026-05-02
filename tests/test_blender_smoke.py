@@ -96,11 +96,16 @@ def test_blender_bonds_detected(tmp_path: Path):
 @pytest.mark.parametrize("rxn_filename,extra_args", [
     ("sn2.rxn", []),
     ("proton_transfer.rxn", ["--r-form", "1.05"]),
+    ("e2.rxn", ["--reaction-type", "e2"]),
 ])
 def test_re1_blender_smoke_writes_blend(
     tmp_path: Path, rxn_filename: str, extra_args: list[str],
 ):
-    """End-to-end Phase Re1 pipeline + Blender renders for both reactions."""
+    """End-to-end Phase Re1 + Phase 3 pipeline + Blender renders.
+
+    SN1 dissoc is intentionally omitted: an ion-pair endpoint is not visually
+    interesting as a Blender smoke (no bond formation, only a stretch).
+    """
     from reactx.cli import main
     if shutil.which(BLENDER) is None:
         pytest.skip(f"Blender executable not found: {BLENDER}")
