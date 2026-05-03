@@ -323,6 +323,31 @@ def test_plane_normal_at_anchor_non_planar_three_neighbors_falls_back():
     assert direction[2] < 0, f"non-planar fallback should point -z, got {direction}"
 
 
+def test_embed_in_place_uses_etkdg_when_mmff_fails(caplog, monkeypatch):
+    """MMFF94 が parameterize できない fragment (例: LiBr) は ETKDG 結果のみで進行。"""
+    import logging
+
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    from reactx.embed3d import _embed_in_place
+
+    # 他のテストの propagate=False 影響を回避
+    reactx_logger = logging.getLogger("reactx")
+    monkeypatch.setattr(reactx_logger, "propagate", True)
+
+    mol = Chem.AddHs(Chem.MolFromSmiles("[Li]Br"))
+    Chem.SanitizeMol(mol)
+
+    caplog.set_level("WARNING", logger="reactx.embed3d")
+    _embed_in_place(mol, seed=42)
+
+    # ETKDG conformer が残っているはず
+    assert mol.GetNumConformers() == 1
+    # MMFF94 警告が出ているはず
+    assert any("MMFF94 cannot parameterize" in rec.getMessage() for rec in caplog.records)
+
+
 def test_plane_normal_at_anchor_degenerate_uses_z_fallback(caplog, monkeypatch):
     """隣接 0 個の場合 (anchor が単独 atom) は [0, 0, 1] + warning。"""
     import logging

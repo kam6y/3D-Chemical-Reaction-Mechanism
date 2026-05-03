@@ -666,7 +666,10 @@ def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:
     if frag.GetNumHeavyAtoms() > 1:
         result = AllChem.MMFFOptimizeMolecule(frag, maxIters=500)
         if result == -1:
-            raise RuntimeError(
-                f"MMFF94 force field could not be constructed for fragment "
-                f"({frag.GetNumAtoms()} atoms). Check element coverage."
+            elems = ", ".join(sorted({a.GetSymbol() for a in frag.GetAtoms()}))
+            log.warning(
+                "MMFF94 cannot parameterize fragment (atoms: %s); using ETKDG "
+                "geometry without MMFF refinement", elems,
             )
+            # ETKDG already produced a 3D conformation; downstream UMA relaxation
+            # will provide energetic refinement.
