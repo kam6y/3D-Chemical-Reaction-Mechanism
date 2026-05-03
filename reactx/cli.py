@@ -13,15 +13,15 @@ from ase.io import read, write
 from rdkit import Chem
 
 from reactx.align import align_product_to_reactant
-from reactx.artificial_force import build_restraints, lookup_r_form
-from reactx.bond_changes import BondChanges, compute_bond_changes
+from reactx.artificial_force import build_restraints
+from reactx.bond_changes import BondChanges
 from reactx.calculators import make_calculator
+from reactx.config import ReactionConfig, load_config, resolve_r_form_targets
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
 from reactx.path_relax import relax_with_restraints
 from reactx.prescreen import prescreen_trials
-from reactx.presets import get_preset
-from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
+from reactx.rxn_parser import atom_map_to_reactant_idx, heavy_to_hydrogen_groups, parse_rxn
 from reactx.scoring import TrialResult, reached_product, score_trials
 from reactx.trials import sample_attack_rotations
 
@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="reactx")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    run = sub.add_parser("run", help="Run full pipeline on a .rxn file")
+    run = sub.add_parser("run", help="Run full pipeline on a .rxn file (with sidecar .rxn.toml)")
     run.add_argument("rxn_path", type=Path)
     run.add_argument("-o", "--output", type=Path, required=True)
 
@@ -40,42 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--model", type=str, default="uma-m-1p1",
                      help="UMA model name (uma-m-1p1, uma-s-1p2, ...)")
 
-    run.add_argument("--n-angles", type=int, default=8,
-                     help="Number of attack-angle trials (>=1; index 0 is identity)")
-    run.add_argument("--cone-half-deg", type=float, default=30.0,
-                     help="Half-angle of cone within which trials are sampled")
     run.add_argument("--seed", type=int, default=0)
-
-    from reactx.presets import PRESETS as _PRESETS
-    run.add_argument("--reaction-type", choices=sorted(_PRESETS), default="sn2_anion",
-                     help="Built-in restraint preset for the reaction class. "
-                          "Individual --k-* / --r-* / --max-relax-steps flags override.")
-
-    run.add_argument("--r-form", type=float, default=None,
-                     help="Override formed-bond target distance (Å). "
-                          "Default: from preset, then element pair table.")
-    run.add_argument("--r-broken", type=float, default=None,
-                     help="Override repulsion target distance (Å). "
-                          "Default: from preset.")
-    run.add_argument("--k-form", type=float, default=None,
-                     help="Override Hookean k for formed bonds. Default: from preset.")
-    run.add_argument("--k-broken", type=float, default=None,
-                     help="Override repulsion k for broken bonds. Default: from preset.")
-
-    run.add_argument("--max-relax-steps", type=int, default=None,
-                     help="Override FIRE max steps. Default: from preset.")
     run.add_argument("--relax-fmax", type=float, default=0.1)
     run.add_argument("--traj-stride", type=int, default=5)
 
-    run.add_argument("--no-mmff-prescreen", action="store_true",
-                     help="Disable MMFF94 prescreen and run all N trials through UMA.")
-    run.add_argument("--prescreen-keep", type=int, default=3,
-                     help="Top-K trials to pass to UMA after MMFF prescreen.")
-    run.add_argument("--prescreen-steps", type=int, default=30,
-                     help="MMFF FIRE step budget per prescreen trial.")
-
     run.add_argument("--neb-refine", action="store_true",
-                     help="Refine the best trial trajectory with a short NEB")
+                     help="Refine the best trial trajectory with a short NEB "
+                          "(only supported for 1 formed + 1 broken reactions)")
     run.add_argument("--neb-images", type=int, default=7)
 
     run.add_argument("--render", action="store_true",
@@ -138,49 +109,26 @@ def _check_hf_auth() -> int:
     return 0
 
 
-def _resolve_effective_params(
-    args, syms: list[str], formed_pairs: list[tuple[int, int]],
-) -> dict:
-    """Merge preset + individual-flag overrides into a flat dict.
-
-    r_form は per-formed-bond の list として返す:
-      - --r-form scalar 指定 → 全要素同値
-      - preset.r_form 指定   → 全要素同値
-      - 両方 None            → 元素ペア表を per-bond でルックアップ
-    formed_pairs が空 (e.g. SN1 step1) のときは r_form_targets=[]。
-    """
-    preset = get_preset(args.reaction_type)
-    k_form = preset.k_form if args.k_form is None else float(args.k_form)
-    k_broken = preset.k_broken if args.k_broken is None else float(args.k_broken)
-    r_broken = preset.r_broken if args.r_broken is None else float(args.r_broken)
-    max_relax_steps = (
-        preset.max_relax_steps if args.max_relax_steps is None
-        else int(args.max_relax_steps)
-    )
-
-    if args.r_form is not None:
-        r_form_targets = [float(args.r_form)] * len(formed_pairs)
-    elif preset.r_form is not None:
-        r_form_targets = [float(preset.r_form)] * len(formed_pairs)
-    else:
-        r_form_targets = [lookup_r_form(syms[a], syms[b]) for a, b in formed_pairs]
-
-    return {
-        "reaction_type": preset.name,
-        "k_form": k_form,
-        "k_broken": k_broken,
-        "r_broken": r_broken,
-        "max_relax_steps": max_relax_steps,
-        "r_form_targets": r_form_targets,
-    }
-
-
 def _cmd_run(args: argparse.Namespace) -> int:
     _configure_reactx_logging()
 
     if not args.rxn_path.exists():
         log.error("Error: .rxn not found: %s", args.rxn_path)
         return 1
+
+    try:
+        cfg = load_config(args.rxn_path)
+    except FileNotFoundError as exc:
+        log.error("%s", exc)
+        log.error(
+            "A sidecar TOML config is REQUIRED. Create %s.toml. "
+            "See examples/sn2.rxn.toml for the schema.",
+            args.rxn_path,
+        )
+        return 2
+    except ValueError as exc:
+        log.error("Invalid sidecar TOML: %s", exc)
+        return 2
 
     if args.backend == "uma":
         rc = _check_hf_auth()
@@ -190,10 +138,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     t_start = time.monotonic()
 
-    r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
+    r_mol, p_mol, heavy_mapping = parse_rxn(args.rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
-    bond_changes = compute_bond_changes(r_h, p_h, mapping)
+    try:
+        bond_changes = BondChanges.from_atom_map_pairs(
+            formed_map=cfg.formed,
+            broken_map=cfg.broken,
+            atom_map_to_idx=atom_map_to_reactant_idx(r_mol),
+        )
+    except (KeyError, ValueError) as exc:
+        log.error("Invalid bond_changes from %s.toml: %s", args.rxn_path, exc)
+        return 2
 
     if args.neb_refine and (
         len(bond_changes.formed) != 1 or len(bond_changes.broken) != 1
@@ -213,15 +169,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # `broken` = the reactant-formed bond (e.g. C-F in CH3F), which keeps the
     # substrate fragment correctly grouped. `formed` then defines where the
     # nucleophile-side fragment (Cl- in product) is placed via backside.
-    # NEB refine は 1+1 反応のみ対応 (Task 6 で multi-bond 時のガードが入る予定);
-    # それ以外の場合は bond_changes_product=None として、neb-refine が要求
-    # された時点で embed3d 側でエラーになる。
+    # NEB refine は 1+1 反応のみ対応; それ以外の場合は bond_changes_product=None
+    # として、neb-refine が要求された時点で embed3d 側でエラーになる。
     if len(bond_changes.formed) == 1 and len(bond_changes.broken) == 1:
         a_form_r, b_form_r = bond_changes.formed[0]
         a_brk_r, b_brk_r = bond_changes.broken[0]
         bond_changes_product = BondChanges(
-            formed=((mapping[a_brk_r], mapping[b_brk_r]),),    # nucleophile-fragment placement direction
-            broken=((mapping[a_form_r], mapping[b_form_r]),),  # substrate-cohesion bond (intact in product)
+            formed=((heavy_mapping[a_brk_r], heavy_mapping[b_brk_r]),),
+            broken=((heavy_mapping[a_form_r], heavy_mapping[b_form_r]),),
         )
     else:
         bond_changes_product = None
@@ -229,13 +184,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     formed_pairs = list(bond_changes.formed)
     broken_pairs = list(bond_changes.broken)
     syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
-    eff = _resolve_effective_params(args, syms_r, formed_pairs)
-    r_form_targets = eff["r_form_targets"]
+    r_form_targets = resolve_r_form_targets(cfg, syms_r, formed_pairs)
     log.info(
-        "preset=%s effective: k_form=%.2f k_broken=%.2f r_broken=%.2f "
+        "description=%s effective: k_form=%.2f k_broken=%.2f r_broken=%.2f "
         "max_relax_steps=%d r_form_targets=%s",
-        eff["reaction_type"], eff["k_form"], eff["k_broken"],
-        eff["r_broken"], eff["max_relax_steps"],
+        cfg.description,
+        cfg.restraints.k_form, cfg.restraints.k_broken,
+        cfg.restraints.r_broken, cfg.restraints.max_relax_steps,
         [f"{x:.3f}" for x in r_form_targets] if r_form_targets else "[]",
     )
 
@@ -243,17 +198,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
     calc = make_calculator(args.backend, **model_kwargs)
 
     n_frags_reactant = len(Chem.GetMolFrags(r_h))
-    effective_n_angles = args.n_angles
-    if n_frags_reactant == 1 and args.n_angles > 1:
+    effective_n_angles = cfg.sampling.n_angles
+    if n_frags_reactant == 1 and effective_n_angles > 1:
         log.info(
             "unimolecular reaction (1 reactant fragment); "
             "n_angles forced from %d to 1, prescreen skipped",
-            args.n_angles,
+            effective_n_angles,
         )
         effective_n_angles = 1
 
     rotations = sample_attack_rotations(
-        n=effective_n_angles, cone_half_deg=args.cone_half_deg, seed=args.seed,
+        n=effective_n_angles, cone_half_deg=cfg.sampling.cone_half_deg, seed=args.seed,
     )
 
     # Phase 1: embed every rotation; collect successful embeds with their angles.
@@ -286,8 +241,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "enabled": False, "kept": None, "skipped": None,
             "mmff_failed": None, "wall_clock_seconds": 0.0,
         }
-    elif args.no_mmff_prescreen:
-        log.info("prescreen: disabled (--no-mmff-prescreen)")
+    elif not cfg.prescreen.enabled:
+        log.info("prescreen: disabled (config: prescreen.enabled = false)")
         keep_trial_indices = sorted(embedded_by_idx.keys())
         prescreen_meta = {
             "enabled": False, "kept": None, "skipped": None,
@@ -302,10 +257,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             mol_h_template=mol_h_template,
             formed=formed_pairs, broken=broken_pairs,
             r_form_target=r_form_targets[0] if r_form_targets else 1.6,
-            r_broken_target=eff["r_broken"],
-            k_form=eff["k_form"], k_broken=eff["k_broken"],
-            max_steps=args.prescreen_steps,
-            k_keep=args.prescreen_keep,
+            r_broken_target=cfg.restraints.r_broken,
+            k_form=cfg.restraints.k_form, k_broken=cfg.restraints.k_broken,
+            max_steps=cfg.prescreen.steps,
+            k_keep=cfg.prescreen.keep,
         )
         keep_trial_indices = [ordered[k] for k in pre.kept]
         skipped_trial_indices = [ordered[s] for s in pre.skipped]
@@ -329,14 +284,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
             formed=formed_pairs,
             broken=broken_pairs,
             r_form=r_form_targets[0] if r_form_targets else None,
-            r_broken=eff["r_broken"],
-            k_form=eff["k_form"],
-            k_broken=eff["k_broken"],
+            r_broken=cfg.restraints.r_broken,
+            k_form=cfg.restraints.k_form,
+            k_broken=cfg.restraints.k_broken,
         )
         try:
             frames, energies = relax_with_restraints(
                 atoms_init, restraints, calc,
-                max_steps=eff["max_relax_steps"],
+                max_steps=cfg.restraints.max_relax_steps,
                 fmax=args.relax_fmax,
                 traj_stride=args.traj_stride,
             )
@@ -353,7 +308,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             formed=formed_pairs,
             broken=broken_pairs,
             r_form_targets=r_form_targets,
-            r_broken_target=eff["r_broken"],
+            r_broken_target=cfg.restraints.r_broken,
         )
         peak = max(energies) if energies else float("inf")
         trials.append(TrialResult(
@@ -372,7 +327,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         log.error("All trials failed. See meta.json for details.")
         return _write_outputs_and_exit(
             args, trials, t_start, neb_refined=False, rc=1,
-            effective=eff, prescreen_meta=prescreen_meta,
+            cfg=cfg, r_form_targets=r_form_targets, prescreen_meta=prescreen_meta,
         )
 
     best = score_trials(trials)
@@ -392,7 +347,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         rH = heavy_to_hydrogen_groups(r_h)
         pH = heavy_to_hydrogen_groups(p_h)
         product = align_product_to_reactant(
-            final_frames[0], product_raw, mapping, rH, pH,
+            final_frames[0], product_raw, heavy_mapping, rH, pH,
         )
         xyz_tmp = args.output / "trajectory_neb.xyz"
         run_neb(
@@ -414,7 +369,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     rc = _write_outputs_and_exit(
         args, trials, t_start, neb_refined=neb_refined, rc=0,
-        effective=eff, prescreen_meta=prescreen_meta,
+        cfg=cfg, r_form_targets=r_form_targets, prescreen_meta=prescreen_meta,
     )
     if rc != 0:
         return rc
@@ -441,7 +396,8 @@ def _write_outputs_and_exit(
     *,
     neb_refined: bool,
     rc: int,
-    effective: dict | None = None,
+    cfg: ReactionConfig | None = None,
+    r_form_targets: list[float] | None = None,
     prescreen_meta: dict | None = None,
 ) -> int:
     best: TrialResult | None = None
@@ -452,9 +408,9 @@ def _write_outputs_and_exit(
             best = None
     selected = best.trial_idx if best is not None else -1
     converged = best.reached_product if best is not None else False
-    meta = {
+    meta: dict = {
         "backend": args.backend,
-        "reaction_type": (effective or {}).get("reaction_type", args.reaction_type),
+        "description": cfg.description if cfg is not None else None,
         "converged": converged,
         "selected_trial": selected,
         "trials": [
@@ -473,10 +429,13 @@ def _write_outputs_and_exit(
         "neb_refined": neb_refined,
         "effective_params": (
             {
-                k: effective[k]
-                for k in ("k_form", "k_broken", "r_broken", "max_relax_steps", "r_form_targets")
+                "k_form": cfg.restraints.k_form,
+                "k_broken": cfg.restraints.k_broken,
+                "r_broken": cfg.restraints.r_broken,
+                "max_relax_steps": cfg.restraints.max_relax_steps,
+                "r_form_targets": list(r_form_targets) if r_form_targets is not None else [],
             }
-            if effective is not None else None
+            if cfg is not None else None
         ),
     }
     meta_clean = _sanitize_for_json(meta)
