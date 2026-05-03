@@ -52,3 +52,23 @@ def test_heavy_to_hydrogen_groups_on_methane():
     mol_h = Chem.AddHs(mol)
     groups = heavy_to_hydrogen_groups(mol_h)
     assert groups == {0: [1, 2, 3, 4]}
+
+
+def test_parse_sn1_recomb_rxn(sn1_recomb_rxn_path):
+    """examples/sn1_recomb.rxn が parse でき、formed=1 / broken=0 が抽出される。"""
+    from reactx.bond_changes import compute_bond_changes
+
+    r_mol, p_mol, mapping = parse_rxn(sn1_recomb_rxn_path)
+    r_h = Chem.AddHs(r_mol)
+    p_h = Chem.AddHs(p_mol)
+    bc = compute_bond_changes(r_h, p_h, mapping)
+
+    assert len(bc.formed) == 1, f"expected 1 formed bond, got {bc.formed}"
+    assert len(bc.broken) == 0, f"expected 0 broken bond, got {bc.broken}"
+    assert len(Chem.GetMolFrags(r_h)) == 2  # reactant: cation + nucleophile
+    assert len(Chem.GetMolFrags(p_h)) == 1  # product: recombined
+    a, b = bc.formed[0]
+    syms = [at.GetSymbol() for at in r_h.GetAtoms()]
+    assert {syms[a], syms[b]} == {"C", "Cl"}, (
+        f"expected C-Cl formed, got {syms[a]}-{syms[b]}"
+    )
