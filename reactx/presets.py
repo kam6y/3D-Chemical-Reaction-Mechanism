@@ -67,6 +67,14 @@ PRESETS["sn1_recomb"] = ReactionPreset(
     max_relax_steps=200,
     r_form=None,     # 元素表 (Cordero: C-Cl ≈ 1.78 Å)
 )
+PRESETS["metathesis_4center"] = ReactionPreset(
+    name="metathesis_4center",
+    k_form=1.0,
+    k_broken=1.0,
+    r_broken=4.0,
+    max_relax_steps=200,
+    r_form=None,     # 元素表 (Cordero: C-Br ≈ 1.94, Li-Cl ≈ 2.02)
+)
 
 
 def get_preset(name: str) -> ReactionPreset:

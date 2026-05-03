@@ -52,6 +52,7 @@ def test_presets_dict_keys():
         "e2",
         "sn1_dissoc",
         "sn1_recomb",
+        "metathesis_4center",
     }
 
 
@@ -98,3 +99,13 @@ def test_sn1_recomb_preset_values():
     assert p.r_broken == 4.0
     assert p.max_relax_steps == 200
     assert p.r_form is None
+
+
+def test_metathesis_4center_preset_values():
+    p = get_preset("metathesis_4center")
+    assert p.name == "metathesis_4center"
+    assert p.k_form == 1.0
+    assert p.k_broken == 1.0
+    assert p.r_broken == 4.0
+    assert p.max_relax_steps == 200
+    assert p.r_form is None  # 元素表 (Cordero: C-Br ≈ 1.94, Li-Cl ≈ 2.02)
