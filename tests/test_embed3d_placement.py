@@ -573,6 +573,43 @@ def test_metathesis_fixture_shape(metathesis_atoms_setup):
     assert cccl != libr  # 別々の broken bond
 
 
+def test_kabsch_alignment_respects_rotation_perturbation(metathesis_atoms_setup):
+    """rotation_perturbation で moving fragment が回転される (相対距離は不変)。"""
+    from reactx.embed3d import _kabsch_alignment
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+
+    out_id = _kabsch_alignment(
+        mol_h, frag_indices, positions.copy(), bc,
+        rotation_perturbation=None,
+    )
+
+    # 90° rotation around z axis (incoming axis Br-Li is along x in this fixture,
+    # so x rotation would not move the atoms — must rotate around y or z).
+    R = np.array([
+        [0.0, -1.0, 0.0],
+        [1.0,  0.0, 0.0],
+        [0.0,  0.0, 1.0],
+    ])
+    out_rot = _kabsch_alignment(
+        mol_h, frag_indices, positions.copy(), bc,
+        rotation_perturbation=R,
+    )
+
+    # Br と Li の絶対位置が変わる
+    assert not np.allclose(out_id[br_idx], out_rot[br_idx], atol=0.1), (
+        f"rotation_perturbation should change Br position; "
+        f"identity={out_id[br_idx]}, rotated={out_rot[br_idx]}"
+    )
+    # 相対距離 (Br-Li) は剛体変換で不変
+    d_id = float(np.linalg.norm(out_id[br_idx] - out_id[li_idx]))
+    d_rot = float(np.linalg.norm(out_rot[br_idx] - out_rot[li_idx]))
+    np.testing.assert_allclose(d_id, d_rot, atol=0.05)
+
+
 def test_kabsch_alignment_creates_4center_geometry(metathesis_atoms_setup):
     """Tier 3 主路: CH3Cl + LiBr fixture で 4-center geometry を達成。
 
