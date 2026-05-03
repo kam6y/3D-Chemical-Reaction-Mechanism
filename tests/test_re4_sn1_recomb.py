@@ -21,10 +21,14 @@ def test_re4_sn1_recomb_end_to_end(tmp_path: Path, sn1_recomb_rxn_path: Path):
 
     meta = json.loads((out / "meta.json").read_text())
 
-    # bimolecular なので unimolecular auto-clamp は発動せず、8 trials が走る
-    assert len(meta["trials"]) == 8, (
-        f"bimolecular reaction expected 8 trials in meta; got {len(meta['trials'])}"
-    )
+    # bimolecular なので unimolecular auto-clamp は発動せず prescreen が走る。
+    # n_angles=8 のうち top-3 (--prescreen-keep default) が UMA に進み
+    # meta.trials には UMA 実行分のみ並ぶ (prescreen-rejected は記録されない)。
+    pre = meta["prescreen"]
+    assert pre["enabled"] is True
+    if not pre["mmff_failed"]:
+        assert len(pre["kept"]) == 3
+        assert len(meta["trials"]) == 3
     assert meta["selected_trial"] >= 0
     assert meta["reaction_type"] == "sn1_recomb"
 
