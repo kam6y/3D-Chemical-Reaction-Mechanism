@@ -105,8 +105,12 @@ def _place_fragments(
 
     Tier 1 (directional, Phase 3): broken bond の方向情報がある反応 (E2 / SN2 / PT)。
     Tier 2 (planar face, Phase 4): broken=() かつ formed=1 の bimolecular (SN1 step 2)。
-    Phase 5+ (未実装):              multi-substrate metathesis (broken が複数 frag に跨る) /
-                                   cycloaddition (formed>=2, broken=0)。
+    Tier 3 (Kabsch, Phase 5):     2-fragment 4-center metathesis (formed=2, broken=2,
+                                   broken bonds 各 fragment 内で完結)。
+    Phase 6+ (未実装):            cycloaddition (formed>=2, broken=0) /
+                                   3+ fragment ionic salt metathesis /
+                                   非対称 metathesis (formed_count != broken_count) /
+                                   broken bonds が両 fragment を跨ぐケース。
     """
     substrate = _find_substrate_fragment(frag_indices, bond_changes.broken)
     if substrate is not None and bond_changes.broken:
@@ -118,7 +122,7 @@ def _place_fragments(
     if not bond_changes.broken and bond_changes.formed:
         if len(bond_changes.formed) > 1:
             raise NotImplementedError(
-                "cycloaddition (broken=0, formed>=2) is Phase 5+. "
+                "cycloaddition (broken=0, formed>=2) is Phase 6+. "
                 f"Got formed={bond_changes.formed}, frags={len(frag_indices)}."
             )
         substrate = _find_substrate_by_size(frag_indices)
@@ -127,9 +131,26 @@ def _place_fragments(
             rotation_perturbation=rotation_perturbation,
         )
 
+    # Tier 3: Phase 5 metathesis (broken bonds 各 fragment 内に閉じ、formed が両 frag を跨ぐ)
+    if (
+        substrate is None
+        and bond_changes.broken
+        and bond_changes.formed
+        and len(frag_indices) == 2
+        and len(bond_changes.formed) == 2
+        and len(bond_changes.broken) == 2
+    ):
+        # Tier 3 内で broken_within_reference / broken_within_moving の本数を再検証
+        # (1+1 でない場合は _kabsch_alignment が NotImplementedError を投げる)
+        return _kabsch_alignment(
+            mol_h, frag_indices, positions, bond_changes,
+            rotation_perturbation=rotation_perturbation,
+        )
+
     raise NotImplementedError(
-        "multi-substrate metathesis (broken bonds spanning fragments) is "
-        f"Phase 5+. Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
+        "multi-substrate placement only supports 2-fragment 4-center metathesis "
+        "(formed=2, broken=2) in Phase 5; other shapes are Phase 6+. "
+        f"Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
         f"frags={len(frag_indices)}."
     )
 

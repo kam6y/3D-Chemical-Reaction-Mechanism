@@ -102,15 +102,21 @@ def test_place_fragments_dispatches_tier2_for_broken_zero_bimolecular(sn1_recomb
     np.testing.assert_allclose(d, FRAGMENT_SEPARATION, atol=0.5)
 
 
-def test_place_fragments_still_raises_for_multi_substrate_metathesis_after_tier2():
-    """multi-substrate metathesis (broken bonds が複数 frag に跨る) は Tier 2 でも reject。"""
+def test_place_fragments_still_rejects_3frag_or_asymmetric_after_tier3():
+    """Tier 3 後も formed=1/broken=1 across-fragment metathesis-like は reject される。
+
+    Phase 4 までは「broken bonds が複数 frag を跨ぐ」全ケースを reject していたが、
+    Phase 5 で 2-frag formed=2/broken=2 のみ Tier 3 が拾うようになった。Tier 3 の
+    条件を満たさない (formed=1/broken=1) は依然として最終 raise に到達する。
+    """
     from reactx.embed3d import _place_fragments
     mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
     frags = Chem.GetMolFrags(mol)
     a = frags[0][0]
     b = frags[1][0]
+    # formed=1 + broken=1 (両方 cross-fragment) — Tier 3 は formed=2/broken=2 のみ
     bc = BondChanges(formed=((frags[0][1], frags[1][1]),), broken=((a, b),))
-    with pytest.raises(NotImplementedError, match="multi-substrate"):
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6|multi-substrate"):
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
@@ -452,7 +458,7 @@ def test_place_fragments_rejects_multi_formed_on_shared_anchor():
         formed=((central, f_idx), (central, cl_idx)),
         broken=(),
     )
-    with pytest.raises(NotImplementedError, match="Phase 5"):
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6"):
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
@@ -469,7 +475,7 @@ def test_place_fragments_rejects_cycloaddition_pattern():
     a0, a1 = frags[0][0], frags[0][1]
     b0, b1 = frags[1][0], frags[1][1]
     bc = BondChanges(formed=((a0, b0), (a1, b1)), broken=())
-    with pytest.raises(NotImplementedError, match="Phase 5"):
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6"):
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
@@ -704,4 +710,70 @@ def test_kabsch_alignment_rejects_multi_bond_from_single_anchor(metathesis_atoms
         _kabsch_alignment(
             mol_h, frag_indices, positions.copy(), bad_bc,
             rotation_perturbation=None,
+        )
+
+
+def test_place_fragments_dispatches_tier3_for_metathesis(metathesis_atoms_setup):
+    """Tier 3 dispatch: 2-fragment formed=2/broken=2/multi-substrate で _kabsch_alignment に流れる。"""
+    from reactx.embed3d import _place_fragments
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    br_idx = syms.index("Br")
+
+    out = _place_fragments(
+        mol_h, frag_indices, positions.copy(), bc,
+        rotation_perturbation=None,
+    )
+    # Tier 3 を経由して 4-center 配置になっていれば C-Br が中程度の距離
+    d_c_br = float(np.linalg.norm(out[c_idx] - out[br_idx]))
+    assert 0.5 < d_c_br < 3.0, (
+        f"expected Tier 3 placement to put Br near C (0.5-3.0 A), got {d_c_br:.2f}"
+    )
+
+
+def test_place_fragments_rejects_3_fragment_metathesis():
+    """3 fragments + broken bond が fragments を跨ぐ場合は Phase 6+ reject。
+
+    Tier 1 dispatch には乗らず (substrate=None: broken が単一 fragment に閉じない)、
+    Tier 3 にも乗らない (frag_count==2 が条件) ので最終 raise に到達。
+    """
+    from reactx.embed3d import _place_fragments
+
+    # 3 fragments: CC, OO, NN。broken bond が CC ↔ OO を跨ぐ → substrate=None。
+    # 3 fragments なので Tier 3 dispatch (frag_count==2) も満たさず final raise。
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO.NN"))
+    frags = Chem.GetMolFrags(mol)
+    c0 = frags[0][0]
+    o0 = frags[1][0]
+    n0 = frags[2][0]
+    bc = BondChanges(
+        formed=((c0, n0),),
+        broken=((c0, o0),),
+    )
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6|multi-substrate"):
+        _place_fragments(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
+        )
+
+
+def test_place_fragments_rejects_asymmetric_metathesis():
+    """非対称 metathesis (formed=2, broken=1, 両 fragment 跨ぎ) で Phase 6+ reject。"""
+    from reactx.embed3d import _place_fragments
+
+    # 2 fragments で broken=1 が両 frag を跨ぐ (substrate=None かつ broken count != formed count)
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
+    frags = Chem.GetMolFrags(mol)
+    a = frags[0][0]
+    b = frags[1][0]
+    bc = BondChanges(
+        formed=((frags[0][1], frags[1][1]), (a, b)),
+        broken=((a, b),),
+    )
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6"):
+        _place_fragments(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
         )
