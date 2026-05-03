@@ -22,13 +22,18 @@ def test_re1_proton_transfer_end_to_end(
         "run", str(proton_transfer_rxn_path), "-o", str(out),
         "--backend", "uma",
         "--n-angles", "4",
-        "--max-relax-steps", "50",
+        "--max-relax-steps", "100",  # preset default; 50 was too short under k_form=0.5
         "--r-form", "1.05",  # N-H equilibrium
     ])
     assert rc == 0
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["selected_trial"] >= 0
+    pre = meta["prescreen"]
+    assert pre["enabled"] is True
+    if not pre["mmff_failed"]:
+        assert len(pre["kept"]) == 3
+        assert len(meta["trials"]) == 3
     assert any(t["reached_product"] for t in meta["trials"])
 
     frames = read(str(out / "trajectory.xyz"), index=":")

@@ -32,6 +32,16 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, menshutkin_rxn_path: Path):
     assert meta["effective_params"]["r_broken"] == 5.0
     assert meta["effective_params"]["max_relax_steps"] == 200
     assert meta["selected_trial"] >= 0
+    # Menshutkin (neutral -> ion pair) sometimes outruns MMFF94 parameters; both
+    # outcomes (mmff_failed=True with all 4 trials kept, or success with K=3)
+    # should still produce at least one product-reaching trial via UMA.
+    pre = meta["prescreen"]
+    assert pre["enabled"] is True
+    if pre["mmff_failed"]:
+        assert len(meta["trials"]) == 4
+    else:
+        assert len(pre["kept"]) == 3
+        assert len(meta["trials"]) == 3
     assert any(t["reached_product"] for t in meta["trials"]), (
         f"No trial reached product. trials={meta['trials']}"
     )

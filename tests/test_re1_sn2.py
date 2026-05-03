@@ -22,6 +22,12 @@ def test_re1_sn2_end_to_end(tmp_path: Path, sn2_rxn_path: Path):
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["selected_trial"] >= 0
+    # Prescreen ON by default: keep=3 of n_angles=4 -> trials list has 3 UMA runs.
+    pre = meta["prescreen"]
+    assert pre["enabled"] is True
+    if not pre["mmff_failed"]:
+        assert len(pre["kept"]) == 3
+        assert len(meta["trials"]) == 3
     # At least one trial reached product
     assert any(t["reached_product"] for t in meta["trials"]), (
         f"No trial reached product. trials={meta['trials']}"

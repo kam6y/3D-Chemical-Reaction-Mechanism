@@ -25,11 +25,39 @@ def test_default_flags_parse():
     assert a.max_relax_steps is None
     # Default reaction type:
     assert a.reaction_type == "sn2_anion"
+    # Prescreen defaults:
+    assert a.no_mmff_prescreen is False
+    assert a.prescreen_keep == 3
+    assert a.prescreen_steps == 30
     # Unchanged:
     assert a.relax_fmax == 0.1
     assert a.traj_stride == 5
     assert a.neb_refine is False
     assert a.neb_images == 7
+
+
+def test_no_mmff_prescreen_flag():
+    p = build_parser()
+    a = p.parse_args([
+        "run", "examples/sn2.rxn", "-o", "out/", "--no-mmff-prescreen",
+    ])
+    assert a.no_mmff_prescreen is True
+
+
+def test_prescreen_keep_override():
+    p = build_parser()
+    a = p.parse_args([
+        "run", "examples/sn2.rxn", "-o", "out/", "--prescreen-keep", "1",
+    ])
+    assert a.prescreen_keep == 1
+
+
+def test_prescreen_steps_override():
+    p = build_parser()
+    a = p.parse_args([
+        "run", "examples/sn2.rxn", "-o", "out/", "--prescreen-steps", "10",
+    ])
+    assert a.prescreen_steps == 10
 
 
 def test_neb_refine_flag():
@@ -157,3 +185,53 @@ def test_meta_json_includes_reaction_type_and_effective_params(tmp_path: Path):
         "r_broken": 5.0, "max_relax_steps": 200,
         "r_form": 1.47,
     }
+
+
+def test_meta_json_includes_prescreen_section_when_enabled(tmp_path: Path):
+    args = argparse.Namespace(
+        backend="lj", output=tmp_path, reaction_type="sn2_anion",
+    )
+    prescreen_meta = {
+        "enabled": True,
+        "kept": [0, 3, 5],
+        "skipped": [1, 2, 4, 6, 7],
+        "mmff_failed": False,
+        "wall_clock_seconds": 1.8,
+    }
+    trials = [TrialResult(
+        trial_idx=0, rotation_deg=0.0, frames=[], energies=[1.0, 2.0],
+        reached_product=True, peak_energy=2.0, n_steps=2,
+    )]
+    with patch("reactx.cli.score_trials", return_value=trials[0]):
+        rc = _write_outputs_and_exit(
+            args, trials, t_start=0.0,
+            neb_refined=False, rc=0,
+            effective=None, prescreen_meta=prescreen_meta,
+        )
+    assert rc == 0
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    assert meta["prescreen"] == prescreen_meta
+
+
+def test_meta_json_prescreen_disabled(tmp_path: Path):
+    args = argparse.Namespace(
+        backend="lj", output=tmp_path, reaction_type="sn2_anion",
+    )
+    prescreen_meta = {
+        "enabled": False, "kept": None, "skipped": None,
+        "mmff_failed": None, "wall_clock_seconds": 0.0,
+    }
+    trials = [TrialResult(
+        trial_idx=0, rotation_deg=0.0, frames=[], energies=[1.0, 2.0],
+        reached_product=True, peak_energy=2.0, n_steps=2,
+    )]
+    with patch("reactx.cli.score_trials", return_value=trials[0]):
+        rc = _write_outputs_and_exit(
+            args, trials, t_start=0.0,
+            neb_refined=False, rc=0,
+            effective=None, prescreen_meta=prescreen_meta,
+        )
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    assert meta["prescreen"]["enabled"] is False
+    assert meta["prescreen"]["kept"] is None
+    assert meta["prescreen"]["mmff_failed"] is None

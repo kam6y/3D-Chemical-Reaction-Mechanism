@@ -30,6 +30,9 @@ reactx run examples/proton_transfer.rxn -o out/pt/ \
 - `--n-angles 8` (default): 多角度試行数
 - `--cone-half-deg 30.0`: 多角度試行の cone 半角
 - `--r-form` (default: 元素ペアから自動): 形成結合の目標距離 (Å)
+- `--prescreen-keep 3` (default): MMFF prescreen で UMA に渡す trial 数 (top-K)
+- `--prescreen-steps 30` (default): prescreen 内の MMFF FIRE step 数
+- `--no-mmff-prescreen`: MMFF prescreen を無効化、全 trial を UMA に流す (Phase Re1 default 挙動)。`meta.json.trials[]` 長を `--n-angles` と一致させたい場合 (旧スクリプトの後方互換) はこれを併用
 - `--neb-refine` (default off): best trajectory を NEB で refinement (実行時間延長)
 
 生成物:
@@ -96,16 +99,21 @@ DoD は以下の手順で確認する:
 
 ## Wall-clock (実測)
 
-NVIDIA GPU + UMA-m-1p1 で実測 (default `--n-angles 8`):
+RTX 5070 Ti + UMA-m-1p1 で実測 (default `--n-angles 8 --prescreen-keep 3`):
 
-| Reaction | wall-clock | trials reached_product | best peak energy |
+| Reaction | wall-clock (旧, 8/8 UMA) | wall-clock (新, prescreen + 3/8 UMA) | 備考 |
 |---|---|---|---|
-| SN2 (`examples/sn2.rxn`) | ~67 s | 8 / 8 | -16322.74 eV |
-| Proton transfer (`examples/proton_transfer.rxn --r-form 1.05`) | ~116 s | 8 / 8 | -14072.91 eV |
+| SN2 (`examples/sn2.rxn`) | ~67 s | **~54 s** | MMFF 動作、3/3 reached_product |
+| Proton transfer (`examples/proton_transfer.rxn`) | ~116 s | **~117 s** | HCl で MMFF parameterize 失敗 → 8/8 UMA に fallback |
+| Menshutkin (`examples/menshutkin.rxn`) | ~3 min | **~41 s** | MMFF 動作、3/3 reached_product |
+
+MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗してフォールバック (= 旧挙動と同一の wall-clock) する。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、`--no-mmff-prescreen` で明示的に旧挙動を再現することも可能。
+
+UMA model load (~25-30 s) が固定コストとして wall-clock を支配するため、prescreen による短縮幅は SN2 で ~20 %、Menshutkin で ~75 % など反応や trial 当たりの relax コストに依存する。
 
 `--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (DoD 用テスト `test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 
-各実行の trial 全件スコアと wall_clock_seconds は `out/<rxn>/meta.json` に残る。
+各実行の trial 全件スコアと prescreen 結果と wall_clock_seconds は `out/<rxn>/meta.json` に残る。
 
 ## テスト
 
