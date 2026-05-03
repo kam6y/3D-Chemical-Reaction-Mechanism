@@ -97,6 +97,21 @@ def test_missing_sidecar_raises_filenotfound(tmp_path: Path):
         load_config(rxn)
 
 
+def test_whitespace_only_description_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "   "
+formed = [[1, 2]]
+broken = []
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
+""")
+    with pytest.raises(ValueError, match="'description' must be a non-empty string"):
+        load_config(rxn)
+
+
 def test_unknown_top_level_key_rejected(tmp_path: Path):
     rxn = _write(tmp_path, """\
 description = "x"

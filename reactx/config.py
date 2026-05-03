@@ -82,7 +82,7 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
     _check_keys(raw, _TOP_LEVEL_KEYS, _TOP_LEVEL_REQUIRED, scope="<top>", source=source)
 
     description = raw["description"]
-    if not isinstance(description, str) or not description:
+    if not isinstance(description, str) or not description.strip():
         raise ValueError(f"{source}: 'description' must be a non-empty string")
 
     formed = _to_pair_tuple(raw["formed"], key="formed", source=source)
