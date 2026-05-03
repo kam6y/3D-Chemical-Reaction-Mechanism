@@ -333,9 +333,16 @@ def test_plane_normal_at_anchor_non_planar_three_neighbors_falls_back():
     assert direction[2] < 0, f"non-planar fallback should point -z, got {direction}"
 
 
-def test_plane_normal_at_anchor_degenerate_uses_z_fallback(caplog):
+def test_plane_normal_at_anchor_degenerate_uses_z_fallback(caplog, monkeypatch):
     """隣接 0 個の場合 (anchor が単独 atom) は [0, 0, 1] + warning。"""
+    import logging
     from reactx.embed3d import _plane_normal_at_anchor
+
+    # 他のテスト (cli.py の _configure_reactx_logging) で reactx logger の
+    # propagate=False がセットされていると caplog が拾えないため、明示的に
+    # propagation を有効化する。test 終了時に monkeypatch が元に戻す。
+    reactx_logger = logging.getLogger("reactx")
+    monkeypatch.setattr(reactx_logger, "propagate", True)
 
     # Cl- 単独: 隣接 0
     mol = Chem.AddHs(Chem.MolFromSmiles("[Cl-]"))
