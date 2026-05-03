@@ -515,4 +515,4 @@ def test_kabsch_rigid_transform_rejects_reflection():
     ])
     R, _t = _kabsch_rigid_transform(src, dst)
     det = float(np.linalg.det(R))
-    assert det >= 0, f"expected proper rotation (det>=0), got det={det}"
+    np.testing.assert_allclose(det, 1.0, atol=1e-9, err_msg=f"expected proper rotation det=+1, got det={det}")

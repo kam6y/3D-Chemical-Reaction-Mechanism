@@ -419,6 +419,13 @@ def _kabsch_rigid_transform(
 
     Returns (R: (3,3) rotation matrix with det>=0, t: (3,) translation vector).
     Raises ValueError if shapes mismatch or N < 2.
+
+    Note: R is unique only when N >= 4 with points in general position.
+    With N < 4 or near-collinear points, multiple rotations achieve the
+    same minimum RMSD; the function returns one of them (chosen by
+    np.linalg.svd's null-space convention). Phase 5 metathesis uses N=2
+    and relies on cone perturbation in the caller to break the residual
+    rotational ambiguity.
     """
     if src.shape != dst.shape:
         raise ValueError(f"src and dst must have same shape; got {src.shape} vs {dst.shape}")
@@ -431,10 +438,10 @@ def _kabsch_rigid_transform(
     dst_c = dst - centroid_dst
 
     H = src_c.T @ dst_c
+    # Singular values (_S) are not needed; only the orthonormal U/Vt factors enter R.
     U, _S, Vt = np.linalg.svd(H)
+    # Vt.T @ U.T is orthogonal so det is exactly +/-1; no zero-guard needed.
     d = float(np.sign(np.linalg.det(Vt.T @ U.T)))
-    if d == 0.0:
-        d = 1.0
     D = np.diag([1.0, 1.0, d])
     R = Vt.T @ D @ U.T
     t = centroid_dst - R @ centroid_src
