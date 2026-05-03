@@ -71,7 +71,8 @@ def embed_mol_to_atoms(
         if bond_changes is None:
             raise ValueError(
                 "Multi-fragment Mol requires bond_changes to determine placement; "
-                "got None. Compute via reactx.bond_changes.compute_bond_changes."
+                "got None. Build via reactx.bond_changes.BondChanges.from_atom_map_pairs(...) "
+                "using TOML formed/broken pairs."
             )
         positions = _place_fragments(
             mol_h, frag_indices, positions, bond_changes,
