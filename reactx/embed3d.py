@@ -4,20 +4,14 @@ Preserves the atom ordering of Chem.AddHs(mol) so that downstream consumers
 (align, NEB, restraints) can correlate atom indices with the same AddHs(mol)
 result.
 
-Multi-fragment placement is driven by the caller-supplied BondChanges via the
-_place_fragments dispatcher, which selects one of three placement strategies:
-
-- Tier 1 (Phase 3, _directional_placement): broken bond の方向情報がある反応
-  (E2 / SN2 / proton transfer / Menshutkin / SN1 dissoc) で、anchor の backside
-  に nucleophile を置く。
-- Tier 2 (Phase 4, _planar_face_placement): broken=() の bimolecular (SN1 step 2
-  recombination) で、anchor の sp²-like 平面の法線方向に nucleophile を置く。
-- Tier 3 (Phase 5, _kabsch_alignment): 2-fragment 4-center metathesis (formed=2,
-  broken=2, broken bonds 各 fragment 内で完結) で、anchor pair に垂直な face に
-  target を立て Kabsch (orthogonal Procrustes) で moving fragment を剛体整列する。
-
-An optional rotation_perturbation generates the cone of multi-angle trials
-(applied per-tier in the strategy that fits the geometry).
+Multi-fragment placement (e.g. SN2 substrate + nucleophile) is driven by the
+caller-supplied BondChanges:
+- The substrate fragment is identified as the one containing both atoms of
+  the broken bond.
+- The nucleophile fragment(s) are placed along the backside direction
+  (-unit(anchor->leaving)) at FRAGMENT_SEPARATION distance.
+- An optional rotation_perturbation rotates the backside direction within
+  the cone of multi-angle trials.
 """
 from __future__ import annotations
 
@@ -77,7 +71,8 @@ def embed_mol_to_atoms(
         if bond_changes is None:
             raise ValueError(
                 "Multi-fragment Mol requires bond_changes to determine placement; "
-                "got None. Compute via reactx.bond_changes.compute_bond_changes."
+                "got None. Build via reactx.bond_changes.BondChanges.from_atom_map_pairs(...) "
+                "using TOML formed/broken pairs."
             )
         positions = _place_fragments(
             mol_h, frag_indices, positions, bond_changes,
@@ -111,12 +106,8 @@ def _place_fragments(
 
     Tier 1 (directional, Phase 3): broken bond の方向情報がある反応 (E2 / SN2 / PT)。
     Tier 2 (planar face, Phase 4): broken=() かつ formed=1 の bimolecular (SN1 step 2)。
-    Tier 3 (Kabsch, Phase 5):     2-fragment 4-center metathesis (formed=2, broken=2,
-                                   broken bonds 各 fragment 内で完結)。
-    Phase 6+ (未実装):            cycloaddition (formed>=2, broken=0) /
-                                   3+ fragment ionic salt metathesis /
-                                   非対称 metathesis (formed_count != broken_count) /
-                                   broken bonds が両 fragment を跨ぐケース。
+    Phase 5+ (未実装):              multi-substrate metathesis (broken が複数 frag に跨る) /
+                                   cycloaddition (formed>=2, broken=0)。
     """
     substrate = _find_substrate_fragment(frag_indices, bond_changes.broken)
     if substrate is not None and bond_changes.broken:
@@ -128,7 +119,7 @@ def _place_fragments(
     if not bond_changes.broken and bond_changes.formed:
         if len(bond_changes.formed) > 1:
             raise NotImplementedError(
-                "cycloaddition (broken=0, formed>=2) is Phase 6+. "
+                "cycloaddition (broken=0, formed>=2) is Phase 5+. "
                 f"Got formed={bond_changes.formed}, frags={len(frag_indices)}."
             )
         substrate = _find_substrate_by_size(frag_indices)
@@ -137,26 +128,9 @@ def _place_fragments(
             rotation_perturbation=rotation_perturbation,
         )
 
-    # Tier 3: Phase 5 metathesis (broken bonds 各 fragment 内に閉じ、formed が両 frag を跨ぐ)
-    if (
-        substrate is None
-        and bond_changes.broken
-        and bond_changes.formed
-        and len(frag_indices) == 2
-        and len(bond_changes.formed) == 2
-        and len(bond_changes.broken) == 2
-    ):
-        # Tier 3 内で broken_within_reference / broken_within_moving の本数を再検証
-        # (1+1 でない場合は _kabsch_alignment が NotImplementedError を投げる)
-        return _kabsch_alignment(
-            mol_h, frag_indices, positions, bond_changes,
-            rotation_perturbation=rotation_perturbation,
-        )
-
     raise NotImplementedError(
-        "multi-substrate placement only supports 2-fragment 4-center metathesis "
-        "(formed=2, broken=2) in Phase 5; other shapes are Phase 6+. "
-        f"Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
+        "multi-substrate metathesis (broken bonds spanning fragments) is "
+        f"Phase 5+. Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
         f"frags={len(frag_indices)}."
     )
 
@@ -435,220 +409,6 @@ def _planar_face_placement(
     return positions
 
 
-# --- Phase 5 Tier 3 helpers ---
-
-
-def _perpendicular_face_dir(
-    axis: np.ndarray,
-    offset: np.ndarray,
-) -> np.ndarray:
-    """Return a unit vector perpendicular to axis, biased by offset.
-
-    Strategy:
-      1. axis を正規化。
-      2. offset の axis-平行成分を除去 → offset_perp。
-      3. ||offset_perp|| > 1e-6 なら正規化して返す。
-      4. Fallback: 世界基底 [+z, +y, +x] を順に試し、axis と直交成分を持つ
-         最初のものを正規化して返す。axis は unit vector なので最低 2 つは
-         必ず非ゼロ垂直成分を持つ → fallback は必ず一意に決まる。
-
-    Special case: if offset is the zero vector, its perpendicular component
-    is also zero; falls through to the fallback chain (returns +z when axis
-    is not parallel to +z, otherwise +y).
-    """
-    axis_norm = float(np.linalg.norm(axis))
-    if axis_norm < 1e-12:
-        raise ValueError("axis must be a non-zero vector")
-    axis_unit = axis / axis_norm
-
-    offset_perp = offset - float(np.dot(offset, axis_unit)) * axis_unit
-    norm = float(np.linalg.norm(offset_perp))
-    if norm > 1e-6:
-        return offset_perp / norm
-
-    for basis in (
-        np.array([0.0, 0.0, 1.0]),
-        np.array([0.0, 1.0, 0.0]),
-        np.array([1.0, 0.0, 0.0]),
-    ):
-        proj = float(np.dot(basis, axis_unit)) * axis_unit
-        candidate = basis - proj
-        candidate_norm = float(np.linalg.norm(candidate))
-        if candidate_norm > 1e-6:
-            return candidate / candidate_norm
-
-    raise RuntimeError("could not find a perpendicular direction; axis is not a unit vector?")
-
-
-def _kabsch_rigid_transform(
-    src: np.ndarray,
-    dst: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Orthogonal Procrustes (Kabsch) solve: src を dst に合わせる剛体変換 (R, t)。
-
-    Centroid 中心化 → cross-covariance H = src_c.T @ dst_c → SVD → R = Vt.T @ D @ U.T
-    where D = diag(1, 1, sign(det(Vt.T @ U.T))) で reflection を防ぐ。
-
-    Returns (R: (3,3) rotation matrix with det>=0, t: (3,) translation vector).
-    Raises ValueError if shapes mismatch or N < 2.
-
-    Note: R is unique only when N >= 4 with points in general position.
-    With N < 4 or near-collinear points, multiple rotations achieve the
-    same minimum RMSD; the function returns one of them (chosen by
-    np.linalg.svd's null-space convention). Phase 5 metathesis uses N=2
-    and relies on cone perturbation in the caller to break the residual
-    rotational ambiguity.
-    """
-    if src.shape != dst.shape:
-        raise ValueError(f"src and dst must have same shape; got {src.shape} vs {dst.shape}")
-    if src.ndim != 2 or src.shape[1] != 3 or src.shape[0] < 2:
-        raise ValueError(f"expected (N>=2, 3) arrays; got {src.shape}")
-
-    centroid_src = src.mean(axis=0)
-    centroid_dst = dst.mean(axis=0)
-    src_c = src - centroid_src
-    dst_c = dst - centroid_dst
-
-    H = src_c.T @ dst_c
-    # Singular values (_S) are not needed; only the orthonormal U/Vt factors enter R.
-    U, _S, Vt = np.linalg.svd(H)
-    # Vt.T @ U.T is orthogonal so det is exactly +/-1; no zero-guard needed.
-    d = float(np.sign(np.linalg.det(Vt.T @ U.T)))
-    D = np.diag([1.0, 1.0, d])
-    R = Vt.T @ D @ U.T
-    t = centroid_dst - R @ centroid_src
-    return R, t
-
-
-def _kabsch_alignment(
-    mol_h: Chem.Mol,
-    frag_indices: tuple[tuple[int, ...], ...],
-    positions: np.ndarray,
-    bond_changes: BondChanges,
-    *,
-    rotation_perturbation: np.ndarray | None,
-) -> np.ndarray:
-    """Tier 3 placement: 2-fragment 4-center metathesis を Kabsch alignment で配置。
-
-    Algorithm (詳細は spec §3 参照):
-      1. reference = _find_substrate_by_size(frag_indices), moving = もう一方
-      2. broken_within_reference / broken_within_moving に分類。各 1 本ずつ前提。
-      3. anchor pair = broken_within_reference の 2 endpoint。
-      4. formed bonds 各本から (anchor_in_reference, incoming_in_moving) を抽出。
-      5. perp_dir = anchor 軸の垂直方向 (moving 重心 offset から決定、fallback あり)。
-      6. target_a/b = positions[anchor_a/b] + FRAGMENT_SEPARATION/2 × perp_dir
-      7. _kabsch_rigid_transform(incoming_positions, target_positions) → (R, t)
-      8. moving fragment 全体に (R, t) を適用 (positions = (R @ p.T).T + t)。
-      9. rotation_perturbation が指定されていれば、target_midpoint 周りに moving fragment
-         全体を追加回転 (cone trial 生成、Kabsch 後に独立適用)。
-
-    Edge cases (Task 6 で error テストとして実装):
-      - broken_within_reference または broken_within_moving が 1 本でない →
-        NotImplementedError ("Phase 5 only supports 1+1 within-fragment broken bonds")
-      - 2 incoming atoms が同一 (multi-bond from single anchor) →
-        NotImplementedError ("multi-bond from single anchor in metathesis")
-
-    Note: mol_h is accepted for API symmetry with Tier 1 (_directional_placement)
-    and Tier 2 (_planar_face_placement); Tier 3 operates on atom-index sets only
-    and does not consult the RDKit molecule.
-    """
-    reference = _find_substrate_by_size(frag_indices)
-    moving = next(f for f in frag_indices if f is not reference)
-    reference_set = set(reference)
-    moving_set = set(moving)
-
-    broken_within_reference = [
-        (a, b) for a, b in bond_changes.broken
-        if a in reference_set and b in reference_set
-    ]
-    broken_within_moving = [
-        (a, b) for a, b in bond_changes.broken
-        if a in moving_set and b in moving_set
-    ]
-    if len(broken_within_reference) != 1 or len(broken_within_moving) != 1:
-        raise NotImplementedError(
-            "Phase 5 only supports 1+1 within-fragment broken bonds; "
-            f"got broken_within_reference={broken_within_reference}, "
-            f"broken_within_moving={broken_within_moving}"
-        )
-
-    anchor_a, anchor_b = sorted(broken_within_reference[0])
-
-    anchor_to_incoming: dict[int, int] = {}
-    for a, b in bond_changes.formed:
-        if a in reference_set and b in moving_set:
-            anchor, incoming = a, b
-        elif b in reference_set and a in moving_set:
-            anchor, incoming = b, a
-        else:
-            raise ValueError(
-                f"formed bond ({a}, {b}) does not bridge reference↔moving; "
-                f"check bond_changes (formed={bond_changes.formed})"
-            )
-        if anchor not in (anchor_a, anchor_b):
-            raise ValueError(
-                f"formed bond anchor {anchor} is not in anchor pair "
-                f"({anchor_a}, {anchor_b}) from broken_within_reference"
-            )
-        if anchor in anchor_to_incoming:
-            raise NotImplementedError(
-                f"multi-bond from single anchor in metathesis (anchor={anchor})"
-            )
-        anchor_to_incoming[anchor] = incoming
-
-    if anchor_a not in anchor_to_incoming or anchor_b not in anchor_to_incoming:
-        raise ValueError(
-            f"each anchor in pair ({anchor_a}, {anchor_b}) must have one formed bond; "
-            f"got {anchor_to_incoming}"
-        )
-    incoming_a = anchor_to_incoming[anchor_a]
-    incoming_b = anchor_to_incoming[anchor_b]
-
-    if incoming_a == incoming_b:
-        raise NotImplementedError(
-            f"multi-bond from single anchor in metathesis "
-            f"(two reference anchors target the same moving atom {incoming_a})"
-        )
-
-    axis = positions[anchor_a] - positions[anchor_b]
-    axis_norm = float(np.linalg.norm(axis))
-    if axis_norm < 1e-6:
-        raise RuntimeError(
-            "anchor pair coincident after MMFF — broken-within-reference bond is broken"
-        )
-    axis_unit = axis / axis_norm
-
-    moving_indices = list(moving)
-    moving_centroid = positions[moving_indices].mean(axis=0)
-    anchor_midpoint = (positions[anchor_a] + positions[anchor_b]) / 2.0
-    offset = moving_centroid - anchor_midpoint
-    perp_dir = _perpendicular_face_dir(axis_unit, offset)
-
-    target_a = positions[anchor_a] + (FRAGMENT_SEPARATION / 2.0) * perp_dir
-    target_b = positions[anchor_b] + (FRAGMENT_SEPARATION / 2.0) * perp_dir
-
-    src = np.stack([positions[incoming_a], positions[incoming_b]])
-    dst = np.stack([target_a, target_b])
-    R, t = _kabsch_rigid_transform(src, dst)
-
-    # Apply Kabsch (R, t) to the moving fragment as a rigid body.
-    moving_pos = positions[moving_indices]
-    moving_pos = (R @ moving_pos.T).T + t
-
-    # Cone perturbation: rotate the just-placed moving fragment around the
-    # target midpoint. This samples orientations of the same 4-center geometry
-    # without disturbing target_a, target_b (which stay fixed in reference frame).
-    if rotation_perturbation is not None:
-        target_midpoint = (target_a + target_b) / 2.0
-        moving_pos = (
-            (rotation_perturbation @ (moving_pos - target_midpoint).T).T
-            + target_midpoint
-        )
-
-    positions[moving_indices] = moving_pos
-    return positions
-
-
 def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:
     params = AllChem.ETKDGv3()
     for attempt in range(MAX_EMBED_RETRIES):
@@ -666,10 +426,7 @@ def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:
     if frag.GetNumHeavyAtoms() > 1:
         result = AllChem.MMFFOptimizeMolecule(frag, maxIters=500)
         if result == -1:
-            elems = ", ".join(sorted({a.GetSymbol() for a in frag.GetAtoms()}))
-            log.warning(
-                "MMFF94 cannot parameterize fragment (atoms: %s); using ETKDG "
-                "geometry without MMFF refinement", elems,
+            raise RuntimeError(
+                f"MMFF94 force field could not be constructed for fragment "
+                f"({frag.GetNumAtoms()} atoms). Check element coverage."
             )
-            # ETKDG already produced a 3D conformation; downstream UMA relaxation
-            # will provide energetic refinement.

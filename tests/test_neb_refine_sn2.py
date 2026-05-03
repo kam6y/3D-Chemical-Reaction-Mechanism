@@ -7,17 +7,27 @@ from ase.io import read
 
 from reactx.cli import main
 
+_SN2_NEB = """\
+description = "SN2 neb-refine fast"
+formed = [[1, 3]]
+broken = [[1, 2]]
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 30
+[sampling]
+n_angles = 2
+"""
+
 
 @pytest.mark.slow
-def test_neb_refine_writes_refined_trajectory(
-    tmp_path: Path, sn2_rxn_path: Path,
-):
+def test_neb_refine_writes_refined_trajectory(tmp_path: Path, tmp_rxn_with_toml):
+    rxn = tmp_rxn_with_toml("sn2", toml_body=_SN2_NEB)
     out = tmp_path / "sn2_neb"
     rc = main([
-        "run", str(sn2_rxn_path), "-o", str(out),
+        "run", str(rxn), "-o", str(out),
         "--backend", "uma",
-        "--n-angles", "2",
-        "--max-relax-steps", "30",
         "--neb-refine",
         "--neb-images", "5",
     ])
@@ -27,5 +37,4 @@ def test_neb_refine_writes_refined_trajectory(
     assert meta["neb_refined"] is True
 
     frames = read(str(out / "trajectory.xyz"), index=":")
-    # NEB with 5 images produces exactly 5 frames (no padding)
     assert len(frames) == 5

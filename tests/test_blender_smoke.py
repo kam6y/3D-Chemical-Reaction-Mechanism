@@ -91,15 +91,56 @@ def test_blender_bonds_detected(tmp_path: Path):
     )
 
 
+_SN2_BLENDER = """\
+description = "SN2 blender smoke"
+formed = [[1, 3]]
+broken = [[1, 2]]
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 30
+[sampling]
+n_angles = 2
+"""
+
+_PT_BLENDER = """\
+description = "Proton transfer blender smoke"
+formed = [[1, 3]]
+broken = [[1, 2]]
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 30
+r_form = 1.05
+[sampling]
+n_angles = 2
+"""
+
+_E2_BLENDER = """\
+description = "E2 blender smoke"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+[restraints]
+k_form = 1.0
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 30
+[sampling]
+n_angles = 2
+"""
+
+
 @pytest.mark.blender
 @pytest.mark.slow
-@pytest.mark.parametrize("rxn_filename,extra_args", [
-    ("sn2.rxn", []),
-    ("proton_transfer.rxn", ["--r-form", "1.05"]),
-    ("e2.rxn", ["--reaction-type", "e2"]),
+@pytest.mark.parametrize("stem,toml_body", [
+    ("sn2", _SN2_BLENDER),
+    ("proton_transfer", _PT_BLENDER),
+    ("e2", _E2_BLENDER),
 ])
 def test_re1_blender_smoke_writes_blend(
-    tmp_path: Path, rxn_filename: str, extra_args: list[str],
+    tmp_path: Path, stem: str, toml_body: str, tmp_rxn_with_toml,
 ):
     """End-to-end Phase Re1 + Phase 3 pipeline + Blender renders.
 
@@ -110,17 +151,13 @@ def test_re1_blender_smoke_writes_blend(
     if shutil.which(BLENDER) is None:
         pytest.skip(f"Blender executable not found: {BLENDER}")
 
-    examples = Path(__file__).resolve().parent.parent / "examples"
-    rxn_path = examples / rxn_filename
-    out = tmp_path / rxn_filename.removesuffix(".rxn")
+    rxn = tmp_rxn_with_toml(stem, toml_body=toml_body)
+    out = tmp_path / stem
     rc = main([
-        "run", str(rxn_path), "-o", str(out),
+        "run", str(rxn), "-o", str(out),
         "--backend", "uma",
-        "--n-angles", "2",
-        "--max-relax-steps", "30",
         "--render",
         "--blender-exe", BLENDER,
-        *extra_args,
     ])
     assert rc == 0
     assert (out / "scene.blend").exists()

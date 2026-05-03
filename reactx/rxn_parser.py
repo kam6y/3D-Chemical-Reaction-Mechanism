@@ -88,3 +88,18 @@ def heavy_to_hydrogen_groups(mol_with_h: Chem.Mol) -> dict[int, list[int]]:
         hs = [n.GetIdx() for n in atom.GetNeighbors() if n.GetSymbol() == "H"]
         groups[heavy_idx] = hs
     return groups
+
+
+def atom_map_to_reactant_idx(reactant_mol: Chem.Mol) -> dict[int, int]:
+    """Return {atom_map_number: 0-based atom index} for the (pre-AddHs) reactant.
+
+    The mapping is identical for the post-AddHs Mol because Chem.AddHs appends
+    new H atoms at indices >= original count, preserving every existing atom's
+    index. Use this dict to translate TOML-side atom-map pairs into 0-based
+    indices that BondChanges, embed3d, and build_restraints expect.
+    """
+    return {
+        a.GetAtomMapNum(): a.GetIdx()
+        for a in reactant_mol.GetAtoms()
+        if a.GetAtomMapNum()
+    }

@@ -55,46 +55,27 @@ def test_heavy_to_hydrogen_groups_on_methane():
 
 
 def test_parse_sn1_recomb_rxn(sn1_recomb_rxn_path):
-    """examples/sn1_recomb.rxn が parse でき、formed=1 / broken=0 が抽出される。"""
-    from reactx.bond_changes import compute_bond_changes
+    """examples/sn1_recomb.rxn が parse でき、TOML の formed=[[1,5]] が C-Cl 形成を表す。"""
+    from reactx.bond_changes import BondChanges
+    from reactx.rxn_parser import atom_map_to_reactant_idx
 
-    r_mol, p_mol, mapping = parse_rxn(sn1_recomb_rxn_path)
+    r_mol, p_mol, _ = parse_rxn(sn1_recomb_rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
-    bc = compute_bond_changes(r_h, p_h, mapping)
 
-    assert len(bc.formed) == 1, f"expected 1 formed bond, got {bc.formed}"
-    assert len(bc.broken) == 0, f"expected 0 broken bond, got {bc.broken}"
     assert len(Chem.GetMolFrags(r_h)) == 2  # reactant: cation + nucleophile
     assert len(Chem.GetMolFrags(p_h)) == 1  # product: recombined
+
+    m2i = atom_map_to_reactant_idx(r_mol)
+    bc = BondChanges.from_atom_map_pairs(
+        formed_map=[(1, 5)],
+        broken_map=[],
+        atom_map_to_idx=m2i,
+    )
+    assert len(bc.formed) == 1
+    assert len(bc.broken) == 0
     a, b = bc.formed[0]
     syms = [at.GetSymbol() for at in r_h.GetAtoms()]
     assert {syms[a], syms[b]} == {"C", "Cl"}, (
         f"expected C-Cl formed, got {syms[a]}-{syms[b]}"
     )
-
-
-def test_parse_metathesis_4center_rxn(metathesis_rxn_path):
-    """examples/metathesis_4center.rxn が parse でき、formed=2 / broken=2 が抽出される。"""
-    from rdkit import Chem
-
-    from reactx.bond_changes import compute_bond_changes
-    from reactx.rxn_parser import parse_rxn
-
-    r_mol, p_mol, mapping = parse_rxn(metathesis_rxn_path)
-    r_h = Chem.AddHs(r_mol)
-    p_h = Chem.AddHs(p_mol)
-    bc = compute_bond_changes(r_h, p_h, mapping)
-
-    assert len(bc.formed) == 2, f"expected 2 formed bonds, got {bc.formed}"
-    assert len(bc.broken) == 2, f"expected 2 broken bonds, got {bc.broken}"
-    assert len(Chem.GetMolFrags(r_h)) == 2, "reactant should have 2 fragments"
-    assert len(Chem.GetMolFrags(p_h)) == 2, "product should have 2 fragments"
-
-    syms = [a.GetSymbol() for a in r_h.GetAtoms()]
-    formed_pair_syms = {frozenset({syms[a], syms[b]}) for a, b in bc.formed}
-    broken_pair_syms = {frozenset({syms[a], syms[b]}) for a, b in bc.broken}
-    assert frozenset({"C", "Br"}) in formed_pair_syms, f"expected C-Br formed; got {formed_pair_syms}"
-    assert frozenset({"Li", "Cl"}) in formed_pair_syms, f"expected Li-Cl formed; got {formed_pair_syms}"
-    assert frozenset({"C", "Cl"}) in broken_pair_syms, f"expected C-Cl broken; got {broken_pair_syms}"
-    assert frozenset({"Li", "Br"}) in broken_pair_syms, f"expected Li-Br broken; got {broken_pair_syms}"

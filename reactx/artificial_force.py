@@ -19,15 +19,12 @@ from ase.constraints import FixConstraint, Hookean
 DEFAULT_R_FORM: dict[tuple[str, str], float] = {
     ("C", "F"): 1.39,
     ("C", "Cl"): 1.78,
-    ("C", "Br"): 1.94,    # Phase 5: alkyl bromide
     ("C", "N"): 1.47,
     ("C", "O"): 1.43,
     ("C", "C"): 1.54,
     ("C", "H"): 1.09,
     ("N", "H"): 1.01,
     ("O", "H"): 0.97,
-    ("Li", "Cl"): 2.02,   # Phase 5: gas-phase LiCl
-    ("Li", "Br"): 2.17,   # Phase 5: gas-phase LiBr
 }
 
 

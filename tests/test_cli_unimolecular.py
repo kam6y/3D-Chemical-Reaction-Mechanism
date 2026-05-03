@@ -1,19 +1,25 @@
-"""Tests for unimolecular reaction handling: --n-angles auto-clamp + prescreen skip."""
+"""Tests for unimolecular reaction handling: n_angles auto-clamp + prescreen skip."""
 import json
 from pathlib import Path
 
 import pytest
 
-from reactx.cli import main
+_SN1_DISSOC_FAST = """\
+description = "sn1_dissoc fast"
+formed = []
+broken = [[1, 5]]
+[restraints]
+k_form = 0.0
+k_broken = 2.0
+r_broken = 6.0
+max_relax_steps = 5
+[sampling]
+n_angles = 8
+"""
 
 
 @pytest.fixture()
-def fake_unimolecular_pipeline(monkeypatch, tmp_path):
-    """Patch the UMA pipeline to a 1-fragment fake reaction.
-
-    We don't need a real UMA call; intercept calculator + relax to return
-    immediately, then inspect meta.json behaviour.
-    """
+def fake_unimolecular_pipeline(monkeypatch):
     import numpy as np
     from ase import Atoms
 
@@ -37,19 +43,16 @@ def fake_unimolecular_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(path_relax, "relax_with_restraints", fake_relax)
 
 
-def test_unimolecular_n_angles_clamped_to_one(fake_unimolecular_pipeline, tmp_path):
-    """When reactant has 1 fragment, --n-angles N is clamped to 1 and prescreen skipped."""
-    rxn = Path("examples/sn1_dissoc.rxn")
-    if not rxn.exists():
-        pytest.skip("examples/sn1_dissoc.rxn not yet created (Task 8)")
+def test_unimolecular_n_angles_clamped_to_one(
+    fake_unimolecular_pipeline, tmp_path: Path, tmp_rxn_with_toml,
+):
+    """When reactant has 1 fragment and TOML claims n_angles=8, clamp to 1."""
+    rxn = tmp_rxn_with_toml("sn1_dissoc", toml_body=_SN1_DISSOC_FAST)
     out = tmp_path / "out"
-    rc = main([
-        "run", str(rxn), "-o", str(out),
-        "--backend", "lj",
-        "--reaction-type", "sn1_dissoc",
-        "--n-angles", "8",
-    ])
+    from reactx.cli import main
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "lj"])
     assert rc == 0
     meta = json.loads((out / "meta.json").read_text())
-    assert len(meta["trials"]) == 1, f"expected 1 trial after clamp, got {len(meta['trials'])}"
-    assert meta["prescreen"]["enabled"] is False or meta["prescreen"]["kept"] is None
+    assert len(meta["trials"]) == 1
+    assert meta["prescreen"]["enabled"] is False
+    assert meta["prescreen"]["kept"] is None

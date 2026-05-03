@@ -1,19 +1,15 @@
-# reactx — Phase Re1 Multi-Angle Path Engine
+# reactx — Multi-Angle Reaction Path Engine
 
-2D 反応機構 (`.rxn`) から多角度サンプリング + Hookean/PullApart 拘束 + FIRE 緩和で 3D 反応経路を探索し、Blender で ball-and-stick アニメーションを生成するパイプライン。
+2D 反応機構 (`.rxn`) と sidecar TOML config から多角度サンプリング + Hookean/PullApart 拘束 + FIRE 緩和で 3D 反応経路を探索し、Blender で ball-and-stick アニメーションを生成するパイプライン。
 
-**Phase Re1 の目標**: 正確な TS エネルギーではなく、妥当なアニメーション。NEB はオプション。対応反応: SN2 / proton transfer。
+目的は妥当なアニメーション (正確な TS エネルギーは目標としない)。NEB refine はオプション。対応反応:
 
-**Phase 3** で multi-bond 反応 (E2 elimination = 1 formed + 2 broken / SN1 step 1 解離 = 0 formed + 1 broken) に拡張。
-
-**Phase 4** で SN1 step 2 cation + nucleophile recombination (1 formed + 0 broken) を Tier 2 plane-normal placement で追加。
-
-**Phase 5** で 2-fragment 4-center metathesis (formed=2 + broken=2、broken bonds 各 fragment 内) を Tier 3 Kabsch alignment で追加。
-
-> **Breaking changes (Phase 3, develop ← phase-3):**
-> - `meta.json.effective_params.r_form: float` → `r_form_targets: list[float]` (per-formed-bond, formed=0 のとき空 list)
-> - `r_form` キーはもう書かれない。外部スクリプトで `meta["effective_params"]["r_form"]` を読んでいる場合は `r_form_targets` (list) に追従が必要。
-> - 内部 API: `_resolve_effective_params` の戻り値も `r_form_targets` キーに統一。
+- **SN2** (`O⁻ + CH₃Cl` 等、1 formed + 1 broken)
+- **Proton transfer** (`HCl + NH₃` 等、1 formed + 1 broken)
+- **Menshutkin** (`NH₃ + CH₃Cl`、1 formed + 1 broken、中性 → イオン対)
+- **E2 elimination** (1 formed + 2 broken)
+- **SN1 step 1 解離** (0 formed + 1 broken、unimolecular)
+- **SN1 step 2 recombination** (1 formed + 0 broken、Tier 2 plane-normal placement)
 
 ## セットアップ
 
@@ -27,24 +23,23 @@ Blender 4.x と `atomic-blender-pdb-xyz` アドオンを別途インストール
 ## 使い方
 
 ```bash
-# SN2 (default; --reaction-type sn2_anion is implicit)
+# SN2 (description / formed / broken / params are all in examples/sn2.rxn.toml)
 reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
-# Proton transfer (HCl + NH3 -> Cl- + NH4+)
-reactx run examples/proton_transfer.rxn -o out/pt/ \
-  --reaction-type proton_transfer --backend uma --render
+# Proton transfer
+reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render
 ```
 
-反応クラスごとに別途チューニング済みプリセットがある (下節 [Reaction-type presets](#reaction-type-presets) 参照)。`--reaction-type` 省略時は `sn2_anion` 相当の挙動。
+反応クラスごとの全パラメータは `examples/<name>.rxn.toml` に集約されている (下節 [Per-reaction .rxn.toml config](#per-reaction-rxntoml-config) 参照)。
 
-主要フラグ:
+主要フラグ (環境/出力依存のみ):
 
-- `--n-angles 8` (default): 多角度試行数
-- `--cone-half-deg 30.0`: 多角度試行の cone 半角
-- `--r-form` (default: 元素ペアから自動): 形成結合の目標距離 (Å)
-- `--prescreen-keep 3` (default): MMFF prescreen で UMA に渡す trial 数 (top-K)
-- `--prescreen-steps 30` (default): prescreen 内の MMFF FIRE step 数
-- `--no-mmff-prescreen`: MMFF prescreen を無効化、全 trial を UMA に流す (Phase Re1 default 挙動)。`meta.json.trials[]` 長を `--n-angles` と一致させたい場合 (旧スクリプトの後方互換) はこれを併用
-- `--neb-refine` (default off): best trajectory を NEB で refinement (実行時間延長)
+- `--backend {uma,lj}` (default: `uma`)
+- `--model uma-m-1p1` (UMA model name)
+- `--seed 0` (sampling 再現性デバッグ)
+- `--relax-fmax 0.1`, `--traj-stride 5` (出力品質)
+- `--neb-refine` + `--neb-images 7`
+  - 1 formed + 1 broken 反応のみ対応 — 他は exit 2
+- `--render` + `--blender-exe blender`
 
 生成物:
 
@@ -53,56 +48,56 @@ reactx run examples/proton_transfer.rxn -o out/pt/ \
 - `out/<rxn>/meta.json` — trial 全件の score, wall_clock_seconds, neb_refined フラグ
 - `out/<rxn>/scene.blend` — Blender シーン
 
-## Reaction-type presets
+## Per-reaction `.rxn.toml` config
 
-`--reaction-type` で反応クラスごとにチューニング済みの拘束パラメータをまとめて適用できる。個別フラグ (`--k-form` / `--k-broken` / `--r-broken` / `--max-relax-steps` / `--r-form`) を併指定するとプリセット値を **常に上書き** する。`--reaction-type` 省略時は `sn2_anion` (現 default 相当)。
+各 `examples/<name>.rxn` には同階層に同名 stem の sidecar TOML (`<name>.rxn.toml`) を **必須で** 配置する。CLI は `<rxn_path>.toml` を機械的にロードし、結合変化情報 (`formed` / `broken`, atom-map 番号) と物理パラメータ (`k_form` / `k_broken` / `r_broken` / `max_relax_steps` / 任意 `r_form`) と sampling/prescreen 設定をすべてここから取る。
 
-| name | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form (Å) | 想定反応 |
-|---|---|---|---|---|---|---|
-| `sn2_anion` (default) | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 陰イオン求核剤の SN2 (例: O⁻ + CH₃Cl) |
-| `proton_transfer` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 中性間 PT (例: HCl + NH₃) |
-| `menshutkin` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 中性求核剤 → イオン対 (例: NH₃ + CH₃Cl) |
-| `e2` | 1.0 | 1.0 | 4.0 | 200 | 元素表 (典型: O–H 0.97 / N–H 1.01) | E2 elimination, 1 formed + 2 broken (例: CH₃CH₂Cl + OH⁻) |
-| `sn1_dissoc` | 0.0 | 2.0 | 6.0 | 200 | — (formed=0) | SN1 step 1 解離, 0 formed + 1 broken (例: (CH₃)₃CBr → t-Bu⁺ + Br⁻) |
-| `sn1_recomb` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (典型: C–Cl 1.78) | SN1 step 2 cation + nucleophile recombination (例: (CH₃)₃C⁺ + Cl⁻) |
-| `metathesis_4center` | 2.0 | 2.0 | 4.5 | 300 | 元素表 (典型: C–Br 1.94, Li–Cl 2.02) | 2-fragment 4-center metathesis (例: CH₃Cl + LiBr → CH₃Br + LiCl) |
+最小例 (`examples/sn2.rxn.toml`):
 
-```bash
-# SN2 (sn2_anion is the default; the flag is optional)
-reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
+```toml
+description = "SN2 anion: CH3Cl + OH- -> CH3OH + Cl-"
+formed = [[1, 3]]
+broken = [[1, 2]]
 
-# Proton transfer
-reactx run examples/proton_transfer.rxn -o out/pt/ \
-  --reaction-type proton_transfer --backend uma --render
-
-# Menshutkin (NH3 + CH3Cl -> CH3NH3+ + Cl-)
-reactx run examples/menshutkin.rxn -o out/men/ \
-  --reaction-type menshutkin --backend uma --render
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
 ```
 
-**Menshutkin プリセットの根拠**: 既定値は陰イオン求核剤の外部熱的反応 (SN2 / PT) 用にチューニングされている。中性求核剤 + イオン対生成のような **内部熱的反応** では QM のバリア勾配が default の Hookean に勝って TS 手前で停滞するため、`k_form` / `k_broken` を倍化して引力・斥力を強化し、`r_broken` を 5.0 Å まで引き伸ばし、`max_relax_steps` を 200 に拡大している。
+| `.rxn` | description | formed (map) | broken (map) | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form | n_angles |
+|---|---|---|---|---|---|---|---|---|---|
+| sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 8 |
+| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 8 |
+| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 8 |
+| e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 1.0 | 1.0 | 4.0 | 200 | 元素表 | 8 |
+| sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | 0.0 | 2.0 | 6.0 | 200 | — | **1** |
+| sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (C-Cl 1.78) | 8 |
 
-各実行で実際に適用された effective parameters は `out/<rxn>/meta.json` の `effective_params` に記録され、再現性を担保する。
+`r_form` は省略時に Cordero (2008) 共有結合半径表で per-bond ルックアップ、scalar で全 formed 同値、list で per-bond 指定。`[sampling]` / `[prescreen]` は省略可能で、それぞれ `n_angles=8 cone_half_deg=30.0`、`enabled=true keep=3 steps=30` がデフォルト。
 
-## Phase Re1 + Phase 3 + Phase 4 + Phase 5 動作確認
+```bash
+reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
+reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
+```
 
-DoD は以下の手順で確認する:
+## 動作確認
 
-1. `reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render` を実行 → `meta.json` の `selected_trial >= 0`, `trials[].reached_product` で少なくとも 1 件 True を確認
-2. `out/sn2/scene.blend` を Blender GUI で開いて Walden 反転を視認
-3. `reactx run examples/proton_transfer.rxn -o out/pt/ --reaction-type proton_transfer --backend uma --render` を実行 → 同様に視認
-4. `pytest -m slow` で SN2 + proton_transfer 統合テストが pass
-5. `reactx run examples/e2.rxn -o out/e2/ --reaction-type e2 --backend uma --render` を実行
-   → `meta.json` で `selected_trial >= 0`, `reached_product=True` の trial が ≥1 件、`out/e2/scene.blend` で C–H と C–Cl の同時切断 + base (OH⁻) 接近を視認
-6. `reactx run examples/sn1_dissoc.rxn -o out/sn1d/ --reaction-type sn1_dissoc --backend uma` を実行
-   → `meta.json.trials` が 1 件 (unimolecular auto-clamp), `trajectory.xyz` で C–Br 距離が ≥4.5 Å まで伸びる
-7. `pytest -m slow` で `test_re3_e2` + `test_re3_sn1_dissoc` + 既存 SN2/PT/Menshutkin が全 pass
-8. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --reaction-type sn1_recomb --backend uma --render` を実行
-   → `meta.json.trials` が 8 件 (bimolecular)、`reached_product=True` の trial が ≥1 件、`out/sn1r/scene.blend` で Cl⁻ が tBu⁺ の平面に向かって接近 → C–Cl 結合形成を視認
-9. `pytest -m slow` で `test_re4_sn1_recomb` + 既存 `test_re1_*` / `test_re3_*` が全 pass
-10. `reactx run examples/metathesis_4center.rxn -o out/m4c/ --reaction-type metathesis_4center --backend uma --render` を実行
-    → `meta.json` で `selected_trial >= 0`, `trials[].reached_product` ≥1 件 True、`out/m4c/scene.blend` で 4-center TS → CH₃Br + LiCl への乗り換えを視認 (CH₃ が Cl から Br へ、Li が Br から Cl へ同時に乗り換え)
-11. `pytest -m slow` で `test_re5_metathesis` + 既存 `test_re1_*` / `test_re3_*` / `test_re4_*` が全 pass
+各反応の最小確認手順:
+
+1. `reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render`
+   → `meta.json` で `selected_trial >= 0`, `trials[].reached_product` ≥1 件 True、`out/sn2/scene.blend` を Blender GUI で開いて Walden 反転を視認
+2. `reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render` → 同様に視認
+3. `reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render`
+   → C–N 形成 ≤ 1.7 Å、C–Cl 切断 ≥ 3.5 Å を視認
+4. `reactx run examples/e2.rxn -o out/e2/ --backend uma --render`
+   → C–H と C–Cl の同時切断 + base (OH⁻) 接近を視認
+5. `reactx run examples/sn1_dissoc.rxn -o out/sn1d/ --backend uma`
+   → unimolecular auto-clamp で `meta.json.trials` が 1 件、`trajectory.xyz` で C–Br 距離 ≥ 4.5 Å
+6. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --backend uma --render`
+   → bimolecular で 8 trials → prescreen で top-3、Cl⁻ が tBu⁺ の平面に向かって接近 → C–Cl 結合形成を視認
+7. `pytest -m slow` で 6 反応すべての統合テストが pass
 
 ## レンダリング: 原子球サイズと結合棒
 
@@ -115,34 +110,34 @@ DoD は以下の手順で確認する:
 
 詳細仕様: `docs/superpowers/specs/2026-04-26-vdw-radii-design.md`
 
-## Phase Re1 + Phase 3 + Phase 4 + Phase 5 の方針と限界
+## 方針と限界
 
-- 目的は妥当なアニメーション (TS エネルギーの正確さは目標としない)
-- NEB は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc / SN1 recomb では CLI が exit code 2 で reject)
-- 対応反応 (Phase 5 時点): SN2 / proton transfer / Menshutkin (1 formed + 1 broken) + **E2 elimination (1 formed + 2 broken)** + **SN1 step 1 解離 (0 formed + 1 broken)** + **SN1 step 2 recombination (1 formed + 0 broken)** + **2-fragment 4-center metathesis (2 formed + 2 broken, broken 各 frag 内)**。中性 addition / cycloaddition / 4+ fragment ionic salt metathesis / Diels–Alder などは Phase 6+
+- 目的は妥当なアニメーション。TS エネルギーの正確さは保証しない
+- NEB refine は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc / SN1 recomb では CLI が exit code 2 で reject)
+- 対応反応は上節「対応反応」を参照。中性 addition / cycloaddition / metathesis / Diels–Alder などは未対応
 - ラジカル / open-shell / 溶媒効果は対象外
-- multi-bond NEB endpoint construction は Phase 6+
-- 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md` (Phase Re1) / `docs/superpowers/specs/2026-05-03-phase-3-multibond-design.md` (Phase 3) / `docs/superpowers/specs/2026-05-03-phase-4-sn1-recomb-design.md` (Phase 4) / `docs/superpowers/specs/2026-05-03-phase-5-metathesis-design.md` (Phase 5)
+- σ-only connectivity diff のため、結合次数変化 (single↔double) は明示的に追跡しない (π 形成は QM calculator に委ねる)
+
+詳細仕様: `docs/superpowers/specs/2026-05-03-rxn-config-sidecar-design.md`
 
 ## Wall-clock (実測)
 
-RTX 5070 Ti + UMA-m-1p1 で実測 (default `--n-angles 8 --prescreen-keep 3`):
+RTX 5070 Ti + UMA-m-1p1 で実測 (sidecar TOML default の `n_angles=8 keep=3`):
 
-| Reaction | wall-clock (旧, 8/8 UMA) | wall-clock (新, prescreen + 3/8 UMA) | 備考 |
-|---|---|---|---|
-| SN2 (`examples/sn2.rxn`) | ~67 s | **~54 s** | MMFF 動作、3/3 reached_product |
-| Proton transfer (`examples/proton_transfer.rxn`) | ~116 s | **~117 s** | HCl で MMFF parameterize 失敗 → 8/8 UMA に fallback |
-| Menshutkin (`examples/menshutkin.rxn`) | ~3 min | **~41 s** | MMFF 動作、3/3 reached_product |
-| E2 (`examples/e2.rxn`) | — (新規) | **~54 s** | Phase 3, 1 formed + 2 broken、3/3 reached_product |
-| SN1 dissoc (`examples/sn1_dissoc.rxn`) | — (新規) | **~21 s** | Phase 3, unimolecular → n_angles=1 強制、prescreen skipped |
-| SN1 recomb (`examples/sn1_recomb.rxn`) | — (新規) | **~30-60 s** | Phase 4, 1 formed + 0 broken、bimolecular で 8 trials → prescreen で top-3 |
-| Metathesis (`examples/metathesis_4center.rxn`) | — (新規) | **~85 s** | Phase 5, 2 formed + 2 broken、Li/Br MMFF parameterize 失敗で全 8 trial が UMA fallback、Menshutkin-style preset (k=2.0/r_broken=4.5/max=300) で 8/8 reached_product |
+| Reaction | wall-clock | 備考 |
+|---|---|---|
+| SN2 (`examples/sn2.rxn`) | ~54 s | MMFF prescreen 動作、3/3 reached_product |
+| Proton transfer (`examples/proton_transfer.rxn`) | ~117 s | HCl で MMFF parameterize 失敗 → 8/8 UMA に fallback |
+| Menshutkin (`examples/menshutkin.rxn`) | ~41 s | MMFF 動作、3/3 reached_product |
+| E2 (`examples/e2.rxn`) | ~54 s | 1 formed + 2 broken、3/3 reached_product |
+| SN1 dissoc (`examples/sn1_dissoc.rxn`) | ~21 s | unimolecular → n_angles=1 強制、prescreen skipped |
+| SN1 recomb (`examples/sn1_recomb.rxn`) | ~30–60 s | 1 formed + 0 broken、bimolecular で 8 trials → prescreen で top-3 |
 
-MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗してフォールバック (= 旧挙動と同一の wall-clock) する。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、`--no-mmff-prescreen` で明示的に旧挙動を再現することも可能。
+MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗し、prescreen を skip して全 trial を UMA で relax する fallback に入る。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、明示的に prescreen を無効化したい場合は TOML に `prescreen.enabled = false` を書く。
 
 UMA model load (~25-30 s) が固定コストとして wall-clock を支配するため、prescreen による短縮幅は SN2 で ~20 %、Menshutkin で ~75 % など反応や trial 当たりの relax コストに依存する。
 
-`--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (DoD 用テスト `test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
+`--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (`test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 
 各実行の trial 全件スコアと prescreen 結果と wall_clock_seconds は `out/<rxn>/meta.json` に残る。
 
@@ -150,25 +145,33 @@ UMA model load (~25-30 s) が固定コストとして wall-clock を支配する
 
 ```bash
 pytest                   # 高速ユニットテストのみ (slow / blender マーカーは除外)
-pytest -m slow           # UMA 依存の SN2 統合テスト
+pytest -m slow           # UMA 依存の 6 反応統合テスト
 pytest -m blender        # Blender smoke test (ローカル環境のみ)
 ```
 
 ## アーキテクチャ
 
 ```
-.rxn → rxn_parser → bond_changes (formed/broken) → embed3d (rotation perturb)
-                                                   ├ trial 1
-                                                   ├ trial 2  ─┐
-                                                   ├ ...        │ FIRE + Hookean/PullApart restraints
-                                                   └ trial N  ─┘
-                                                          ↓
-                                                   scoring → best trial
-                                                          ↓
+.rxn + .rxn.toml ─> rxn_parser + load_config ─> ReactionConfig
+                                                       │
+                                                       ▼
+                                               BondChanges (formed/broken)
+                                                       │
+                                                       ▼
+                                              embed3d (rotation perturb)
+                                                ├ trial 1
+                                                ├ trial 2  ─┐
+                                                ├ ...        │ FIRE + Hookean/PullApart restraints
+                                                └ trial N  ─┘
+                                                       │
+                                                       ▼
+                                                scoring → best trial
+                                                       │
                                           (optional) neb refinement
-                                                          ↓
-                                                  trajectory.xyz → blender/render.py → .blend
+                                                       │
+                                                       ▼
+                                               trajectory.xyz → blender/render.py → .blend
 ```
 
-詳細設計: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md`
-実装計画: `docs/superpowers/plans/2026-04-27-reactx-phase-Re1-implementation.md`
+詳細設計: `docs/superpowers/specs/2026-05-03-rxn-config-sidecar-design.md`
+実装計画: `docs/superpowers/plans/2026-05-03-rxn-config-sidecar.md`

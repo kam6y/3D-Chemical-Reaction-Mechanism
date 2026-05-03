@@ -1,74 +1,66 @@
-"""Unit tests for reactx.bond_changes."""
+"""Unit tests for BondChanges + from_atom_map_pairs (Tier B)."""
 import pytest
-from rdkit import Chem
 
-from reactx.bond_changes import BondChanges, compute_bond_changes
-from reactx.rxn_parser import parse_rxn
+from reactx.bond_changes import BondChanges
 
 
-def _atom_index_by_symbol(mol_h: Chem.Mol, sym: str) -> int:
-    for atom in mol_h.GetAtoms():
-        if atom.GetSymbol() == sym:
-            return atom.GetIdx()
-    raise AssertionError(f"no {sym} atom in mol")
-
-
-def test_sn2_bond_changes_returns_singleton_lists():
-    r_mol, p_mol, mapping = parse_rxn("examples/sn2.rxn")
-    r_h = Chem.AddHs(r_mol)
-    p_h = Chem.AddHs(p_mol)
-
-    bc = compute_bond_changes(r_h, p_h, mapping)
-    assert isinstance(bc, BondChanges)
-    assert len(bc.formed) == 1
-    assert len(bc.broken) == 1
-
-    c_idx = _atom_index_by_symbol(r_h, "C")
-    cl_idx = _atom_index_by_symbol(r_h, "Cl")
-    o_idx = _atom_index_by_symbol(r_h, "O")
-    assert set(bc.formed[0]) == {c_idx, o_idx}
-    assert set(bc.broken[0]) == {c_idx, cl_idx}
-
-
-def test_proton_transfer_bond_changes():
-    r_mol, p_mol, mapping = parse_rxn("examples/proton_transfer.rxn")
-    r_h = Chem.AddHs(r_mol)
-    p_h = Chem.AddHs(p_mol)
-
-    bc = compute_bond_changes(r_h, p_h, mapping)
-    assert len(bc.formed) == 1
-    assert len(bc.broken) == 1
-
-    n_idx = _atom_index_by_symbol(r_h, "N")
-    cl_idx = _atom_index_by_symbol(r_h, "Cl")
-    proton_idx = next(a.GetIdx() for a in r_h.GetAtoms() if a.GetAtomMapNum() == 1)
-
-    assert set(bc.formed[0]) == {n_idx, proton_idx}
-    assert set(bc.broken[0]) == {proton_idx, cl_idx}
-
-
-def test_bond_changes_rejects_self_loop():
+def test_self_loop_rejected():
     with pytest.raises(ValueError, match="self-loop"):
         BondChanges(formed=((0, 0),), broken=((1, 2),))
 
 
-def test_bond_changes_rejects_duplicate():
+def test_duplicate_rejected():
     with pytest.raises(ValueError, match="duplicate"):
         BondChanges(formed=((0, 1), (1, 0)), broken=())
 
 
-def test_bond_changes_rejects_empty_total():
+def test_empty_total_rejected():
     with pytest.raises(ValueError, match="at least one"):
         BondChanges(formed=(), broken=())
 
 
-def test_bond_changes_accepts_multi_bond_topologies():
-    # E2 形状: 1 formed + 2 broken
+def test_formed_broken_overlap_rejected():
+    with pytest.raises(ValueError, match="formed and broken collide"):
+        BondChanges(formed=((0, 1),), broken=((1, 0),))
+
+
+def test_multi_bond_topologies_accepted():
     bc = BondChanges(formed=((4, 5),), broken=((0, 2), (1, 4)))
     assert len(bc.formed) == 1
     assert len(bc.broken) == 2
-
-    # SN1 step 1 形状: 0 formed + 1 broken
     bc = BondChanges(formed=(), broken=((0, 1),))
     assert len(bc.formed) == 0
     assert len(bc.broken) == 1
+
+
+def test_from_atom_map_pairs_translates_indices():
+    # atom-map 1->idx 0, 5->idx 4
+    m2i = {1: 0, 5: 4}
+    bc = BondChanges.from_atom_map_pairs(
+        formed_map=[(1, 5)],
+        broken_map=[],
+        atom_map_to_idx=m2i,
+    )
+    assert bc.formed == ((0, 4),)
+    assert bc.broken == ()
+
+
+def test_from_atom_map_pairs_unknown_map_number_raises_key_error():
+    m2i = {1: 0, 2: 1}
+    with pytest.raises(KeyError, match="unknown atom-map number 99"):
+        BondChanges.from_atom_map_pairs(
+            formed_map=[(1, 99)],
+            broken_map=[],
+            atom_map_to_idx=m2i,
+        )
+
+
+def test_from_atom_map_pairs_overlap_via_translation_raises():
+    """formed=(1,5) broken=(5,1) collapse to the same canonical pair after translation."""
+    m2i = {1: 0, 5: 4}
+    with pytest.raises(ValueError, match="formed and broken collide"):
+        BondChanges.from_atom_map_pairs(
+            formed_map=[(1, 5)],
+            broken_map=[(5, 1)],
+            atom_map_to_idx=m2i,
+        )

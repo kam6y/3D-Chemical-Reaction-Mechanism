@@ -7,16 +7,25 @@ from ase.io import read
 
 from reactx.cli import main
 
+_SN1D_FAST = """\
+description = "SN1 dissoc fast"
+formed = []
+broken = [[1, 5]]
+[restraints]
+k_form = 0.0
+k_broken = 2.0
+r_broken = 6.0
+max_relax_steps = 100
+[sampling]
+n_angles = 1
+"""
+
 
 @pytest.mark.slow
-def test_re3_sn1_dissoc_end_to_end(tmp_path: Path, sn1_dissoc_rxn_path: Path):
+def test_re3_sn1_dissoc_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
+    rxn = tmp_rxn_with_toml("sn1_dissoc", toml_body=_SN1D_FAST)
     out = tmp_path / "sn1d"
-    rc = main([
-        "run", str(sn1_dissoc_rxn_path), "-o", str(out),
-        "--backend", "uma",
-        "--reaction-type", "sn1_dissoc",
-        "--n-angles", "8",   # will be auto-clamped to 1
-    ])
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
     assert rc == 0
 
     meta = json.loads((out / "meta.json").read_text())
@@ -25,7 +34,7 @@ def test_re3_sn1_dissoc_end_to_end(tmp_path: Path, sn1_dissoc_rxn_path: Path):
     )
     assert meta["selected_trial"] == 0
     assert meta["effective_params"]["r_form_targets"] == []
-    assert meta["reaction_type"] == "sn1_dissoc"
+    assert meta["description"] == "SN1 dissoc fast"
 
     pre = meta["prescreen"]
     assert pre["enabled"] is False or pre["kept"] is None
