@@ -154,6 +154,10 @@ def prescreen_trials(
     On any MMFF parameterize failure, fall back to keeping all trial indices
     (mmff_failed=True; warning logged). Short-circuit without invoking MMFF
     when k_keep >= len(atoms_list).
+
+    `r_form_target` is a scalar broadcast to every formed bond (same as
+    `build_restraints`). Per-bond targets are Phase 4+; Phase 3 only supports
+    formed≤1 in practice.
     """
     n = len(atoms_list)
     if k_keep >= n:

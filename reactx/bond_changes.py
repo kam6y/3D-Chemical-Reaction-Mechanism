@@ -1,9 +1,9 @@
-"""Compute formed/broken bonds for a single elementary step (1 formed + 1 broken).
+"""Compute formed/broken bonds for elementary steps (Phase 3: multi-bond).
 
-Phase Re1 supports only this minimal topology. Generic multi-bond reactions
-(E2, dissociation, etc.) raise NotImplementedError and are deferred to Phase 2.
+σ-only connectivity diff. Bond order changes (single↔double) are NOT
+detected; π formation is left to the QM calculator. See the Phase 3 spec
+section "σ-only connectivity diff".
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,41 +12,40 @@ from rdkit import Chem
 
 
 @dataclass(frozen=True)
-class SimpleBondChanges:
-    """Single elementary step: exactly one bond formed and one bond broken.
+class BondChanges:
+    """Multi-bond elementary step: lists of formed and broken bonds.
 
-    Atom indices are in the **reactant_mol_h** coordinate system
-    (Chem.AddHs(reactant_mol).GetAtoms() ordering).
+    Atom indices are in the reactant_mol_h (Chem.AddHs(reactant_mol)) ordering.
+    Tuples (not lists) for frozen-dataclass hashability.
     """
 
-    formed: tuple[int, int]
-    broken: tuple[int, int]
+    formed: tuple[tuple[int, int], ...]
+    broken: tuple[tuple[int, int], ...]
 
-    @property
-    def shared_atom(self) -> int:
-        """The atom common to both formed and broken bonds (= 'central anchor').
+    def __post_init__(self) -> None:
+        for label, bonds in (("formed", self.formed), ("broken", self.broken)):
+            seen: set[tuple[int, int]] = set()
+            for a, b in bonds:
+                if a == b:
+                    raise ValueError(f"{label} bond {(a, b)} is a self-loop")
+                key = (a, b) if a <= b else (b, a)
+                if key in seen:
+                    raise ValueError(
+                        f"{label} contains duplicate bond {(a, b)} "
+                        f"(canonical form {key} already seen)"
+                    )
+                seen.add(key)
+        if len(self.formed) + len(self.broken) == 0:
+            raise ValueError("BondChanges must have at least one formed or broken bond")
 
-        For SN2 this is the substrate C; for proton transfer this is the H.
-        """
-        f = set(self.formed)
-        b = set(self.broken)
-        common = f & b
-        if len(common) != 1:
-            raise ValueError(
-                f"formed {self.formed} and broken {self.broken} must share exactly "
-                f"one atom; got {common}"
-            )
-        return next(iter(common))
 
-
-def compute_simple_bond_changes(
+def compute_bond_changes(
     reactant_mol_h: Chem.Mol,
     product_mol_h: Chem.Mol,
     heavy_mapping: dict[int, int],
-) -> SimpleBondChanges:
-    """Diff bonds between reactant and product mol_h, return formed + broken.
+) -> BondChanges:
+    """Diff bonds between reactant and product mol_h. σ-only connectivity.
 
-    Raises NotImplementedError if not exactly 1 formed + 1 broken bond.
     Atom indices in the result use reactant_mol_h's ordering.
     """
     if reactant_mol_h.GetNumAtoms() != product_mol_h.GetNumAtoms():
@@ -63,16 +62,9 @@ def compute_simple_bond_changes(
         _ordered(inv_mapping[a], inv_mapping[b]) for a, b in _bond_set_in_self_idx(product_mol_h)
     }
 
-    formed = sorted(p_bonds_in_r_space - r_bonds)
-    broken = sorted(r_bonds - p_bonds_in_r_space)
-
-    if len(formed) != 1 or len(broken) != 1:
-        raise NotImplementedError(
-            f"Phase Re1 supports exactly 1 formed + 1 broken bond. "
-            f"Got formed={formed} ({len(formed)}), broken={broken} ({len(broken)}). "
-            f"Generic bond-change support is Phase 2."
-        )
-    return SimpleBondChanges(formed=formed[0], broken=broken[0])
+    formed = tuple(sorted(p_bonds_in_r_space - r_bonds))
+    broken = tuple(sorted(r_bonds - p_bonds_in_r_space))
+    return BondChanges(formed=formed, broken=broken)
 
 
 def _bond_set_in_self_idx(mol: Chem.Mol) -> set[tuple[int, int]]:
@@ -91,9 +83,16 @@ def _build_full_atom_mapping(
     """Extend heavy_mapping with implicit-H pairings.
 
     heavy_mapping covers all atoms with explicit atom map numbers (heavy + any
-    explicit-mapped H). Remaining unmapped Hs (= implicit Hs added by AddHs)
-    are paired by their bonded heavy atom group: reactant Hs of heavy_r <->
-    product Hs of heavy_p where heavy_r -> heavy_p in heavy_mapping.
+    explicit-mapped H). Remaining unmapped Hs are paired by their bonded heavy
+    atom group: reactant Hs of heavy_r <-> product Hs of heavy_p where
+    heavy_r -> heavy_p in heavy_mapping.
+
+    Index-space assumption: heavy_mapping uses indices that are valid in BOTH
+    the pre-AddHs Mol and the post-AddHs Mol. This holds because Chem.AddHs
+    appends implicit Hs at indices >= original atom count, preserving every
+    pre-existing atom's index. Callers must pass a heavy_mapping derived from
+    parse_rxn (= pre-AddHs atom-map-number lookup) together with the AddHs'd
+    Mols.
     """
     full: dict[int, int] = dict(heavy_mapping)
     used_p: set[int] = set(full.values())
@@ -102,7 +101,7 @@ def _build_full_atom_mapping(
         r_atom = reactant_mol_h.GetAtomWithIdx(r_heavy)
         p_atom = product_mol_h.GetAtomWithIdx(p_heavy)
         if r_atom.GetSymbol() == "H" or p_atom.GetSymbol() == "H":
-            continue  # explicit-mapped H itself, not a heavy atom group
+            continue
 
         r_implicit_hs = [
             n.GetIdx()

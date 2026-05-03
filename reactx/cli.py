@@ -14,7 +14,7 @@ from rdkit import Chem
 
 from reactx.align import align_product_to_reactant
 from reactx.artificial_force import build_restraints, lookup_r_form
-from reactx.bond_changes import SimpleBondChanges, compute_simple_bond_changes
+from reactx.bond_changes import BondChanges, compute_bond_changes
 from reactx.calculators import make_calculator
 from reactx.embed3d import embed_mol_to_atoms
 from reactx.neb import run_neb
@@ -139,14 +139,15 @@ def _check_hf_auth() -> int:
 
 
 def _resolve_effective_params(
-    args, syms: list[str], formed_pair: tuple[int, int],
+    args, syms: list[str], formed_pairs: list[tuple[int, int]],
 ) -> dict:
     """Merge preset + individual-flag overrides into a flat dict.
 
-    Resolution order for each scalar:
-        individual flag (not None) > preset value > (r_form only) element table
-
-    Returns keys: reaction_type, k_form, k_broken, r_broken, max_relax_steps, r_form.
+    r_form は per-formed-bond の list として返す:
+      - --r-form scalar 指定 → 全要素同値
+      - preset.r_form 指定   → 全要素同値
+      - 両方 None            → 元素ペア表を per-bond でルックアップ
+    formed_pairs が空 (e.g. SN1 step1) のときは r_form_targets=[]。
     """
     preset = get_preset(args.reaction_type)
     k_form = preset.k_form if args.k_form is None else float(args.k_form)
@@ -156,19 +157,21 @@ def _resolve_effective_params(
         preset.max_relax_steps if args.max_relax_steps is None
         else int(args.max_relax_steps)
     )
+
     if args.r_form is not None:
-        r_form = float(args.r_form)
+        r_form_targets = [float(args.r_form)] * len(formed_pairs)
     elif preset.r_form is not None:
-        r_form = float(preset.r_form)
+        r_form_targets = [float(preset.r_form)] * len(formed_pairs)
     else:
-        r_form = lookup_r_form(syms[formed_pair[0]], syms[formed_pair[1]])
+        r_form_targets = [lookup_r_form(syms[a], syms[b]) for a, b in formed_pairs]
+
     return {
         "reaction_type": preset.name,
         "k_form": k_form,
         "k_broken": k_broken,
         "r_broken": r_broken,
         "max_relax_steps": max_relax_steps,
-        "r_form": r_form,
+        "r_form_targets": r_form_targets,
     }
 
 
@@ -190,39 +193,67 @@ def _cmd_run(args: argparse.Namespace) -> int:
     r_mol, p_mol, mapping = parse_rxn(args.rxn_path)
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
-    bond_changes = compute_simple_bond_changes(r_h, p_h, mapping)
+    bond_changes = compute_bond_changes(r_h, p_h, mapping)
+
+    if args.neb_refine and (
+        len(bond_changes.formed) != 1 or len(bond_changes.broken) != 1
+    ):
+        log.error(
+            "--neb-refine is only supported for 1 formed + 1 broken bond "
+            "reactions in Phase 3 (got formed=%d, broken=%d). Multi-bond NEB "
+            "endpoint construction is Phase 4+. Re-run without --neb-refine.",
+            len(bond_changes.formed), len(bond_changes.broken),
+        )
+        return 2
 
     # bond_changes is reactant-space; for product embedding (neb-refine path)
-    # we feed embed3d a product-space SimpleBondChanges constructed by
+    # we feed embed3d a product-space BondChanges constructed by
     # swapping roles + remapping indices. embed3d identifies the substrate as
     # the fragment containing both atoms of `broken`, so for product we set
     # `broken` = the reactant-formed bond (e.g. C-F in CH3F), which keeps the
     # substrate fragment correctly grouped. `formed` then defines where the
     # nucleophile-side fragment (Cl- in product) is placed via backside.
-    a_form_r, b_form_r = bond_changes.formed
-    a_brk_r, b_brk_r = bond_changes.broken
-    bond_changes_product = SimpleBondChanges(
-        formed=(mapping[a_brk_r], mapping[b_brk_r]),    # nucleophile-fragment placement direction
-        broken=(mapping[a_form_r], mapping[b_form_r]),  # substrate-cohesion bond (intact in product)
-    )
+    # NEB refine は 1+1 反応のみ対応 (Task 6 で multi-bond 時のガードが入る予定);
+    # それ以外の場合は bond_changes_product=None として、neb-refine が要求
+    # された時点で embed3d 側でエラーになる。
+    if len(bond_changes.formed) == 1 and len(bond_changes.broken) == 1:
+        a_form_r, b_form_r = bond_changes.formed[0]
+        a_brk_r, b_brk_r = bond_changes.broken[0]
+        bond_changes_product = BondChanges(
+            formed=((mapping[a_brk_r], mapping[b_brk_r]),),    # nucleophile-fragment placement direction
+            broken=((mapping[a_form_r], mapping[b_form_r]),),  # substrate-cohesion bond (intact in product)
+        )
+    else:
+        bond_changes_product = None
 
-    formed_pair = bond_changes.formed
-    broken_pair = bond_changes.broken
+    formed_pairs = list(bond_changes.formed)
+    broken_pairs = list(bond_changes.broken)
     syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
-    eff = _resolve_effective_params(args, syms_r, formed_pair)
-    r_form_target = eff["r_form"]
+    eff = _resolve_effective_params(args, syms_r, formed_pairs)
+    r_form_targets = eff["r_form_targets"]
     log.info(
         "preset=%s effective: k_form=%.2f k_broken=%.2f r_broken=%.2f "
-        "max_relax_steps=%d r_form=%.3f",
+        "max_relax_steps=%d r_form_targets=%s",
         eff["reaction_type"], eff["k_form"], eff["k_broken"],
-        eff["r_broken"], eff["max_relax_steps"], eff["r_form"],
+        eff["r_broken"], eff["max_relax_steps"],
+        [f"{x:.3f}" for x in r_form_targets] if r_form_targets else "[]",
     )
 
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
     calc = make_calculator(args.backend, **model_kwargs)
 
+    n_frags_reactant = len(Chem.GetMolFrags(r_h))
+    effective_n_angles = args.n_angles
+    if n_frags_reactant == 1 and args.n_angles > 1:
+        log.info(
+            "unimolecular reaction (1 reactant fragment); "
+            "n_angles forced from %d to 1, prescreen skipped",
+            args.n_angles,
+        )
+        effective_n_angles = 1
+
     rotations = sample_attack_rotations(
-        n=args.n_angles, cone_half_deg=args.cone_half_deg, seed=args.seed,
+        n=effective_n_angles, cone_half_deg=args.cone_half_deg, seed=args.seed,
     )
 
     # Phase 1: embed every rotation; collect successful embeds with their angles.
@@ -248,7 +279,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # Phase 2: optionally prescreen with MMFF94 to pick top-K of N for UMA.
     prescreen_meta: dict | None = None
     keep_trial_indices: list[int]
-    if args.no_mmff_prescreen:
+    if n_frags_reactant == 1:
+        log.info("prescreen: skipped (single trial / unimolecular)")
+        keep_trial_indices = sorted(embedded_by_idx.keys())
+        prescreen_meta = {
+            "enabled": False, "kept": None, "skipped": None,
+            "mmff_failed": None, "wall_clock_seconds": 0.0,
+        }
+    elif args.no_mmff_prescreen:
         log.info("prescreen: disabled (--no-mmff-prescreen)")
         keep_trial_indices = sorted(embedded_by_idx.keys())
         prescreen_meta = {
@@ -262,8 +300,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         pre = prescreen_trials(
             atoms_list=atoms_for_prescreen,
             mol_h_template=mol_h_template,
-            formed=[formed_pair], broken=[broken_pair],
-            r_form_target=r_form_target,
+            formed=formed_pairs, broken=broken_pairs,
+            r_form_target=r_form_targets[0] if r_form_targets else 1.6,
             r_broken_target=eff["r_broken"],
             k_form=eff["k_form"], k_broken=eff["k_broken"],
             max_steps=args.prescreen_steps,
@@ -288,9 +326,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         log.info("trial %d (rotation_deg=%.1f)", i, rot_deg)
         restraints = build_restraints(
             atoms_init,
-            formed=[formed_pair],
-            broken=[broken_pair],
-            r_form=r_form_target,
+            formed=formed_pairs,
+            broken=broken_pairs,
+            r_form=r_form_targets[0] if r_form_targets else None,
             r_broken=eff["r_broken"],
             k_form=eff["k_form"],
             k_broken=eff["k_broken"],
@@ -312,9 +350,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
         ok = reached_product(
             frames[-1],
-            formed=[formed_pair],
-            broken=[broken_pair],
-            r_form_targets=[r_form_target],
+            formed=formed_pairs,
+            broken=broken_pairs,
+            r_form_targets=r_form_targets,
             r_broken_target=eff["r_broken"],
         )
         peak = max(energies) if energies else float("inf")
@@ -436,7 +474,7 @@ def _write_outputs_and_exit(
         "effective_params": (
             {
                 k: effective[k]
-                for k in ("k_form", "k_broken", "r_broken", "max_relax_steps", "r_form")
+                for k in ("k_form", "k_broken", "r_broken", "max_relax_steps", "r_form_targets")
             }
             if effective is not None else None
         ),

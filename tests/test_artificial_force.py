@@ -84,3 +84,17 @@ def test_build_restraints_empty_lists():
     atoms = Atoms("HH", positions=[[0, 0, 0], [1, 0, 0]])
     cs = build_restraints(atoms, formed=[], broken=[])
     assert cs == []
+
+
+def test_build_restraints_scales_linearly_with_bond_count():
+    """Phase 3 multi-bond regression: 2 formed + 1 broken -> 3 constraints."""
+    atoms = Atoms("CHFNN", positions=[
+        [0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0], [4, 0, 0],
+    ])
+    cs = build_restraints(
+        atoms,
+        formed=[(0, 1), (2, 3)],
+        broken=[(0, 4)],
+        r_form=1.5, r_broken=4.0,
+    )
+    assert len(cs) == 3  # 2 Hookeans + 1 PullApart

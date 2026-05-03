@@ -90,7 +90,11 @@ def build_restraints(
     broken bonds apart.
 
     `r_form=None` (default) looks each pair up in DEFAULT_R_FORM by element
-    symbols. A scalar overrides the table for all formed bonds (debug).
+    symbols. A scalar overrides the table by **broadcasting the same value to
+    every formed bond**. Per-bond targets (different rt for each bond) are
+    NOT supported in Phase 3 — formed=1 is the only multi-bond shape Phase 3
+    actually exercises (E2). Per-bond list support is Phase 4+ when reactions
+    with formed≥2 are added (Diels-Alder etc.).
     """
     syms = atoms.get_chemical_symbols()
     constraints: list = []
