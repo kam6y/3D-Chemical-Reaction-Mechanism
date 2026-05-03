@@ -4,14 +4,20 @@ Preserves the atom ordering of Chem.AddHs(mol) so that downstream consumers
 (align, NEB, restraints) can correlate atom indices with the same AddHs(mol)
 result.
 
-Multi-fragment placement (e.g. SN2 substrate + nucleophile) is driven by the
-caller-supplied BondChanges:
-- The substrate fragment is identified as the one containing both atoms of
-  the broken bond.
-- The nucleophile fragment(s) are placed along the backside direction
-  (-unit(anchor->leaving)) at FRAGMENT_SEPARATION distance.
-- An optional rotation_perturbation rotates the backside direction within
-  the cone of multi-angle trials.
+Multi-fragment placement is driven by the caller-supplied BondChanges via the
+_place_fragments dispatcher, which selects one of three placement strategies:
+
+- Tier 1 (Phase 3, _directional_placement): broken bond の方向情報がある反応
+  (E2 / SN2 / proton transfer / Menshutkin / SN1 dissoc) で、anchor の backside
+  に nucleophile を置く。
+- Tier 2 (Phase 4, _planar_face_placement): broken=() の bimolecular (SN1 step 2
+  recombination) で、anchor の sp²-like 平面の法線方向に nucleophile を置く。
+- Tier 3 (Phase 5, _kabsch_alignment): 2-fragment 4-center metathesis (formed=2,
+  broken=2, broken bonds 各 fragment 内で完結) で、anchor pair に垂直な face に
+  target を立て Kabsch (orthogonal Procrustes) で moving fragment を剛体整列する。
+
+An optional rotation_perturbation generates the cone of multi-angle trials
+(applied per-tier in the strategy that fits the geometry).
 """
 from __future__ import annotations
 

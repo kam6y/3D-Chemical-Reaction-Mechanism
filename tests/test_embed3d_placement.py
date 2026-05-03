@@ -123,18 +123,6 @@ def test_place_fragments_still_rejects_3frag_or_asymmetric_after_tier3():
         )
 
 
-def test_place_fragments_raises_for_multi_substrate_metathesis():
-    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
-    frags = Chem.GetMolFrags(mol)
-    a = frags[0][0]
-    b = frags[1][0]
-    bc = BondChanges(formed=((frags[0][1], frags[1][1]),), broken=((a, b),))
-    with pytest.raises(NotImplementedError, match="multi-substrate|centroid"):
-        _place_fragments(
-            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
-            bc, rotation_perturbation=None,
-        )
-
 
 def test_place_fragments_raises_for_multi_base_on_single_anchor():
     mol = Chem.AddHs(Chem.MolFromSmiles("CC.[F-].[Cl-]"))
@@ -776,4 +764,24 @@ def test_place_fragments_rejects_asymmetric_metathesis():
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
+        )
+
+
+def test_kabsch_alignment_raises_when_anchor_pair_coincident(metathesis_atoms_setup):
+    """anchor_a と anchor_b が同じ位置に来た場合 RuntimeError を投げる
+    (= broken_within_reference の bond が既に切れている異常状態)。"""
+    from reactx.embed3d import _kabsch_alignment
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    # C と Cl を同じ位置に重ねる
+    bad_positions = positions.copy()
+    bad_positions[cl_idx] = bad_positions[c_idx]
+
+    with pytest.raises(RuntimeError, match="anchor pair coincident"):
+        _kabsch_alignment(
+            mol_h, frag_indices, bad_positions, bc,
+            rotation_perturbation=None,
         )
