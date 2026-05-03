@@ -322,3 +322,19 @@ def test_plane_normal_at_anchor_degenerate_uses_z_fallback(caplog):
     assert any("plane-normal" in rec.getMessage() for rec in caplog.records), (
         "expected a warning log for degenerate anchor"
     )
+
+
+def test_sn1_recomb_fixture_shape(sn1_recomb_atoms_setup):
+    """fixture の形状確認: 2 fragments, formed=1, broken=0, tBu+ planar at origin."""
+    mol_h, frag_indices, positions, bc = sn1_recomb_atoms_setup
+    assert len(frag_indices) == 2
+    assert len(bc.formed) == 1
+    assert len(bc.broken) == 0
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    central = next(
+        i for i, a in enumerate(mol_h.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    np.testing.assert_allclose(positions[central], [0.0, 0.0, 0.0], atol=1e-9)
+    cl_idx = syms.index("Cl")
+    assert (central, cl_idx) == bc.formed[0] or (cl_idx, central) == bc.formed[0]
