@@ -408,6 +408,44 @@ def _planar_face_placement(
     return positions
 
 
+def _perpendicular_face_dir(
+    axis: np.ndarray,
+    offset: np.ndarray,
+) -> np.ndarray:
+    """Return a unit vector perpendicular to axis, biased by offset.
+
+    Strategy:
+      1. axis を正規化。
+      2. offset の axis-平行成分を除去 → offset_perp。
+      3. ||offset_perp|| > 1e-6 なら正規化して返す。
+      4. Fallback: 世界基底 [+z, +y, +x] を順に試し、axis と直交成分を持つ
+         最初のものを正規化して返す。axis は unit vector なので最低 2 つは
+         必ず非ゼロ垂直成分を持つ → fallback は必ず一意に決まる。
+    """
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm < 1e-12:
+        raise ValueError("axis must be a non-zero vector")
+    axis_unit = axis / axis_norm
+
+    offset_perp = offset - float(np.dot(offset, axis_unit)) * axis_unit
+    norm = float(np.linalg.norm(offset_perp))
+    if norm > 1e-6:
+        return offset_perp / norm
+
+    for basis in (
+        np.array([0.0, 0.0, 1.0]),
+        np.array([0.0, 1.0, 0.0]),
+        np.array([1.0, 0.0, 0.0]),
+    ):
+        proj = float(np.dot(basis, axis_unit)) * axis_unit
+        candidate = basis - proj
+        candidate_norm = float(np.linalg.norm(candidate))
+        if candidate_norm > 1e-6:
+            return candidate / candidate_norm
+
+    raise RuntimeError("could not find a perpendicular direction; axis is not a unit vector?")
+
+
 def _kabsch_rigid_transform(
     src: np.ndarray,
     dst: np.ndarray,

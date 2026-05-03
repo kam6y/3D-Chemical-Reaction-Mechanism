@@ -516,3 +516,32 @@ def test_kabsch_rigid_transform_rejects_reflection():
     R, _t = _kabsch_rigid_transform(src, dst)
     det = float(np.linalg.det(R))
     np.testing.assert_allclose(det, 1.0, atol=1e-9, err_msg=f"expected proper rotation det=+1, got det={det}")
+
+
+def test_perpendicular_face_dir_normal_case():
+    """offset が axis に垂直成分を持つとき、その方向に正規化された unit vector を返す。"""
+    from reactx.embed3d import _perpendicular_face_dir
+    axis = np.array([1.0, 0.0, 0.0])
+    offset = np.array([0.0, 2.0, 0.0])
+    perp = _perpendicular_face_dir(axis, offset)
+    np.testing.assert_allclose(perp, [0.0, 1.0, 0.0], atol=1e-9)
+
+
+def test_perpendicular_face_dir_axis_aligned_offset_falls_back_to_z():
+    """offset が axis と平行 (垂直成分なし) のとき +z fallback (axis が +x のとき)。"""
+    from reactx.embed3d import _perpendicular_face_dir
+    axis = np.array([1.0, 0.0, 0.0])
+    offset = np.array([2.0, 0.0, 0.0])  # axis と平行
+    perp = _perpendicular_face_dir(axis, offset)
+    # +z は axis (=+x) と直交するので採用される
+    np.testing.assert_allclose(perp, [0.0, 0.0, 1.0], atol=1e-9)
+
+
+def test_perpendicular_face_dir_axis_z_skips_z_uses_y_fallback():
+    """axis が +z のとき、世界基底 +z は使えないので +y にフォールバック。"""
+    from reactx.embed3d import _perpendicular_face_dir
+    axis = np.array([0.0, 0.0, 1.0])
+    offset = np.array([0.0, 0.0, 2.0])  # axis と平行
+    perp = _perpendicular_face_dir(axis, offset)
+    # +z は axis と平行 → スキップ、+y は axis と直交 → 採用
+    np.testing.assert_allclose(perp, [0.0, 1.0, 0.0], atol=1e-9)
