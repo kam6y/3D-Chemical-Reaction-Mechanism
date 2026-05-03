@@ -72,3 +72,29 @@ def test_parse_sn1_recomb_rxn(sn1_recomb_rxn_path):
     assert {syms[a], syms[b]} == {"C", "Cl"}, (
         f"expected C-Cl formed, got {syms[a]}-{syms[b]}"
     )
+
+
+def test_parse_metathesis_4center_rxn(metathesis_rxn_path):
+    """examples/metathesis_4center.rxn が parse でき、formed=2 / broken=2 が抽出される。"""
+    from rdkit import Chem
+
+    from reactx.bond_changes import compute_bond_changes
+    from reactx.rxn_parser import parse_rxn
+
+    r_mol, p_mol, mapping = parse_rxn(metathesis_rxn_path)
+    r_h = Chem.AddHs(r_mol)
+    p_h = Chem.AddHs(p_mol)
+    bc = compute_bond_changes(r_h, p_h, mapping)
+
+    assert len(bc.formed) == 2, f"expected 2 formed bonds, got {bc.formed}"
+    assert len(bc.broken) == 2, f"expected 2 broken bonds, got {bc.broken}"
+    assert len(Chem.GetMolFrags(r_h)) == 2, "reactant should have 2 fragments"
+    assert len(Chem.GetMolFrags(p_h)) == 2, "product should have 2 fragments"
+
+    syms = [a.GetSymbol() for a in r_h.GetAtoms()]
+    formed_pair_syms = {frozenset({syms[a], syms[b]}) for a, b in bc.formed}
+    broken_pair_syms = {frozenset({syms[a], syms[b]}) for a, b in bc.broken}
+    assert frozenset({"C", "Br"}) in formed_pair_syms, f"expected C-Br formed; got {formed_pair_syms}"
+    assert frozenset({"Li", "Cl"}) in formed_pair_syms, f"expected Li-Cl formed; got {formed_pair_syms}"
+    assert frozenset({"C", "Cl"}) in broken_pair_syms, f"expected C-Cl broken; got {broken_pair_syms}"
+    assert frozenset({"Li", "Br"}) in broken_pair_syms, f"expected Li-Br broken; got {broken_pair_syms}"

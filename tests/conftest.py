@@ -39,6 +39,11 @@ def sn1_recomb_rxn_path(examples_dir: Path) -> Path:
 
 
 @pytest.fixture()
+def metathesis_rxn_path(examples_dir: Path) -> Path:
+    return examples_dir / "metathesis_4center.rxn"
+
+
+@pytest.fixture()
 def sn2_atoms_setup():
     """3-fragment-style SN2 setup for placement dispatcher test (CH3Cl + OH-)."""
     mol = Chem.AddHs(Chem.MolFromSmiles("C(Cl).[OH-]"))
