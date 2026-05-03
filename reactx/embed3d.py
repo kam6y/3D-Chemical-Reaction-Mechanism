@@ -141,13 +141,17 @@ def _find_substrate_fragment(
 def _find_substrate_by_size(
     frag_indices: tuple[tuple[int, ...], ...],
 ) -> tuple[int, ...]:
-    """Tier 2 substrate identification: largest heavy-atom fragment.
+    """Tier 2 substrate identification: largest fragment by total atom count.
 
-    Tie の場合は最小 atom index を含む方を選ぶ (deterministic)。
-    SN1 step 2 では cation = (CH₃)₃C⁺ (4 heavy) > Cl⁻ (1 heavy) で明確に決まる。
+    Heavy-atom-count proxy: len(f) counts heavy + H, not heavy-only. For SN1
+    step 2 (tBu⁺ 13 atoms vs Cl⁻ 1 atom) this is exact. Tie の場合は最小 atom
+    index を含む方を選ぶ (deterministic)。
     """
     if not frag_indices:
         raise ValueError("frag_indices is empty")
+    # NOTE: len(f) is a heavy-count proxy. If a future caller needs true heavy-
+    # count ranking (e.g. H-rich substrate vs halide), pass mol_h and filter
+    # atoms with GetAtomicNum() > 1.
     return max(
         frag_indices,
         key=lambda f: (len(f), -min(f)),
