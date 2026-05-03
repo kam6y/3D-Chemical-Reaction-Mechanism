@@ -8,10 +8,10 @@
 
 **Phase 4** で SN1 step 2 cation + nucleophile recombination (1 formed + 0 broken) を Tier 2 plane-normal placement で追加。
 
-> **Breaking changes (Phase 3, develop ← phase-3):**
-> - `meta.json.effective_params.r_form: float` → `r_form_targets: list[float]` (per-formed-bond, formed=0 のとき空 list)
-> - `r_form` キーはもう書かれない。外部スクリプトで `meta["effective_params"]["r_form"]` を読んでいる場合は `r_form_targets` (list) に追従が必要。
-> - 内部 API: `_resolve_effective_params` の戻り値も `r_form_targets` キーに統一。
+> **Breaking changes (Phase 6, develop ← phase-6):**
+> - CLI フラグ `--reaction-type` および `--k-* / --r-* / --max-relax-steps / --n-angles / --cone-half-deg / --no-mmff-prescreen / --prescreen-keep / --prescreen-steps` は **全削除**。各反応の設定は `<rxn_path>.toml` (sidecar TOML) に書く。
+> - `meta.json.reaction_type` キー → 削除、代わりに `meta.json.description` (TOML の `description` 値そのまま) を書く。
+> - `reactx.presets` モジュール削除、`reactx.bond_changes.compute_bond_changes` 削除。`BondChanges.from_atom_map_pairs(formed_map, broken_map, atom_map_to_idx)` を使用。
 
 ## セットアップ
 
@@ -25,24 +25,22 @@ Blender 4.x と `atomic-blender-pdb-xyz` アドオンを別途インストール
 ## 使い方
 
 ```bash
-# SN2 (default; --reaction-type sn2_anion is implicit)
+# SN2 (description / formed / broken / params are all in examples/sn2.rxn.toml)
 reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
-# Proton transfer (HCl + NH3 -> Cl- + NH4+)
-reactx run examples/proton_transfer.rxn -o out/pt/ \
-  --reaction-type proton_transfer --backend uma --render
+# Proton transfer
+reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render
 ```
 
-反応クラスごとに別途チューニング済みプリセットがある (下節 [Reaction-type presets](#reaction-type-presets) 参照)。`--reaction-type` 省略時は `sn2_anion` 相当の挙動。
+反応クラスごとの全パラメータは `examples/<name>.rxn.toml` に集約されている (下節 [Per-reaction .rxn.toml config](#per-reaction-rxntoml-config) 参照)。
 
-主要フラグ:
+主要フラグ (環境/出力依存のみ):
 
-- `--n-angles 8` (default): 多角度試行数
-- `--cone-half-deg 30.0`: 多角度試行の cone 半角
-- `--r-form` (default: 元素ペアから自動): 形成結合の目標距離 (Å)
-- `--prescreen-keep 3` (default): MMFF prescreen で UMA に渡す trial 数 (top-K)
-- `--prescreen-steps 30` (default): prescreen 内の MMFF FIRE step 数
-- `--no-mmff-prescreen`: MMFF prescreen を無効化、全 trial を UMA に流す (Phase Re1 default 挙動)。`meta.json.trials[]` 長を `--n-angles` と一致させたい場合 (旧スクリプトの後方互換) はこれを併用
-- `--neb-refine` (default off): best trajectory を NEB で refinement (実行時間延長)
+- `--backend {uma,lj}` (default: `uma`)
+- `--model uma-m-1p1` (UMA model name)
+- `--seed 0` (sampling 再現性デバッグ)
+- `--relax-fmax 0.1`, `--traj-stride 5` (出力品質)
+- `--neb-refine` + `--neb-images 7` (1 formed + 1 broken のみ対応)
+- `--render` + `--blender-exe blender`
 
 生成物:
 
@@ -51,35 +49,41 @@ reactx run examples/proton_transfer.rxn -o out/pt/ \
 - `out/<rxn>/meta.json` — trial 全件の score, wall_clock_seconds, neb_refined フラグ
 - `out/<rxn>/scene.blend` — Blender シーン
 
-## Reaction-type presets
+## Per-reaction `.rxn.toml` config
 
-`--reaction-type` で反応クラスごとにチューニング済みの拘束パラメータをまとめて適用できる。個別フラグ (`--k-form` / `--k-broken` / `--r-broken` / `--max-relax-steps` / `--r-form`) を併指定するとプリセット値を **常に上書き** する。`--reaction-type` 省略時は `sn2_anion` (現 default 相当)。
+各 `examples/<name>.rxn` には同階層に同名 stem の sidecar TOML (`<name>.rxn.toml`) を **必須で** 配置する。CLI は `<rxn_path>.toml` を機械的にロードし、結合変化情報 (`formed` / `broken`, atom-map 番号) と物理パラメータ (`k_form` / `k_broken` / `r_broken` / `max_relax_steps` / 任意 `r_form`) と sampling/prescreen 設定をすべてここから取る。
 
-| name | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form (Å) | 想定反応 |
-|---|---|---|---|---|---|---|
-| `sn2_anion` (default) | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 陰イオン求核剤の SN2 (例: O⁻ + CH₃Cl) |
-| `proton_transfer` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 中性間 PT (例: HCl + NH₃) |
-| `menshutkin` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 中性求核剤 → イオン対 (例: NH₃ + CH₃Cl) |
-| `e2` | 1.0 | 1.0 | 4.0 | 200 | 元素表 (典型: O–H 0.97 / N–H 1.01) | E2 elimination, 1 formed + 2 broken (例: CH₃CH₂Cl + OH⁻) |
-| `sn1_dissoc` | 0.0 | 2.0 | 6.0 | 200 | — (formed=0) | SN1 step 1 解離, 0 formed + 1 broken (例: (CH₃)₃CBr → t-Bu⁺ + Br⁻) |
-| `sn1_recomb` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (典型: C–Cl 1.78) | SN1 step 2 cation + nucleophile recombination (例: (CH₃)₃C⁺ + Cl⁻) |
+最小例 (`examples/sn2.rxn.toml`):
 
-```bash
-# SN2 (sn2_anion is the default; the flag is optional)
-reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
+```toml
+description = "SN2 anion: CH3Cl + OH- -> CH3OH + Cl-"
+formed = [[1, 3]]
+broken = [[1, 2]]
 
-# Proton transfer
-reactx run examples/proton_transfer.rxn -o out/pt/ \
-  --reaction-type proton_transfer --backend uma --render
-
-# Menshutkin (NH3 + CH3Cl -> CH3NH3+ + Cl-)
-reactx run examples/menshutkin.rxn -o out/men/ \
-  --reaction-type menshutkin --backend uma --render
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
 ```
 
-**Menshutkin プリセットの根拠**: 既定値は陰イオン求核剤の外部熱的反応 (SN2 / PT) 用にチューニングされている。中性求核剤 + イオン対生成のような **内部熱的反応** では QM のバリア勾配が default の Hookean に勝って TS 手前で停滞するため、`k_form` / `k_broken` を倍化して引力・斥力を強化し、`r_broken` を 5.0 Å まで引き伸ばし、`max_relax_steps` を 200 に拡大している。
+| `.rxn` | description | formed (map) | broken (map) | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form | n_angles |
+|---|---|---|---|---|---|---|---|---|---|
+| sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 8 |
+| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 8 |
+| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 8 |
+| e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 1.0 | 1.0 | 4.0 | 200 | 元素表 | 8 |
+| sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | 0.0 | 2.0 | 6.0 | 200 | — | **1** |
+| sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (C-Cl 1.78) | 8 |
 
-各実行で実際に適用された effective parameters は `out/<rxn>/meta.json` の `effective_params` に記録され、再現性を担保する。
+`r_form` は省略時に Cordero (2008) 共有結合半径表で per-bond ルックアップ、scalar で全 formed 同値、list で per-bond 指定。`[sampling]` / `[prescreen]` は省略可能で、それぞれ `n_angles=8 cone_half_deg=30.0`、`enabled=true keep=3 steps=30` がデフォルト。
+
+```bash
+reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
+reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
+```
+
+> **Phase 6 で削除されたフラグ:** `--reaction-type`, `--k-form`, `--k-broken`, `--r-form`, `--r-broken`, `--max-relax-steps`, `--n-angles`, `--cone-half-deg`, `--no-mmff-prescreen`, `--prescreen-keep`, `--prescreen-steps`。これらはすべて `.rxn.toml` 側で指定する。
 
 ## Phase Re1 + Phase 3 + Phase 4 動作確認
 
@@ -87,14 +91,14 @@ DoD は以下の手順で確認する:
 
 1. `reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render` を実行 → `meta.json` の `selected_trial >= 0`, `trials[].reached_product` で少なくとも 1 件 True を確認
 2. `out/sn2/scene.blend` を Blender GUI で開いて Walden 反転を視認
-3. `reactx run examples/proton_transfer.rxn -o out/pt/ --reaction-type proton_transfer --backend uma --render` を実行 → 同様に視認
+3. `reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render` を実行 → 同様に視認
 4. `pytest -m slow` で SN2 + proton_transfer 統合テストが pass
-5. `reactx run examples/e2.rxn -o out/e2/ --reaction-type e2 --backend uma --render` を実行
+5. `reactx run examples/e2.rxn -o out/e2/ --backend uma --render` を実行
    → `meta.json` で `selected_trial >= 0`, `reached_product=True` の trial が ≥1 件、`out/e2/scene.blend` で C–H と C–Cl の同時切断 + base (OH⁻) 接近を視認
-6. `reactx run examples/sn1_dissoc.rxn -o out/sn1d/ --reaction-type sn1_dissoc --backend uma` を実行
+6. `reactx run examples/sn1_dissoc.rxn -o out/sn1d/ --backend uma` を実行
    → `meta.json.trials` が 1 件 (unimolecular auto-clamp), `trajectory.xyz` で C–Br 距離が ≥4.5 Å まで伸びる
 7. `pytest -m slow` で `test_re3_e2` + `test_re3_sn1_dissoc` + 既存 SN2/PT/Menshutkin が全 pass
-8. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --reaction-type sn1_recomb --backend uma --render` を実行
+8. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --backend uma --render` を実行
    → `meta.json.trials` が 8 件 (bimolecular)、`reached_product=True` の trial が ≥1 件、`out/sn1r/scene.blend` で Cl⁻ が tBu⁺ の平面に向かって接近 → C–Cl 結合形成を視認
 9. `pytest -m slow` で `test_re4_sn1_recomb` + 既存 `test_re1_*` / `test_re3_*` が全 pass
 
@@ -150,17 +154,25 @@ pytest -m blender        # Blender smoke test (ローカル環境のみ)
 ## アーキテクチャ
 
 ```
-.rxn → rxn_parser → bond_changes (formed/broken) → embed3d (rotation perturb)
-                                                   ├ trial 1
-                                                   ├ trial 2  ─┐
-                                                   ├ ...        │ FIRE + Hookean/PullApart restraints
-                                                   └ trial N  ─┘
-                                                          ↓
-                                                   scoring → best trial
-                                                          ↓
+.rxn + .rxn.toml ─> rxn_parser + load_config ─> ReactionConfig
+                                                       │
+                                                       ▼
+                                               BondChanges (formed/broken)
+                                                       │
+                                                       ▼
+                                              embed3d (rotation perturb)
+                                                ├ trial 1
+                                                ├ trial 2  ─┐
+                                                ├ ...        │ FIRE + Hookean/PullApart restraints
+                                                └ trial N  ─┘
+                                                       │
+                                                       ▼
+                                                scoring → best trial
+                                                       │
                                           (optional) neb refinement
-                                                          ↓
-                                                  trajectory.xyz → blender/render.py → .blend
+                                                       │
+                                                       ▼
+                                               trajectory.xyz → blender/render.py → .blend
 ```
 
 詳細設計: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md`
