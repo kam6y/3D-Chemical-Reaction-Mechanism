@@ -511,14 +511,19 @@ def _kabsch_alignment(
       5. perp_dir = anchor 軸の垂直方向 (moving 重心 offset から決定、fallback あり)。
       6. target_a/b = positions[anchor_a/b] + FRAGMENT_SEPARATION/2 × perp_dir
       7. _kabsch_rigid_transform(incoming_positions, target_positions) → (R, t)
-      8. R = rotation_perturbation @ R (cone 散らし)
-      9. moving fragment 全体に R, t を centroid 経由で適用。
+      8. moving fragment 全体に (R, t) を適用 (positions = (R @ p.T).T + t)。
+      9. rotation_perturbation が指定されていれば、target_midpoint 周りに moving fragment
+         全体を追加回転 (cone trial 生成、Kabsch 後に独立適用)。
 
     Edge cases (Task 6 で error テストとして実装):
       - broken_within_reference または broken_within_moving が 1 本でない →
         NotImplementedError ("Phase 5 only supports 1+1 within-fragment broken bonds")
       - 2 incoming atoms が同一 (multi-bond from single anchor) →
         NotImplementedError ("multi-bond from single anchor in metathesis")
+
+    Note: mol_h is accepted for API symmetry with Tier 1 (_directional_placement)
+    and Tier 2 (_planar_face_placement); Tier 3 operates on atom-index sets only
+    and does not consult the RDKit molecule.
     """
     reference = _find_substrate_by_size(frag_indices)
     moving = next(f for f in frag_indices if f is not reference)
@@ -575,7 +580,7 @@ def _kabsch_alignment(
     if incoming_a == incoming_b:
         raise NotImplementedError(
             f"multi-bond from single anchor in metathesis "
-            f"(both formed bonds share moving atom {incoming_a})"
+            f"(two reference anchors target the same moving atom {incoming_a})"
         )
 
     axis = positions[anchor_a] - positions[anchor_b]

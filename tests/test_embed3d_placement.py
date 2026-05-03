@@ -591,10 +591,16 @@ def test_kabsch_alignment_creates_4center_geometry(metathesis_atoms_setup):
     li_idx = syms.index("Li")
     br_idx = syms.index("Br")
 
+    positions_in = positions.copy()
+
     out = _kabsch_alignment(
-        mol_h, frag_indices, positions.copy(), bc,
+        mol_h, frag_indices, positions_in.copy(), bc,
         rotation_perturbation=None,
     )
+
+    # reference fragment (CH3Cl) is fixed
+    np.testing.assert_array_equal(out[c_idx], positions_in[c_idx])
+    np.testing.assert_array_equal(out[cl_idx], positions_in[cl_idx])
 
     d_c_br = float(np.linalg.norm(out[c_idx] - out[br_idx]))
     d_li_cl = float(np.linalg.norm(out[li_idx] - out[cl_idx]))
@@ -616,6 +622,6 @@ def test_kabsch_alignment_creates_4center_geometry(metathesis_atoms_setup):
         - np.dot(moving_centroid - anchor_midpoint, axis_anchor) * axis_anchor
     ))
     expected = FRAGMENT_SEPARATION / 2
-    assert abs(perp_dist - expected) <= 0.5, (
+    assert abs(perp_dist - expected) <= 0.1, (
         f"moving centroid should be {expected:.2f} A above anchor axis (perp), got {perp_dist:.2f}"
     )
