@@ -311,6 +311,88 @@ def _directional_placement(
     return positions
 
 
+def _planar_face_placement(
+    mol_h: Chem.Mol,
+    frag_indices: tuple[tuple[int, ...], ...],
+    positions: np.ndarray,
+    bond_changes: BondChanges,
+    substrate: tuple[int, ...],
+    *,
+    rotation_perturbation: np.ndarray | None,
+) -> np.ndarray:
+    """Tier 2 placement: anchor の sp²-like 平面の法線方向に nucleophile を置く。
+
+    For each non-substrate fragment F:
+      bridging = formed bond で substrate↔F を跨ぐもの (空なら ValueError)。
+      複数あれば canonical-ordered の最初の 1 本を deterministic に採用。
+      anchor   = bridging の substrate 側端。
+      direction = _plane_normal_at_anchor(...) を rotation_perturbation で回転。
+      F の incoming 原子を anchor + direction * FRAGMENT_SEPARATION に置く。
+
+    複数の non-substrate fragment が同じ anchor を共有する場合は
+    NotImplementedError("multi-base attack on single anchor not supported")。
+    """
+    substrate_set = set(substrate)
+    non_substrate = [f for f in frag_indices if f is not substrate]
+    if len(non_substrate) >= 2:
+        log.warning(
+            "Tier 2 termolecular placement (%d non-substrate fragments); "
+            "geometric quality may be reduced", len(non_substrate),
+        )
+
+    bridging_by_anchor: dict[int, list[tuple[tuple[int, ...], tuple[int, int]]]] = {}
+    for f_idx, f in enumerate(non_substrate):
+        f_set = set(f)
+        bridging = sorted([
+            (a, b) if a <= b else (b, a)
+            for a, b in bond_changes.formed
+            if (a in substrate_set and b in f_set) or (b in substrate_set and a in f_set)
+        ])
+        if not bridging:
+            raise ValueError(
+                f"fragment {f_idx} has no formed bond bridging to substrate; "
+                f"check input atom mapping (formed={bond_changes.formed}, "
+                f"substrate atoms={sorted(substrate_set)})"
+            )
+        chosen_bond = bridging[0]
+        anchor = chosen_bond[0] if chosen_bond[0] in substrate_set else chosen_bond[1]
+        bridging_by_anchor.setdefault(anchor, []).append((f, chosen_bond))
+
+    for anchor, hits in bridging_by_anchor.items():
+        unique_frags = {id(f) for f, _ in hits}
+        if len(unique_frags) > 1:
+            raise NotImplementedError(
+                f"multi-base attack on single anchor {anchor} not supported "
+                f"(Tier 2 supports at most one fragment per anchor)"
+            )
+
+    for fragment in non_substrate:
+        anchor: int | None = None
+        bridging_bond: tuple[int, int] | None = None
+        for a, hits in bridging_by_anchor.items():
+            for f, bond in hits:
+                if f is fragment:
+                    anchor, bridging_bond = a, bond
+                    break
+            if anchor is not None:
+                break
+        if anchor is None or bridging_bond is None:
+            raise RuntimeError(
+                f"fragment {fragment} has no entry in bridging_by_anchor — "
+                "logic error in _planar_face_placement"
+            )
+
+        direction = _plane_normal_at_anchor(positions, anchor, mol_h, substrate)
+        if rotation_perturbation is not None:
+            direction = rotation_perturbation @ direction
+        target = positions[anchor] + direction * FRAGMENT_SEPARATION
+
+        incoming = bridging_bond[1] if bridging_bond[0] == anchor else bridging_bond[0]
+        positions[list(fragment)] += target - positions[incoming]
+
+    return positions
+
+
 def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:
     params = AllChem.ETKDGv3()
     for attempt in range(MAX_EMBED_RETRIES):

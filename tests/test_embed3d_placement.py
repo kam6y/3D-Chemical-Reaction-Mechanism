@@ -338,3 +338,65 @@ def test_sn1_recomb_fixture_shape(sn1_recomb_atoms_setup):
     np.testing.assert_allclose(positions[central], [0.0, 0.0, 0.0], atol=1e-9)
     cl_idx = syms.index("Cl")
     assert (central, cl_idx) == bc.formed[0] or (cl_idx, central) == bc.formed[0]
+
+
+def test_planar_face_placement_places_cl_along_plane_normal(sn1_recomb_atoms_setup):
+    """Tier 2: Cl の最終位置が anchor + plane_normal * FRAGMENT_SEPARATION。"""
+    from reactx.embed3d import _planar_face_placement, FRAGMENT_SEPARATION
+
+    mol_h, frag_indices, positions, bc = sn1_recomb_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    central = next(
+        i for i, a in enumerate(mol_h.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    cl_idx = syms.index("Cl")
+
+    substrate = next(f for f in frag_indices if central in f)
+    out = _planar_face_placement(
+        mol_h, frag_indices, positions.copy(), bc, substrate,
+        rotation_perturbation=None,
+    )
+
+    # tBu+ は xy 平面、anchor=central=(0,0,0), plane normal は ±z (sign +z)。
+    # → target = (0, 0, FRAGMENT_SEPARATION) = (0, 0, 3.5)
+    expected = np.array([0.0, 0.0, FRAGMENT_SEPARATION])
+    actual = out[cl_idx]
+    np.testing.assert_allclose(actual, expected, atol=0.5)
+
+
+def test_planar_face_placement_respects_rotation_perturbation(sn1_recomb_atoms_setup):
+    """rotation_perturbation で Cl の位置が回転されることを確認。"""
+    from reactx.embed3d import _planar_face_placement, FRAGMENT_SEPARATION
+
+    mol_h, frag_indices, positions, bc = sn1_recomb_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    central = next(
+        i for i, a in enumerate(mol_h.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    cl_idx = syms.index("Cl")
+    substrate = next(f for f in frag_indices if central in f)
+
+    out_id = _planar_face_placement(
+        mol_h, frag_indices, positions.copy(), bc, substrate,
+        rotation_perturbation=None,
+    )
+
+    # 90° rotation around x axis: z → y
+    R = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+    out_rot = _planar_face_placement(
+        mol_h, frag_indices, positions.copy(), bc, substrate,
+        rotation_perturbation=R,
+    )
+
+    # Cl が異なる位置に置かれること
+    assert not np.allclose(out_id[cl_idx], out_rot[cl_idx], atol=0.1), (
+        f"rotation_perturbation should change Cl position; "
+        f"identity={out_id[cl_idx]}, rotated={out_rot[cl_idx]}"
+    )
+    # 距離は同じ (回転は等距変換)
+    d_id = float(np.linalg.norm(out_id[cl_idx] - out_id[central]))
+    d_rot = float(np.linalg.norm(out_rot[cl_idx] - out_rot[central]))
+    np.testing.assert_allclose(d_id, d_rot, atol=0.1)
+    np.testing.assert_allclose(d_rot, FRAGMENT_SEPARATION, atol=0.5)
