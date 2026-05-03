@@ -571,3 +571,51 @@ def test_metathesis_fixture_shape(metathesis_atoms_setup):
     cccl = next(i for i, b in enumerate(bc.broken) if c_idx in b and cl_idx in b)
     libr = next(i for i, b in enumerate(bc.broken) if li_idx in b and br_idx in b)
     assert cccl != libr  # 別々の broken bond
+
+
+def test_kabsch_alignment_creates_4center_geometry(metathesis_atoms_setup):
+    """Tier 3 主路: CH3Cl + LiBr fixture で 4-center geometry を達成。
+
+    Assertions (spec §7 (q)):
+      - C-Br ≤ 2.5 Å (formed bond)
+      - Li-Cl ≤ 2.5 Å (formed bond)
+      - anchor 軸 (C-Cl) と incoming 軸 (Br-Li) が概並行 (cos angle > 0.7)
+      - moving 重心が anchor 軸から FRAGMENT_SEPARATION/2 ± 0.5 Å 離れる
+    """
+    from reactx.embed3d import FRAGMENT_SEPARATION, _kabsch_alignment
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+
+    out = _kabsch_alignment(
+        mol_h, frag_indices, positions.copy(), bc,
+        rotation_perturbation=None,
+    )
+
+    d_c_br = float(np.linalg.norm(out[c_idx] - out[br_idx]))
+    d_li_cl = float(np.linalg.norm(out[li_idx] - out[cl_idx]))
+    assert d_c_br <= 2.5, f"C-Br should be <=2.5 A (formed bond), got {d_c_br:.2f}"
+    assert d_li_cl <= 2.5, f"Li-Cl should be <=2.5 A (formed bond), got {d_li_cl:.2f}"
+
+    axis_anchor = out[c_idx] - out[cl_idx]
+    axis_anchor /= np.linalg.norm(axis_anchor)
+    axis_incoming = out[br_idx] - out[li_idx]
+    axis_incoming /= np.linalg.norm(axis_incoming)
+    cos_angle = abs(float(np.dot(axis_anchor, axis_incoming)))
+    assert cos_angle > 0.7, f"anchor and incoming axes should be ~parallel, got cos={cos_angle:.3f}"
+
+    moving_frag = next(f for f in frag_indices if li_idx in f)
+    moving_centroid = out[list(moving_frag)].mean(axis=0)
+    anchor_midpoint = (out[c_idx] + out[cl_idx]) / 2
+    perp_dist = float(np.linalg.norm(
+        (moving_centroid - anchor_midpoint)
+        - np.dot(moving_centroid - anchor_midpoint, axis_anchor) * axis_anchor
+    ))
+    expected = FRAGMENT_SEPARATION / 2
+    assert abs(perp_dist - expected) <= 0.5, (
+        f"moving centroid should be {expected:.2f} A above anchor axis (perp), got {perp_dist:.2f}"
+    )

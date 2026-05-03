@@ -493,6 +493,130 @@ def _kabsch_rigid_transform(
     return R, t
 
 
+def _kabsch_alignment(
+    mol_h: Chem.Mol,
+    frag_indices: tuple[tuple[int, ...], ...],
+    positions: np.ndarray,
+    bond_changes: BondChanges,
+    *,
+    rotation_perturbation: np.ndarray | None,
+) -> np.ndarray:
+    """Tier 3 placement: 2-fragment 4-center metathesis を Kabsch alignment で配置。
+
+    Algorithm (詳細は spec §3 参照):
+      1. reference = _find_substrate_by_size(frag_indices), moving = もう一方
+      2. broken_within_reference / broken_within_moving に分類。各 1 本ずつ前提。
+      3. anchor pair = broken_within_reference の 2 endpoint。
+      4. formed bonds 各本から (anchor_in_reference, incoming_in_moving) を抽出。
+      5. perp_dir = anchor 軸の垂直方向 (moving 重心 offset から決定、fallback あり)。
+      6. target_a/b = positions[anchor_a/b] + FRAGMENT_SEPARATION/2 × perp_dir
+      7. _kabsch_rigid_transform(incoming_positions, target_positions) → (R, t)
+      8. R = rotation_perturbation @ R (cone 散らし)
+      9. moving fragment 全体に R, t を centroid 経由で適用。
+
+    Edge cases (Task 6 で error テストとして実装):
+      - broken_within_reference または broken_within_moving が 1 本でない →
+        NotImplementedError ("Phase 5 only supports 1+1 within-fragment broken bonds")
+      - 2 incoming atoms が同一 (multi-bond from single anchor) →
+        NotImplementedError ("multi-bond from single anchor in metathesis")
+    """
+    reference = _find_substrate_by_size(frag_indices)
+    moving = next(f for f in frag_indices if f is not reference)
+    reference_set = set(reference)
+    moving_set = set(moving)
+
+    broken_within_reference = [
+        (a, b) for a, b in bond_changes.broken
+        if a in reference_set and b in reference_set
+    ]
+    broken_within_moving = [
+        (a, b) for a, b in bond_changes.broken
+        if a in moving_set and b in moving_set
+    ]
+    if len(broken_within_reference) != 1 or len(broken_within_moving) != 1:
+        raise NotImplementedError(
+            "Phase 5 only supports 1+1 within-fragment broken bonds; "
+            f"got broken_within_reference={broken_within_reference}, "
+            f"broken_within_moving={broken_within_moving}"
+        )
+
+    anchor_a, anchor_b = sorted(broken_within_reference[0])
+
+    anchor_to_incoming: dict[int, int] = {}
+    for a, b in bond_changes.formed:
+        if a in reference_set and b in moving_set:
+            anchor, incoming = a, b
+        elif b in reference_set and a in moving_set:
+            anchor, incoming = b, a
+        else:
+            raise ValueError(
+                f"formed bond ({a}, {b}) does not bridge reference↔moving; "
+                f"check bond_changes (formed={bond_changes.formed})"
+            )
+        if anchor not in (anchor_a, anchor_b):
+            raise ValueError(
+                f"formed bond anchor {anchor} is not in anchor pair "
+                f"({anchor_a}, {anchor_b}) from broken_within_reference"
+            )
+        if anchor in anchor_to_incoming:
+            raise NotImplementedError(
+                f"multi-bond from single anchor in metathesis (anchor={anchor})"
+            )
+        anchor_to_incoming[anchor] = incoming
+
+    if anchor_a not in anchor_to_incoming or anchor_b not in anchor_to_incoming:
+        raise ValueError(
+            f"each anchor in pair ({anchor_a}, {anchor_b}) must have one formed bond; "
+            f"got {anchor_to_incoming}"
+        )
+    incoming_a = anchor_to_incoming[anchor_a]
+    incoming_b = anchor_to_incoming[anchor_b]
+
+    if incoming_a == incoming_b:
+        raise NotImplementedError(
+            f"multi-bond from single anchor in metathesis "
+            f"(both formed bonds share moving atom {incoming_a})"
+        )
+
+    axis = positions[anchor_a] - positions[anchor_b]
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm < 1e-6:
+        raise RuntimeError(
+            "anchor pair coincident after MMFF — broken-within-reference bond is broken"
+        )
+    axis_unit = axis / axis_norm
+
+    moving_indices = list(moving)
+    moving_centroid = positions[moving_indices].mean(axis=0)
+    anchor_midpoint = (positions[anchor_a] + positions[anchor_b]) / 2.0
+    offset = moving_centroid - anchor_midpoint
+    perp_dir = _perpendicular_face_dir(axis_unit, offset)
+
+    target_a = positions[anchor_a] + (FRAGMENT_SEPARATION / 2.0) * perp_dir
+    target_b = positions[anchor_b] + (FRAGMENT_SEPARATION / 2.0) * perp_dir
+
+    src = np.stack([positions[incoming_a], positions[incoming_b]])
+    dst = np.stack([target_a, target_b])
+    R, t = _kabsch_rigid_transform(src, dst)
+
+    # Apply Kabsch (R, t) to the moving fragment as a rigid body.
+    moving_pos = positions[moving_indices]
+    moving_pos = (R @ moving_pos.T).T + t
+
+    # Cone perturbation: rotate the just-placed moving fragment around the
+    # target midpoint. This samples orientations of the same 4-center geometry
+    # without disturbing target_a, target_b (which stay fixed in reference frame).
+    if rotation_perturbation is not None:
+        target_midpoint = (target_a + target_b) / 2.0
+        moving_pos = (
+            (rotation_perturbation @ (moving_pos - target_midpoint).T).T
+            + target_midpoint
+        )
+
+    positions[moving_indices] = moving_pos
+    return positions
+
+
 def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:
     params = AllChem.ETKDGv3()
     for attempt in range(MAX_EMBED_RETRIES):
