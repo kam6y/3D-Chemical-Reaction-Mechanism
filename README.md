@@ -112,10 +112,10 @@ DoD は以下の手順で確認する:
 ## Phase Re1 + Phase 3 + Phase 4 の方針と限界
 
 - 目的は妥当なアニメーション (TS エネルギーの正確さは目標としない)
-- NEB は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc では CLI が exit code 2 で reject)
+- NEB は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc / SN1 recomb では CLI が exit code 2 で reject)
 - 対応反応 (Phase 4 時点): SN2 / proton transfer / Menshutkin (1 formed + 1 broken) + **E2 elimination (1 formed + 2 broken)** + **SN1 step 1 解離 (0 formed + 1 broken)** + **SN1 step 2 recombination (1 formed + 0 broken)**。中性 addition / cycloaddition / metathesis / Diels–Alder などは Phase 5+
 - ラジカル / open-shell / 溶媒効果は対象外
-- multi-bond NEB endpoint construction は Phase 4+
+- multi-bond NEB endpoint construction は Phase 5+
 - 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md` (Phase Re1) / `docs/superpowers/specs/2026-05-03-phase-3-multibond-design.md` (Phase 3) / `docs/superpowers/specs/2026-05-03-phase-4-sn1-recomb-design.md` (Phase 4)
 
 ## Wall-clock (実測)
