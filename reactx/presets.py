@@ -69,10 +69,10 @@ PRESETS["sn1_recomb"] = ReactionPreset(
 )
 PRESETS["metathesis_4center"] = ReactionPreset(
     name="metathesis_4center",
-    k_form=1.0,
-    k_broken=1.0,
-    r_broken=4.0,
-    max_relax_steps=200,
+    k_form=2.0,
+    k_broken=2.0,
+    r_broken=4.5,
+    max_relax_steps=300,
     r_form=None,     # 元素表 (Cordero: C-Br ≈ 1.94, Li-Cl ≈ 2.02)
 )
 

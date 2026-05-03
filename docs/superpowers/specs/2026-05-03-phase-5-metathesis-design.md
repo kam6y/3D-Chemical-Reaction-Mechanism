@@ -272,19 +272,23 @@ def _kabsch_rigid_transform(
 ```python
 PRESETS["metathesis_4center"] = ReactionPreset(
     name="metathesis_4center",
-    k_form=1.0,
-    k_broken=1.0,
-    r_broken=4.0,
-    max_relax_steps=200,
+    k_form=2.0,
+    k_broken=2.0,
+    r_broken=4.5,
+    max_relax_steps=300,
     r_form=None,     # 元素表 (Cordero: C–Br ≈ 1.94, Li–Cl ≈ 2.02)
 )
 ```
 
-選定根拠:
-- `k_form=1.0`, `k_broken=1.0` — Phase 3 e2 と同じ。formed/broken それぞれ 2 本ずつ走るので合計 4 本の Hookean が同時に効く。これより強くすると 4-center が潰れて moving fragment が reference に貼り付く懸念。
-- `r_broken=4.0 Å` — default。broken=2 本で同じ閾値を使う。
-- `max_relax_steps=200` — multi-bond は収束遅め、E2/sn1_recomb と同等。
-- `r_form=None` — 元素表 fallback。Cordero 2008 共有結合半径から C-Br=1.94, Li-Cl=2.02 を期待。
+選定根拠 (DoD 実機チューニング後の最終値):
+- `k_form=2.0`, `k_broken=2.0` — Menshutkin と同等。当初値 1.0/1.0 (E2 同等) では UMA 局所最小に捕まり 8/8 trial が partial product で停滞 (C-Br が逆に開く + C-Cl が伸びきらない)。Menshutkin の「中性 → イオン対」型 barrier と同質と判断し倍化。
+- `r_broken=4.5 Å` — Menshutkin と同等 (5.0 より控えめ)。default 4.0 では C-Cl が伸びきらず (final ~2.06 Å) product 判定の `r_broken - broken_tol = 3.5 Å` 閾値に届かなかった。
+- `max_relax_steps=300` — Menshutkin (200) より長め。multi-bond は収束遅めなので余裕を持たせる。実測では trial 5 が 16 step で収束、余裕は十分。
+- `r_form=None` — 元素表 fallback。`DEFAULT_R_FORM` に C-Br=1.94 / Li-Cl=2.02 / Li-Br=2.17 を新規追加 (`reactx/artificial_force.py`)。
+
+実測結果 (RTX 5070 Ti, MMFF prescreen 失敗で 8 trial 全 UMA): wall-clock ~85s, 8/8 reached_product (C-Br=1.94, Li-Cl=2.02, C-Cl=4.57, Li-Br=5.05 Å @ best trial)。
+
+注: `_embed_in_place` も Phase 5 で修正済み (Li 等 MMFF94 が parameterize 不能な fragment では raise せず ETKDG 結果を warning 付きで使う、`reactx/embed3d.py`)。
 
 ### 5.3 `reactx/cli.py`
 
@@ -359,7 +363,7 @@ product 2 (LiCl): atom map 3=Li, 2=Cl。
 
 ## 10. リスク
 
-- **UMA の Li 取り扱い**: Li (Z=3) は `omol` 訓練範囲内だが、ionic 系で過剰電荷局在を起こす可能性がある。DoD 段階で実機実行で `reached_product` 達成率を確認、必要なら preset の `k_form` を 0.5 に下げる調整を検討する。
+- **UMA の Li 取り扱い (実測で確認済み)**: Li (Z=3) は `omol` 訓練範囲内。DoD 段階の実機実行 (RTX 5070 Ti) では当初の preset (k_form=k_broken=1.0, r_broken=4.0) で 8 trial 全てが部分 product (Li-Cl は形成、C-Br が逆に開いて C-Cl が伸びきらない) で停滞した。UMA の局所 minimum から抜け出すには Menshutkin 同等の強い拘束が必要で、最終 preset を `k_form=2.0, k_broken=2.0, r_broken=4.5, max_relax_steps=300` に強化したところ 8/8 が `reached_product=True` (C-Br=1.94, Li-Cl=2.02, C-Cl=4.57, Li-Br=5.05 Å @ trial 5)。詳細は §5.2 と README wall-clock 表。
 - **MMFF94 prescreen の Li 失敗**: MMFF94 は Li を parameterize できない可能性が高い → prescreen が `mmff_failed=true` にフォールバックして全 trial を UMA に流す。proton_transfer (HCl) と同様のパターンで wall-clock は ~1.5x 程度延長見込み。
 - **Kabsch の 1-DOF redundancy (anchor 軸周り)**: 2-corresponding-point Kabsch では anchor 軸 (= incoming 軸) 周りの回転が一意に決まらない。実装で `det(R) >= 0` の sign correction で reflection は防げるが、anchor 軸周りの位相は最小二乗解として centroid-aligned かつ axis-parallel な回転が選ばれる。残り 1 DOF (= 「どの face 側から接近するか」) は perp_dir の選択で決定論化、cone perturbation で散らせるので実害は限定的。
 - **r_broken=4.0 と FRAGMENT_SEPARATION/2=1.75 の整合**: target は anchor から 垂直に 1.75 Å。broken bond (anchor pair = C-Cl と Li-Br) は ETKDG 由来 1.78-2.2 Å のまま reference frame では不変、moving frame でも Kabsch は剛体変換なので不変。Hookean (k_broken=1.0, r_broken=4.0) で relax 開始から伸ばし始め、2-3 step 以内に broken 距離が伸び始める。
