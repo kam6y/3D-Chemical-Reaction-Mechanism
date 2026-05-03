@@ -1,36 +1,30 @@
-"""Smoke test that examples/menshutkin.rxn parses + bond changes are correct."""
+"""Smoke test that examples/menshutkin.rxn parses + atom map covers all atoms."""
 from pathlib import Path
 
-from rdkit import Chem
-
-from reactx.bond_changes import compute_bond_changes
-from reactx.rxn_parser import parse_rxn
+from reactx.bond_changes import BondChanges
+from reactx.rxn_parser import atom_map_to_reactant_idx, parse_rxn
 
 
 def test_menshutkin_rxn_parses(menshutkin_rxn_path: Path):
     r_mol, p_mol, mapping = parse_rxn(menshutkin_rxn_path)
-    # 9 atoms total on each side: N(1), 3H(2-4), C(5), 3H(6-8), Cl(9).
-    # `mapping` is {reactant_idx: product_idx} for every mapped atom.
     assert len(mapping) == 9
     assert r_mol.GetNumAtoms() == 9
     assert p_mol.GetNumAtoms() == 9
-    # All atom map numbers 1..9 must appear on both sides.
     r_map_nums = {a.GetAtomMapNum() for a in r_mol.GetAtoms()}
     p_map_nums = {a.GetAtomMapNum() for a in p_mol.GetAtoms()}
     assert r_map_nums == {1, 2, 3, 4, 5, 6, 7, 8, 9}
     assert p_map_nums == {1, 2, 3, 4, 5, 6, 7, 8, 9}
 
 
-def test_menshutkin_bond_changes_n_c_formed_c_cl_broken(menshutkin_rxn_path: Path):
-    r_mol, p_mol, mapping = parse_rxn(menshutkin_rxn_path)
-    r_h = Chem.AddHs(r_mol)
-    p_h = Chem.AddHs(p_mol)
-    bc = compute_bond_changes(r_h, p_h, mapping)
-    # Symbols on reactant-side at the bond endpoints
-    syms = [a.GetSymbol() for a in r_h.GetAtoms()]
-    assert len(bc.formed) == 1
-    assert len(bc.broken) == 1
-    formed_syms = sorted([syms[bc.formed[0][0]], syms[bc.formed[0][1]]])
-    broken_syms = sorted([syms[bc.broken[0][0]], syms[bc.broken[0][1]]])
-    assert formed_syms == ["C", "N"]
-    assert broken_syms == ["C", "Cl"]
+def test_menshutkin_n_c_formed_c_cl_broken_via_toml_pairs(menshutkin_rxn_path: Path):
+    """TOML claims formed=[[1,5]] broken=[[5,9]] — translating gives the right symbols."""
+    r_mol, _, _ = parse_rxn(menshutkin_rxn_path)
+    m2i = atom_map_to_reactant_idx(r_mol)
+    bc = BondChanges.from_atom_map_pairs(
+        formed_map=[(1, 5)],
+        broken_map=[(5, 9)],
+        atom_map_to_idx=m2i,
+    )
+    syms = [a.GetSymbol() for a in r_mol.GetAtoms()]
+    assert sorted([syms[bc.formed[0][0]], syms[bc.formed[0][1]]]) == ["C", "N"]
+    assert sorted([syms[bc.broken[0][0]], syms[bc.broken[0][1]]]) == ["C", "Cl"]
