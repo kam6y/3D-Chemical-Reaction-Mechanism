@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 MAX_EMBED_RETRIES = 5
 FRAGMENT_SEPARATION = 3.5  # Å — attack distance for multi-fragment placement
+PLANE_FIT_TOLERANCE = 0.3  # Å — SVD residual (smallest singular value) threshold
 
 
 def embed_mol_to_atoms(
@@ -156,6 +157,43 @@ def _find_substrate_by_size(
         frag_indices,
         key=lambda f: (len(f), -min(f)),
     )
+
+
+def _plane_normal_at_anchor(
+    positions: np.ndarray,
+    anchor: int,
+    mol_h: Chem.Mol,
+    substrate: tuple[int, ...],
+) -> np.ndarray:
+    """Tier 2: anchor の sp²-like 平面の法線方向を返す (unit vector)。
+
+    Strategy (priority order):
+      1. anchor の substrate 内隣接 (heavy + H) を集める。
+      2. 隣接 ≥3 かつ平面 fit 残差 < PLANE_FIT_TOLERANCE: SVD 法線。
+         符号 disambiguation: direction[2] < 0 なら反転 (常に +z 寄り)。
+      3. 隣接 = 1 or 2、または平面 fit 残差が大きい:
+         direction = -unit(mean_neighbor - anchor)。norm < 1e-6 なら次へ。
+      4. degenerate: direction = [0, 0, 1] + warning ログ。
+    """
+    substrate_set = set(substrate)
+    neighbors_in_substrate = [
+        n.GetIdx() for n in mol_h.GetAtomWithIdx(anchor).GetNeighbors()
+        if n.GetIdx() in substrate_set
+    ]
+
+    if len(neighbors_in_substrate) >= 3:
+        coords = np.array([positions[i] for i in neighbors_in_substrate])
+        centered = coords - positions[anchor]
+        # SVD: 最小特異値方向が plane normal
+        _, S, Vt = np.linalg.svd(centered, full_matrices=False)
+        residual = float(S[-1])
+        if residual < PLANE_FIT_TOLERANCE:
+            normal = Vt[-1]
+            if normal[2] < 0:
+                normal = -normal
+            return normal / np.linalg.norm(normal)
+
+    raise NotImplementedError("fallback branches in later tasks")
 
 
 def _directional_placement(

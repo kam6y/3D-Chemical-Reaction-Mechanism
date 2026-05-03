@@ -171,3 +171,39 @@ def test_find_substrate_by_size_tie_break_smallest_atom_index():
     mol, frags = _make_mol_with_frags("[Cl-].[F-]")
     found = _find_substrate_by_size(frags)
     assert found == frags[0], "tie-break should pick fragment with smallest atom index"
+
+
+def test_plane_normal_at_anchor_planar_three_neighbors():
+    """3 substrate 隣接が xy 平面に乗っている場合、法線は ±z 方向 (符号は +z 寄り)。"""
+    from reactx.embed3d import _plane_normal_at_anchor
+
+    mol = Chem.AddHs(Chem.MolFromSmiles("[C+](C)(C)C"))
+    syms = [a.GetSymbol() for a in mol.GetAtoms()]
+    central = next(
+        i for i, a in enumerate(mol.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    methyl_carbons = [
+        n.GetIdx() for n in mol.GetAtomWithIdx(central).GetNeighbors()
+        if n.GetSymbol() == "C"
+    ]
+    assert len(methyl_carbons) == 3, f"expected 3 methyl C neighbors, got {len(methyl_carbons)}"
+
+    n = mol.GetNumAtoms()
+    positions = np.zeros((n, 3))
+    positions[central] = (0.0, 0.0, 0.0)
+    # 3 methyl C を xy 平面の三角形に置く
+    for k, m in enumerate(methyl_carbons):
+        theta = 2 * np.pi * k / 3
+        positions[m] = (np.cos(theta) * 1.5, np.sin(theta) * 1.5, 0.0)
+
+    substrate = tuple(range(n))  # 全 atom が同じ fragment
+    direction = _plane_normal_at_anchor(positions, central, mol, substrate)
+
+    assert direction.shape == (3,)
+    np.testing.assert_allclose(np.linalg.norm(direction), 1.0, atol=1e-6)
+    # 法線は ±z で、符号は +z 寄り
+    assert direction[2] > 0, f"sign disambiguation failed: direction={direction}"
+    assert abs(direction[0]) < 1e-3 and abs(direction[1]) < 1e-3, (
+        f"direction should be along z, got {direction}"
+    )
