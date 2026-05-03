@@ -428,3 +428,28 @@ def test_planar_face_placement_respects_rotation_perturbation(sn1_recomb_atoms_s
     d_rot = float(np.linalg.norm(out_rot[cl_idx] - out_rot[central]))
     np.testing.assert_allclose(d_id, d_rot, atol=0.1)
     np.testing.assert_allclose(d_rot, FRAGMENT_SEPARATION, atol=0.5)
+
+
+def test_planar_face_placement_rejects_multi_base_on_single_anchor():
+    """Tier 2 で 1 anchor に複数 nucleophile が共有する場合は NotImplementedError。"""
+    from reactx.embed3d import _place_fragments
+
+    # [C+](C)(C)C.[F-].[Cl-] で formed=((C+, F), (C+, Cl)) — 2 base が同じ anchor 共有
+    mol = Chem.AddHs(Chem.MolFromSmiles("[C+](C)(C)C.[F-].[Cl-]"))
+    frags = Chem.GetMolFrags(mol)
+    central = next(
+        i for i, a in enumerate(mol.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    syms = [a.GetSymbol() for a in mol.GetAtoms()]
+    f_idx = syms.index("F")
+    cl_idx = syms.index("Cl")
+    bc = BondChanges(
+        formed=((central, f_idx), (central, cl_idx)),
+        broken=(),
+    )
+    with pytest.raises(NotImplementedError, match="multi-base"):
+        _place_fragments(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
+        )
