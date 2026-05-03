@@ -408,6 +408,39 @@ def _planar_face_placement(
     return positions
 
 
+def _kabsch_rigid_transform(
+    src: np.ndarray,
+    dst: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Orthogonal Procrustes (Kabsch) solve: src を dst に合わせる剛体変換 (R, t)。
+
+    Centroid 中心化 → cross-covariance H = src_c.T @ dst_c → SVD → R = Vt.T @ D @ U.T
+    where D = diag(1, 1, sign(det(Vt.T @ U.T))) で reflection を防ぐ。
+
+    Returns (R: (3,3) rotation matrix with det>=0, t: (3,) translation vector).
+    Raises ValueError if shapes mismatch or N < 2.
+    """
+    if src.shape != dst.shape:
+        raise ValueError(f"src and dst must have same shape; got {src.shape} vs {dst.shape}")
+    if src.ndim != 2 or src.shape[1] != 3 or src.shape[0] < 2:
+        raise ValueError(f"expected (N>=2, 3) arrays; got {src.shape}")
+
+    centroid_src = src.mean(axis=0)
+    centroid_dst = dst.mean(axis=0)
+    src_c = src - centroid_src
+    dst_c = dst - centroid_dst
+
+    H = src_c.T @ dst_c
+    U, _S, Vt = np.linalg.svd(H)
+    d = float(np.sign(np.linalg.det(Vt.T @ U.T)))
+    if d == 0.0:
+        d = 1.0
+    D = np.diag([1.0, 1.0, d])
+    R = Vt.T @ D @ U.T
+    t = centroid_dst - R @ centroid_src
+    return R, t
+
+
 def _embed_in_place(frag: Chem.Mol, *, seed: int) -> None:
     params = AllChem.ETKDGv3()
     for attempt in range(MAX_EMBED_RETRIES):

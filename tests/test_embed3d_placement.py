@@ -474,3 +474,45 @@ def test_place_fragments_rejects_cycloaddition_pattern():
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
         )
+
+
+def test_kabsch_rigid_transform_recovers_known_rotation_translation():
+    """既知の (R, t) を src に適用した dst から、Kabsch が同じ (R, t) を回復する。"""
+    from reactx.embed3d import _kabsch_rigid_transform
+
+    rng = np.random.default_rng(42)
+    src = rng.normal(size=(4, 3))
+    # 既知の回転 (z 軸周り 30°) と translation
+    theta = np.deg2rad(30.0)
+    R_true = np.array([
+        [np.cos(theta), -np.sin(theta), 0.0],
+        [np.sin(theta),  np.cos(theta), 0.0],
+        [0.0,            0.0,           1.0],
+    ])
+    t_true = np.array([1.5, -2.0, 0.5])
+    dst = (R_true @ src.T).T + t_true
+
+    R, t = _kabsch_rigid_transform(src, dst)
+    np.testing.assert_allclose(R, R_true, atol=1e-9)
+    np.testing.assert_allclose(t, t_true, atol=1e-9)
+
+
+def test_kabsch_rigid_transform_rejects_reflection():
+    """rotoinversion を解にしてしまう対応点でも det(R) >= 0 の rotation を返す。"""
+    from reactx.embed3d import _kabsch_rigid_transform
+
+    # 鏡面反転を要求する明示的な対応点 (xy 平面で z 反転を要求)
+    src = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+    # dst は src の x, y は同じだが z を反転 (= 鏡面反転)
+    dst = np.array([
+        [1.0, 0.0,  0.0],
+        [0.0, 1.0,  0.0],
+        [0.0, 0.0, -1.0],
+    ])
+    R, _t = _kabsch_rigid_transform(src, dst)
+    det = float(np.linalg.det(R))
+    assert det >= 0, f"expected proper rotation (det>=0), got det={det}"
