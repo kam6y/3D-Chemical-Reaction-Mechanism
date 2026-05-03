@@ -437,8 +437,8 @@ def test_planar_face_placement_respects_rotation_perturbation(sn1_recomb_atoms_s
     np.testing.assert_allclose(d_rot, FRAGMENT_SEPARATION, atol=0.5)
 
 
-def test_planar_face_placement_rejects_multi_base_on_single_anchor():
-    """Tier 2 で 1 anchor に複数 nucleophile が共有する場合は NotImplementedError。"""
+def test_place_fragments_rejects_multi_formed_on_shared_anchor():
+    """formed=2 (1 anchor に複数 nucleophile 共有) は dispatcher で Phase 5+ として reject。"""
     from reactx.embed3d import _place_fragments
 
     # [C+](C)(C)C.[F-].[Cl-] で formed=((C+, F), (C+, Cl)) — 2 base が同じ anchor 共有
@@ -455,7 +455,24 @@ def test_planar_face_placement_rejects_multi_base_on_single_anchor():
         formed=((central, f_idx), (central, cl_idx)),
         broken=(),
     )
-    with pytest.raises(NotImplementedError, match="multi-base"):
+    with pytest.raises(NotImplementedError, match="Phase 5"):
+        _place_fragments(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
+        )
+
+
+def test_place_fragments_rejects_cycloaddition_pattern():
+    """formed=2 を 2 fragments の別 anchor で形成する Diels-Alder 型は Phase 5+ として reject。"""
+    from reactx.embed3d import _place_fragments
+
+    # CC.CC で formed=((0, 2), (1, 3)) — 2 つの formed bond が別 anchor を介して 2 frag を繋ぐ
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.CC"))
+    frags = Chem.GetMolFrags(mol)
+    a0, a1 = frags[0][0], frags[0][1]
+    b0, b1 = frags[1][0], frags[1][1]
+    bc = BondChanges(formed=((a0, b0), (a1, b1)), broken=())
+    with pytest.raises(NotImplementedError, match="Phase 5"):
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,

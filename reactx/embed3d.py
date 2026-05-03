@@ -104,8 +104,9 @@ def _place_fragments(
     """Dispatch to the appropriate placement strategy.
 
     Tier 1 (directional, Phase 3): broken bond の方向情報がある反応 (E2 / SN2 / PT)。
-    Tier 2 (planar face, Phase 4): broken=() かつ formed>=1 の bimolecular (SN1 step 2)。
-    Phase 4+ (未実装):              multi-substrate metathesis (broken が複数 frag に跨る)。
+    Tier 2 (planar face, Phase 4): broken=() かつ formed=1 の bimolecular (SN1 step 2)。
+    Phase 5+ (未実装):              multi-substrate metathesis (broken が複数 frag に跨る) /
+                                   cycloaddition (formed>=2, broken=0)。
     """
     substrate = _find_substrate_fragment(frag_indices, bond_changes.broken)
     if substrate is not None and bond_changes.broken:
@@ -115,6 +116,11 @@ def _place_fragments(
         )
 
     if not bond_changes.broken and bond_changes.formed:
+        if len(bond_changes.formed) > 1:
+            raise NotImplementedError(
+                "cycloaddition (broken=0, formed>=2) is Phase 5+. "
+                f"Got formed={bond_changes.formed}, frags={len(frag_indices)}."
+            )
         substrate = _find_substrate_by_size(frag_indices)
         return _planar_face_placement(
             mol_h, frag_indices, positions, bond_changes, substrate,
@@ -123,7 +129,7 @@ def _place_fragments(
 
     raise NotImplementedError(
         "multi-substrate metathesis (broken bonds spanning fragments) is "
-        f"Phase 4+. Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
+        f"Phase 5+. Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
         f"frags={len(frag_indices)}."
     )
 
