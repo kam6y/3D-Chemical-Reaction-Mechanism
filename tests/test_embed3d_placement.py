@@ -552,3 +552,22 @@ def test_perpendicular_face_dir_rejects_zero_axis():
     from reactx.embed3d import _perpendicular_face_dir
     with pytest.raises(ValueError, match="non-zero"):
         _perpendicular_face_dir(np.zeros(3), np.array([1.0, 0.0, 0.0]))
+
+
+def test_metathesis_fixture_shape(metathesis_atoms_setup):
+    """fixture の形状確認: 2 fragments, formed=2, broken=2, anchor pair on x axis."""
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    assert len(frag_indices) == 2
+    assert len(bc.formed) == 2
+    assert len(bc.broken) == 2
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+    np.testing.assert_allclose(positions[cl_idx], [0.0, 0.0, 0.0], atol=1e-9)
+    np.testing.assert_allclose(positions[c_idx], [1.78, 0.0, 0.0], atol=1e-9)
+    # broken bonds 各 fragment 内に閉じる
+    cccl = next(i for i, b in enumerate(bc.broken) if c_idx in b and cl_idx in b)
+    libr = next(i for i, b in enumerate(bc.broken) if li_idx in b and br_idx in b)
+    assert cccl != libr  # 別々の broken bond
