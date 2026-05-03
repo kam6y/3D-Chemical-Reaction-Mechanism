@@ -162,7 +162,10 @@ def _plane_normal_at_anchor(
     """Return a unit vector pointing away from the anchor's substrate plane.
 
     Strategy (priority order):
-      1. anchor の substrate 内重原子隣接 (mol_h の bond から導出) を集める。
+      1. anchor の substrate 内隣接原子 (mol_h の bond から導出、重原子 + H 両方含む)
+         を集める。H を含む理由: tBu⁺ では heavy 隣接のみで plane 定義に十分だが、
+         CH₃⁺ (3 H 隣接) や secondary cation (2 heavy + 1 H) では H を入れないと
+         plane が定義できないか、plane fit 残差が悪化するため。
       2. **隣接 ≥3 かつ平面 fit 残差 < PLANE_FIT_TOLERANCE**:
             SVD で平面 fit (anchor 中心)、最小特異値の右特異ベクトル = 法線。
             符号 disambiguation: direction[2] < 0 なら反転 (常に +z 寄り)。
