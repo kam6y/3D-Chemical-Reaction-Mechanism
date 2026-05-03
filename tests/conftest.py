@@ -121,3 +121,36 @@ def sn1_recomb_atoms_setup():
 
     bc = BondChanges(formed=((central, cl_idx),), broken=())
     return mol, frag_indices, positions, bc
+
+
+@pytest.fixture()
+def tmp_rxn_with_toml(tmp_path: Path):
+    """Copy `examples/<stem>.rxn` to tmp_path, write a fresh sidecar TOML.
+
+    Usage:
+        rxn_path = tmp_rxn_with_toml("sn2", toml_body='''\\
+            description = "sn2 fast"
+            formed = [[1, 3]]
+            broken = [[1, 2]]
+            [restraints]
+            k_form = 0.5
+            k_broken = 1.0
+            r_broken = 4.0
+            max_relax_steps = 30
+            [sampling]
+            n_angles = 1
+        ''')
+
+    Returns the temp `.rxn` Path. The .rxn body is unchanged from
+    examples/<stem>.rxn; only the sidecar TOML is configurable.
+    """
+    examples = Path(__file__).resolve().parent.parent / "examples"
+
+    def _make(stem: str, *, toml_body: str) -> Path:
+        src_rxn = examples / f"{stem}.rxn"
+        dst_rxn = tmp_path / f"{stem}.rxn"
+        dst_rxn.write_bytes(src_rxn.read_bytes())
+        (tmp_path / f"{stem}.rxn.toml").write_text(toml_body, encoding="utf-8")
+        return dst_rxn
+
+    return _make
