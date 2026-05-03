@@ -59,6 +59,14 @@ PRESETS["sn1_dissoc"] = ReactionPreset(
     r_broken=6.0,
     max_relax_steps=200,
 )
+PRESETS["sn1_recomb"] = ReactionPreset(
+    name="sn1_recomb",
+    k_form=1.0,
+    k_broken=0.0,    # broken=() のため使われない、明示的に 0
+    r_broken=4.0,    # 同上、placeholder (effective_params の見栄え用)
+    max_relax_steps=200,
+    r_form=None,     # 元素表 (Cordero: C-Cl ≈ 1.78 Å)
+)
 
 
 def get_preset(name: str) -> ReactionPreset:
