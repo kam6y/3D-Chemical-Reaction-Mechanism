@@ -109,6 +109,10 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
 def _check_keys(
     raw: dict, allowed: set[str], required: set[str], *, scope: str, source: str,
 ) -> None:
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{source}: '{scope}' must be a table, got {type(raw).__name__}"
+        )
     unknown = set(raw) - allowed
     if unknown:
         raise ValueError(
@@ -148,7 +152,7 @@ def _build_restraints(raw: dict, *, formed_count: int, source: str) -> Restraint
     k_broken = _as_float(raw["k_broken"], "restraints.k_broken", source, non_negative=True)
     r_broken = _as_float(raw["r_broken"], "restraints.r_broken", source, positive=True)
     max_steps = _as_int(raw["max_relax_steps"], "restraints.max_relax_steps", source, positive=True)
-    r_form_raw = raw.get("r_form", None)
+    r_form_raw = raw.get("r_form")
     r_form = _normalize_r_form(r_form_raw, formed_count=formed_count, source=source)
     return RestraintConfig(
         k_form=k_form, k_broken=k_broken, r_broken=r_broken,

@@ -206,6 +206,17 @@ r_form = [1.0, 2.0]
         load_config(rxn)
 
 
+def test_non_table_section_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "x"
+formed = [[1, 2]]
+broken = []
+restraints = 5
+""")
+    with pytest.raises(ValueError, match="'restraints' must be a table"):
+        load_config(rxn)
+
+
 def test_formed_pair_must_be_two_ints(tmp_path: Path):
     rxn = _write(tmp_path, """\
 description = "x"
