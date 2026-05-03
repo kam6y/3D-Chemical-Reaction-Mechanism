@@ -545,3 +545,10 @@ def test_perpendicular_face_dir_axis_z_skips_z_uses_y_fallback():
     perp = _perpendicular_face_dir(axis, offset)
     # +z は axis と平行 → スキップ、+y は axis と直交 → 採用
     np.testing.assert_allclose(perp, [0.0, 1.0, 0.0], atol=1e-9)
+
+
+def test_perpendicular_face_dir_rejects_zero_axis():
+    """norm(axis) < 1e-12 で ValueError を投げる。"""
+    from reactx.embed3d import _perpendicular_face_dir
+    with pytest.raises(ValueError, match="non-zero"):
+        _perpendicular_face_dir(np.zeros(3), np.array([1.0, 0.0, 0.0]))

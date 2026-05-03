@@ -408,6 +408,9 @@ def _planar_face_placement(
     return positions
 
 
+# --- Phase 5 Tier 3 helpers ---
+
+
 def _perpendicular_face_dir(
     axis: np.ndarray,
     offset: np.ndarray,
@@ -421,6 +424,10 @@ def _perpendicular_face_dir(
       4. Fallback: 世界基底 [+z, +y, +x] を順に試し、axis と直交成分を持つ
          最初のものを正規化して返す。axis は unit vector なので最低 2 つは
          必ず非ゼロ垂直成分を持つ → fallback は必ず一意に決まる。
+
+    Special case: if offset is the zero vector, its perpendicular component
+    is also zero; falls through to the fallback chain (returns +z when axis
+    is not parallel to +z, otherwise +y).
     """
     axis_norm = float(np.linalg.norm(axis))
     if axis_norm < 1e-12:
