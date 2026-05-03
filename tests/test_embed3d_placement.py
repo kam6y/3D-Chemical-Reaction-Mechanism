@@ -662,3 +662,46 @@ def test_kabsch_alignment_creates_4center_geometry(metathesis_atoms_setup):
     assert abs(perp_dist - expected) <= 0.1, (
         f"moving centroid should be {expected:.2f} A above anchor axis (perp), got {perp_dist:.2f}"
     )
+
+
+def test_kabsch_alignment_rejects_broken_spanning_fragments():
+    """broken bonds が両 fragment を跨ぐ (= 純粋 metathesis 以外) で NotImplementedError。"""
+    from reactx.embed3d import _kabsch_alignment
+
+    # 2 fragments で broken bond が両 frag を跨ぐ (cross-fragment broken)
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
+    frags = Chem.GetMolFrags(mol)
+    a = frags[0][0]  # 左 fragment の C
+    b = frags[1][0]  # 右 fragment の O
+    # broken=2 だが両方 cross-fragment → broken_within_* がいずれも 0
+    bc = BondChanges(
+        formed=((frags[0][1], frags[1][1]), (a, b)),
+        broken=((a, b), (frags[0][1], frags[1][1])),
+    )
+    with pytest.raises(NotImplementedError, match="1\\+1 within-fragment"):
+        _kabsch_alignment(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
+        )
+
+
+def test_kabsch_alignment_rejects_multi_bond_from_single_anchor(metathesis_atoms_setup):
+    """同 anchor から 2 formed bond で NotImplementedError。"""
+    from reactx.embed3d import _kabsch_alignment
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+    # 両 formed bond の reference 端を C にする (anchor=C 共有)
+    bad_bc = BondChanges(
+        formed=((c_idx, br_idx), (c_idx, li_idx)),
+        broken=((c_idx, cl_idx), (li_idx, br_idx)),
+    )
+    with pytest.raises(NotImplementedError, match="multi-bond from single anchor"):
+        _kabsch_alignment(
+            mol_h, frag_indices, positions.copy(), bad_bc,
+            rotation_perturbation=None,
+        )
