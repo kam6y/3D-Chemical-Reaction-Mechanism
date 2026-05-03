@@ -303,3 +303,22 @@ def test_plane_normal_at_anchor_non_planar_three_neighbors_falls_back():
     np.testing.assert_allclose(np.linalg.norm(direction), 1.0, atol=1e-6)
     # mean of 3 sp3 dirs is in +z direction → -unit(mean) is -z direction
     assert direction[2] < 0, f"non-planar fallback should point -z, got {direction}"
+
+
+def test_plane_normal_at_anchor_degenerate_uses_z_fallback(caplog):
+    """隣接 0 個の場合 (anchor が単独 atom) は [0, 0, 1] + warning。"""
+    from reactx.embed3d import _plane_normal_at_anchor
+
+    # Cl- 単独: 隣接 0
+    mol = Chem.AddHs(Chem.MolFromSmiles("[Cl-]"))
+    n = mol.GetNumAtoms()
+    positions = np.zeros((n, 3))
+    substrate = tuple(range(n))
+
+    caplog.set_level("WARNING", logger="reactx.embed3d")
+    direction = _plane_normal_at_anchor(positions, 0, mol, substrate)
+
+    np.testing.assert_allclose(direction, [0.0, 0.0, 1.0], atol=1e-9)
+    assert any("plane-normal" in rec.getMessage() for rec in caplog.records), (
+        "expected a warning log for degenerate anchor"
+    )
