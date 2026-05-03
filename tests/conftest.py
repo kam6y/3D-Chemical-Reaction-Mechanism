@@ -39,6 +39,11 @@ def sn1_recomb_rxn_path(examples_dir: Path) -> Path:
 
 
 @pytest.fixture()
+def metathesis_rxn_path(examples_dir: Path) -> Path:
+    return examples_dir / "metathesis_4center.rxn"
+
+
+@pytest.fixture()
 def sn2_atoms_setup():
     """3-fragment-style SN2 setup for placement dispatcher test (CH3Cl + OH-)."""
     mol = Chem.AddHs(Chem.MolFromSmiles("C(Cl).[OH-]"))
@@ -120,4 +125,48 @@ def sn1_recomb_atoms_setup():
     positions[cl_idx] = (10.0, 10.0, 10.0)
 
     bc = BondChanges(formed=((central, cl_idx),), broken=())
+    return mol, frag_indices, positions, bc
+
+
+@pytest.fixture()
+def metathesis_atoms_setup():
+    """4-center metathesis setup: CH3Cl + LiBr.
+
+    formed = ((C, Br), (Li, Cl))
+    broken = ((C, Cl), (Li, Br))
+
+    Layout:
+      - Cl at (0, 0, 0), C at (1.78, 0, 0) — anchor pair on x axis
+      - 3 H around C tetrahedrally on +x side
+      - LiBr centroid offset to (0.89, 2.0, 0) so perp_dir resolves to +y
+        (Br at (1.99, 2.0, 0), Li at (-0.21, 2.0, 0))
+    """
+    mol = Chem.AddHs(Chem.MolFromSmiles("CCl.[Li]Br"))
+    Chem.SanitizeMol(mol)
+    frag_indices = Chem.GetMolFrags(mol)
+    n = mol.GetNumAtoms()
+    syms = [a.GetSymbol() for a in mol.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+
+    positions = np.zeros((n, 3))
+    positions[cl_idx] = (0.0, 0.0, 0.0)
+    positions[c_idx] = (1.78, 0.0, 0.0)
+    h_atoms = [
+        a.GetIdx() for a in mol.GetAtomWithIdx(c_idx).GetNeighbors()
+        if a.GetSymbol() == "H"
+    ]
+    for k, h in enumerate(h_atoms):
+        theta = 2 * np.pi * k / 3
+        positions[h] = (1.78 + 0.5, np.cos(theta) * 0.9, np.sin(theta) * 0.9)
+    # LiBr (Br-Li ~2.2 Å) above CCl axis midpoint (0.89, 0, 0), offset +y
+    positions[br_idx] = (1.99, 2.0, 0.0)
+    positions[li_idx] = (-0.21, 2.0, 0.0)
+
+    bc = BondChanges(
+        formed=((c_idx, br_idx), (li_idx, cl_idx)),
+        broken=((c_idx, cl_idx), (li_idx, br_idx)),
+    )
     return mol, frag_indices, positions, bc

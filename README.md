@@ -8,6 +8,8 @@
 
 **Phase 4** で SN1 step 2 cation + nucleophile recombination (1 formed + 0 broken) を Tier 2 plane-normal placement で追加。
 
+**Phase 5** で 2-fragment 4-center metathesis (formed=2 + broken=2、broken bonds 各 fragment 内) を Tier 3 Kabsch alignment で追加。
+
 > **Breaking changes (Phase 3, develop ← phase-3):**
 > - `meta.json.effective_params.r_form: float` → `r_form_targets: list[float]` (per-formed-bond, formed=0 のとき空 list)
 > - `r_form` キーはもう書かれない。外部スクリプトで `meta["effective_params"]["r_form"]` を読んでいる場合は `r_form_targets` (list) に追従が必要。
@@ -63,6 +65,7 @@ reactx run examples/proton_transfer.rxn -o out/pt/ \
 | `e2` | 1.0 | 1.0 | 4.0 | 200 | 元素表 (典型: O–H 0.97 / N–H 1.01) | E2 elimination, 1 formed + 2 broken (例: CH₃CH₂Cl + OH⁻) |
 | `sn1_dissoc` | 0.0 | 2.0 | 6.0 | 200 | — (formed=0) | SN1 step 1 解離, 0 formed + 1 broken (例: (CH₃)₃CBr → t-Bu⁺ + Br⁻) |
 | `sn1_recomb` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (典型: C–Cl 1.78) | SN1 step 2 cation + nucleophile recombination (例: (CH₃)₃C⁺ + Cl⁻) |
+| `metathesis_4center` | 2.0 | 2.0 | 4.5 | 300 | 元素表 (典型: C–Br 1.94, Li–Cl 2.02) | 2-fragment 4-center metathesis (例: CH₃Cl + LiBr → CH₃Br + LiCl) |
 
 ```bash
 # SN2 (sn2_anion is the default; the flag is optional)
@@ -81,7 +84,7 @@ reactx run examples/menshutkin.rxn -o out/men/ \
 
 各実行で実際に適用された effective parameters は `out/<rxn>/meta.json` の `effective_params` に記録され、再現性を担保する。
 
-## Phase Re1 + Phase 3 + Phase 4 動作確認
+## Phase Re1 + Phase 3 + Phase 4 + Phase 5 動作確認
 
 DoD は以下の手順で確認する:
 
@@ -97,6 +100,9 @@ DoD は以下の手順で確認する:
 8. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --reaction-type sn1_recomb --backend uma --render` を実行
    → `meta.json.trials` が 8 件 (bimolecular)、`reached_product=True` の trial が ≥1 件、`out/sn1r/scene.blend` で Cl⁻ が tBu⁺ の平面に向かって接近 → C–Cl 結合形成を視認
 9. `pytest -m slow` で `test_re4_sn1_recomb` + 既存 `test_re1_*` / `test_re3_*` が全 pass
+10. `reactx run examples/metathesis_4center.rxn -o out/m4c/ --reaction-type metathesis_4center --backend uma --render` を実行
+    → `meta.json` で `selected_trial >= 0`, `trials[].reached_product` ≥1 件 True、`out/m4c/scene.blend` で 4-center TS → CH₃Br + LiCl への乗り換えを視認 (CH₃ が Cl から Br へ、Li が Br から Cl へ同時に乗り換え)
+11. `pytest -m slow` で `test_re5_metathesis` + 既存 `test_re1_*` / `test_re3_*` / `test_re4_*` が全 pass
 
 ## レンダリング: 原子球サイズと結合棒
 
@@ -109,14 +115,14 @@ DoD は以下の手順で確認する:
 
 詳細仕様: `docs/superpowers/specs/2026-04-26-vdw-radii-design.md`
 
-## Phase Re1 + Phase 3 + Phase 4 の方針と限界
+## Phase Re1 + Phase 3 + Phase 4 + Phase 5 の方針と限界
 
 - 目的は妥当なアニメーション (TS エネルギーの正確さは目標としない)
 - NEB は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc / SN1 recomb では CLI が exit code 2 で reject)
-- 対応反応 (Phase 4 時点): SN2 / proton transfer / Menshutkin (1 formed + 1 broken) + **E2 elimination (1 formed + 2 broken)** + **SN1 step 1 解離 (0 formed + 1 broken)** + **SN1 step 2 recombination (1 formed + 0 broken)**。中性 addition / cycloaddition / metathesis / Diels–Alder などは Phase 5+
+- 対応反応 (Phase 5 時点): SN2 / proton transfer / Menshutkin (1 formed + 1 broken) + **E2 elimination (1 formed + 2 broken)** + **SN1 step 1 解離 (0 formed + 1 broken)** + **SN1 step 2 recombination (1 formed + 0 broken)** + **2-fragment 4-center metathesis (2 formed + 2 broken, broken 各 frag 内)**。中性 addition / cycloaddition / 4+ fragment ionic salt metathesis / Diels–Alder などは Phase 6+
 - ラジカル / open-shell / 溶媒効果は対象外
-- multi-bond NEB endpoint construction は Phase 5+
-- 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md` (Phase Re1) / `docs/superpowers/specs/2026-05-03-phase-3-multibond-design.md` (Phase 3) / `docs/superpowers/specs/2026-05-03-phase-4-sn1-recomb-design.md` (Phase 4)
+- multi-bond NEB endpoint construction は Phase 6+
+- 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md` (Phase Re1) / `docs/superpowers/specs/2026-05-03-phase-3-multibond-design.md` (Phase 3) / `docs/superpowers/specs/2026-05-03-phase-4-sn1-recomb-design.md` (Phase 4) / `docs/superpowers/specs/2026-05-03-phase-5-metathesis-design.md` (Phase 5)
 
 ## Wall-clock (実測)
 
@@ -130,6 +136,7 @@ RTX 5070 Ti + UMA-m-1p1 で実測 (default `--n-angles 8 --prescreen-keep 3`):
 | E2 (`examples/e2.rxn`) | — (新規) | **~54 s** | Phase 3, 1 formed + 2 broken、3/3 reached_product |
 | SN1 dissoc (`examples/sn1_dissoc.rxn`) | — (新規) | **~21 s** | Phase 3, unimolecular → n_angles=1 強制、prescreen skipped |
 | SN1 recomb (`examples/sn1_recomb.rxn`) | — (新規) | **~30-60 s** | Phase 4, 1 formed + 0 broken、bimolecular で 8 trials → prescreen で top-3 |
+| Metathesis (`examples/metathesis_4center.rxn`) | — (新規) | **~85 s** | Phase 5, 2 formed + 2 broken、Li/Br MMFF parameterize 失敗で全 8 trial が UMA fallback、Menshutkin-style preset (k=2.0/r_broken=4.5/max=300) で 8/8 reached_product |
 
 MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗してフォールバック (= 旧挙動と同一の wall-clock) する。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、`--no-mmff-prescreen` で明示的に旧挙動を再現することも可能。
 

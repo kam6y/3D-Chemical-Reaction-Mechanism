@@ -102,32 +102,26 @@ def test_place_fragments_dispatches_tier2_for_broken_zero_bimolecular(sn1_recomb
     np.testing.assert_allclose(d, FRAGMENT_SEPARATION, atol=0.5)
 
 
-def test_place_fragments_still_raises_for_multi_substrate_metathesis_after_tier2():
-    """multi-substrate metathesis (broken bonds が複数 frag に跨る) は Tier 2 でも reject。"""
+def test_place_fragments_still_rejects_3frag_or_asymmetric_after_tier3():
+    """Tier 3 後も formed=1/broken=1 across-fragment metathesis-like は reject される。
+
+    Phase 4 までは「broken bonds が複数 frag を跨ぐ」全ケースを reject していたが、
+    Phase 5 で 2-frag formed=2/broken=2 のみ Tier 3 が拾うようになった。Tier 3 の
+    条件を満たさない (formed=1/broken=1) は依然として最終 raise に到達する。
+    """
     from reactx.embed3d import _place_fragments
     mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
     frags = Chem.GetMolFrags(mol)
     a = frags[0][0]
     b = frags[1][0]
+    # formed=1 + broken=1 (両方 cross-fragment) — Tier 3 は formed=2/broken=2 のみ
     bc = BondChanges(formed=((frags[0][1], frags[1][1]),), broken=((a, b),))
-    with pytest.raises(NotImplementedError, match="multi-substrate"):
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6|multi-substrate"):
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
         )
 
-
-def test_place_fragments_raises_for_multi_substrate_metathesis():
-    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
-    frags = Chem.GetMolFrags(mol)
-    a = frags[0][0]
-    b = frags[1][0]
-    bc = BondChanges(formed=((frags[0][1], frags[1][1]),), broken=((a, b),))
-    with pytest.raises(NotImplementedError, match="multi-substrate|centroid"):
-        _place_fragments(
-            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
-            bc, rotation_perturbation=None,
-        )
 
 
 def test_place_fragments_raises_for_multi_base_on_single_anchor():
@@ -329,6 +323,31 @@ def test_plane_normal_at_anchor_non_planar_three_neighbors_falls_back():
     assert direction[2] < 0, f"non-planar fallback should point -z, got {direction}"
 
 
+def test_embed_in_place_uses_etkdg_when_mmff_fails(caplog, monkeypatch):
+    """MMFF94 が parameterize できない fragment (例: LiBr) は ETKDG 結果のみで進行。"""
+    import logging
+
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    from reactx.embed3d import _embed_in_place
+
+    # 他のテストの propagate=False 影響を回避
+    reactx_logger = logging.getLogger("reactx")
+    monkeypatch.setattr(reactx_logger, "propagate", True)
+
+    mol = Chem.AddHs(Chem.MolFromSmiles("[Li]Br"))
+    Chem.SanitizeMol(mol)
+
+    caplog.set_level("WARNING", logger="reactx.embed3d")
+    _embed_in_place(mol, seed=42)
+
+    # ETKDG conformer が残っているはず
+    assert mol.GetNumConformers() == 1
+    # MMFF94 警告が出ているはず
+    assert any("MMFF94 cannot parameterize" in rec.getMessage() for rec in caplog.records)
+
+
 def test_plane_normal_at_anchor_degenerate_uses_z_fallback(caplog, monkeypatch):
     """隣接 0 個の場合 (anchor が単独 atom) は [0, 0, 1] + warning。"""
     import logging
@@ -452,7 +471,7 @@ def test_place_fragments_rejects_multi_formed_on_shared_anchor():
         formed=((central, f_idx), (central, cl_idx)),
         broken=(),
     )
-    with pytest.raises(NotImplementedError, match="Phase 5"):
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6"):
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
@@ -469,8 +488,325 @@ def test_place_fragments_rejects_cycloaddition_pattern():
     a0, a1 = frags[0][0], frags[0][1]
     b0, b1 = frags[1][0], frags[1][1]
     bc = BondChanges(formed=((a0, b0), (a1, b1)), broken=())
-    with pytest.raises(NotImplementedError, match="Phase 5"):
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6"):
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
+        )
+
+
+def test_kabsch_rigid_transform_recovers_known_rotation_translation():
+    """既知の (R, t) を src に適用した dst から、Kabsch が同じ (R, t) を回復する。"""
+    from reactx.embed3d import _kabsch_rigid_transform
+
+    rng = np.random.default_rng(42)
+    src = rng.normal(size=(4, 3))
+    # 既知の回転 (z 軸周り 30°) と translation
+    theta = np.deg2rad(30.0)
+    R_true = np.array([
+        [np.cos(theta), -np.sin(theta), 0.0],
+        [np.sin(theta),  np.cos(theta), 0.0],
+        [0.0,            0.0,           1.0],
+    ])
+    t_true = np.array([1.5, -2.0, 0.5])
+    dst = (R_true @ src.T).T + t_true
+
+    R, t = _kabsch_rigid_transform(src, dst)
+    np.testing.assert_allclose(R, R_true, atol=1e-9)
+    np.testing.assert_allclose(t, t_true, atol=1e-9)
+
+
+def test_kabsch_rigid_transform_rejects_reflection():
+    """rotoinversion を解にしてしまう対応点でも det(R) >= 0 の rotation を返す。"""
+    from reactx.embed3d import _kabsch_rigid_transform
+
+    # 鏡面反転を要求する明示的な対応点 (xy 平面で z 反転を要求)
+    src = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+    # dst は src の x, y は同じだが z を反転 (= 鏡面反転)
+    dst = np.array([
+        [1.0, 0.0,  0.0],
+        [0.0, 1.0,  0.0],
+        [0.0, 0.0, -1.0],
+    ])
+    R, _t = _kabsch_rigid_transform(src, dst)
+    det = float(np.linalg.det(R))
+    np.testing.assert_allclose(det, 1.0, atol=1e-9, err_msg=f"expected proper rotation det=+1, got det={det}")
+
+
+def test_perpendicular_face_dir_normal_case():
+    """offset が axis に垂直成分を持つとき、その方向に正規化された unit vector を返す。"""
+    from reactx.embed3d import _perpendicular_face_dir
+    axis = np.array([1.0, 0.0, 0.0])
+    offset = np.array([0.0, 2.0, 0.0])
+    perp = _perpendicular_face_dir(axis, offset)
+    np.testing.assert_allclose(perp, [0.0, 1.0, 0.0], atol=1e-9)
+
+
+def test_perpendicular_face_dir_axis_aligned_offset_falls_back_to_z():
+    """offset が axis と平行 (垂直成分なし) のとき +z fallback (axis が +x のとき)。"""
+    from reactx.embed3d import _perpendicular_face_dir
+    axis = np.array([1.0, 0.0, 0.0])
+    offset = np.array([2.0, 0.0, 0.0])  # axis と平行
+    perp = _perpendicular_face_dir(axis, offset)
+    # +z は axis (=+x) と直交するので採用される
+    np.testing.assert_allclose(perp, [0.0, 0.0, 1.0], atol=1e-9)
+
+
+def test_perpendicular_face_dir_axis_z_skips_z_uses_y_fallback():
+    """axis が +z のとき、世界基底 +z は使えないので +y にフォールバック。"""
+    from reactx.embed3d import _perpendicular_face_dir
+    axis = np.array([0.0, 0.0, 1.0])
+    offset = np.array([0.0, 0.0, 2.0])  # axis と平行
+    perp = _perpendicular_face_dir(axis, offset)
+    # +z は axis と平行 → スキップ、+y は axis と直交 → 採用
+    np.testing.assert_allclose(perp, [0.0, 1.0, 0.0], atol=1e-9)
+
+
+def test_perpendicular_face_dir_rejects_zero_axis():
+    """norm(axis) < 1e-12 で ValueError を投げる。"""
+    from reactx.embed3d import _perpendicular_face_dir
+    with pytest.raises(ValueError, match="non-zero"):
+        _perpendicular_face_dir(np.zeros(3), np.array([1.0, 0.0, 0.0]))
+
+
+def test_metathesis_fixture_shape(metathesis_atoms_setup):
+    """fixture の形状確認: 2 fragments, formed=2, broken=2, anchor pair on x axis."""
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    assert len(frag_indices) == 2
+    assert len(bc.formed) == 2
+    assert len(bc.broken) == 2
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+    np.testing.assert_allclose(positions[cl_idx], [0.0, 0.0, 0.0], atol=1e-9)
+    np.testing.assert_allclose(positions[c_idx], [1.78, 0.0, 0.0], atol=1e-9)
+    # broken bonds 各 fragment 内に閉じる
+    cccl = next(i for i, b in enumerate(bc.broken) if c_idx in b and cl_idx in b)
+    libr = next(i for i, b in enumerate(bc.broken) if li_idx in b and br_idx in b)
+    assert cccl != libr  # 別々の broken bond
+
+
+def test_kabsch_alignment_respects_rotation_perturbation(metathesis_atoms_setup):
+    """rotation_perturbation で moving fragment が回転される (相対距離は不変)。"""
+    from reactx.embed3d import _kabsch_alignment
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+
+    out_id = _kabsch_alignment(
+        mol_h, frag_indices, positions.copy(), bc,
+        rotation_perturbation=None,
+    )
+
+    # 90° rotation around z axis (incoming axis Br-Li is along x in this fixture,
+    # so x rotation would not move the atoms — must rotate around y or z).
+    R = np.array([
+        [0.0, -1.0, 0.0],
+        [1.0,  0.0, 0.0],
+        [0.0,  0.0, 1.0],
+    ])
+    out_rot = _kabsch_alignment(
+        mol_h, frag_indices, positions.copy(), bc,
+        rotation_perturbation=R,
+    )
+
+    # Br と Li の絶対位置が変わる
+    assert not np.allclose(out_id[br_idx], out_rot[br_idx], atol=0.1), (
+        f"rotation_perturbation should change Br position; "
+        f"identity={out_id[br_idx]}, rotated={out_rot[br_idx]}"
+    )
+    # 相対距離 (Br-Li) は剛体変換で不変
+    d_id = float(np.linalg.norm(out_id[br_idx] - out_id[li_idx]))
+    d_rot = float(np.linalg.norm(out_rot[br_idx] - out_rot[li_idx]))
+    np.testing.assert_allclose(d_id, d_rot, atol=0.05)
+
+
+def test_kabsch_alignment_creates_4center_geometry(metathesis_atoms_setup):
+    """Tier 3 主路: CH3Cl + LiBr fixture で 4-center geometry を達成。
+
+    Assertions (spec §7 (q)):
+      - C-Br ≤ 2.5 Å (formed bond)
+      - Li-Cl ≤ 2.5 Å (formed bond)
+      - anchor 軸 (C-Cl) と incoming 軸 (Br-Li) が概並行 (cos angle > 0.7)
+      - moving 重心が anchor 軸から FRAGMENT_SEPARATION/2 ± 0.5 Å 離れる
+    """
+    from reactx.embed3d import FRAGMENT_SEPARATION, _kabsch_alignment
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+
+    positions_in = positions.copy()
+
+    out = _kabsch_alignment(
+        mol_h, frag_indices, positions_in.copy(), bc,
+        rotation_perturbation=None,
+    )
+
+    # reference fragment (CH3Cl) is fixed
+    np.testing.assert_array_equal(out[c_idx], positions_in[c_idx])
+    np.testing.assert_array_equal(out[cl_idx], positions_in[cl_idx])
+
+    d_c_br = float(np.linalg.norm(out[c_idx] - out[br_idx]))
+    d_li_cl = float(np.linalg.norm(out[li_idx] - out[cl_idx]))
+    assert d_c_br <= 2.5, f"C-Br should be <=2.5 A (formed bond), got {d_c_br:.2f}"
+    assert d_li_cl <= 2.5, f"Li-Cl should be <=2.5 A (formed bond), got {d_li_cl:.2f}"
+
+    axis_anchor = out[c_idx] - out[cl_idx]
+    axis_anchor /= np.linalg.norm(axis_anchor)
+    axis_incoming = out[br_idx] - out[li_idx]
+    axis_incoming /= np.linalg.norm(axis_incoming)
+    cos_angle = abs(float(np.dot(axis_anchor, axis_incoming)))
+    assert cos_angle > 0.7, f"anchor and incoming axes should be ~parallel, got cos={cos_angle:.3f}"
+
+    moving_frag = next(f for f in frag_indices if li_idx in f)
+    moving_centroid = out[list(moving_frag)].mean(axis=0)
+    anchor_midpoint = (out[c_idx] + out[cl_idx]) / 2
+    perp_dist = float(np.linalg.norm(
+        (moving_centroid - anchor_midpoint)
+        - np.dot(moving_centroid - anchor_midpoint, axis_anchor) * axis_anchor
+    ))
+    expected = FRAGMENT_SEPARATION / 2
+    assert abs(perp_dist - expected) <= 0.1, (
+        f"moving centroid should be {expected:.2f} A above anchor axis (perp), got {perp_dist:.2f}"
+    )
+
+
+def test_kabsch_alignment_rejects_broken_spanning_fragments():
+    """broken bonds が両 fragment を跨ぐ (= 純粋 metathesis 以外) で NotImplementedError。"""
+    from reactx.embed3d import _kabsch_alignment
+
+    # 2 fragments で broken bond が両 frag を跨ぐ (cross-fragment broken)
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
+    frags = Chem.GetMolFrags(mol)
+    a = frags[0][0]  # 左 fragment の C
+    b = frags[1][0]  # 右 fragment の O
+    # broken=2 だが両方 cross-fragment → broken_within_* がいずれも 0
+    bc = BondChanges(
+        formed=((frags[0][1], frags[1][1]), (a, b)),
+        broken=((a, b), (frags[0][1], frags[1][1])),
+    )
+    with pytest.raises(NotImplementedError, match="1\\+1 within-fragment"):
+        _kabsch_alignment(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
+        )
+
+
+def test_kabsch_alignment_rejects_multi_bond_from_single_anchor(metathesis_atoms_setup):
+    """同 anchor から 2 formed bond で NotImplementedError。"""
+    from reactx.embed3d import _kabsch_alignment
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    li_idx = syms.index("Li")
+    br_idx = syms.index("Br")
+    # 両 formed bond の reference 端を C にする (anchor=C 共有)
+    bad_bc = BondChanges(
+        formed=((c_idx, br_idx), (c_idx, li_idx)),
+        broken=((c_idx, cl_idx), (li_idx, br_idx)),
+    )
+    with pytest.raises(NotImplementedError, match="multi-bond from single anchor"):
+        _kabsch_alignment(
+            mol_h, frag_indices, positions.copy(), bad_bc,
+            rotation_perturbation=None,
+        )
+
+
+def test_place_fragments_dispatches_tier3_for_metathesis(metathesis_atoms_setup):
+    """Tier 3 dispatch: 2-fragment formed=2/broken=2/multi-substrate で _kabsch_alignment に流れる。"""
+    from reactx.embed3d import _place_fragments
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    br_idx = syms.index("Br")
+
+    out = _place_fragments(
+        mol_h, frag_indices, positions.copy(), bc,
+        rotation_perturbation=None,
+    )
+    # Tier 3 を経由して 4-center 配置になっていれば C-Br が中程度の距離
+    d_c_br = float(np.linalg.norm(out[c_idx] - out[br_idx]))
+    assert 0.5 < d_c_br < 3.0, (
+        f"expected Tier 3 placement to put Br near C (0.5-3.0 A), got {d_c_br:.2f}"
+    )
+
+
+def test_place_fragments_rejects_3_fragment_metathesis():
+    """3 fragments + broken bond が fragments を跨ぐ場合は Phase 6+ reject。
+
+    Tier 1 dispatch には乗らず (substrate=None: broken が単一 fragment に閉じない)、
+    Tier 3 にも乗らない (frag_count==2 が条件) ので最終 raise に到達。
+    """
+    from reactx.embed3d import _place_fragments
+
+    # 3 fragments: CC, OO, NN。broken bond が CC ↔ OO を跨ぐ → substrate=None。
+    # 3 fragments なので Tier 3 dispatch (frag_count==2) も満たさず final raise。
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO.NN"))
+    frags = Chem.GetMolFrags(mol)
+    c0 = frags[0][0]
+    o0 = frags[1][0]
+    n0 = frags[2][0]
+    bc = BondChanges(
+        formed=((c0, n0),),
+        broken=((c0, o0),),
+    )
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6|multi-substrate"):
+        _place_fragments(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
+        )
+
+
+def test_place_fragments_rejects_asymmetric_metathesis():
+    """非対称 metathesis (formed=2, broken=1, 両 fragment 跨ぎ) で Phase 6+ reject。"""
+    from reactx.embed3d import _place_fragments
+
+    # 2 fragments で broken=1 が両 frag を跨ぐ (substrate=None かつ broken count != formed count)
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
+    frags = Chem.GetMolFrags(mol)
+    a = frags[0][0]
+    b = frags[1][0]
+    bc = BondChanges(
+        formed=((frags[0][1], frags[1][1]), (a, b)),
+        broken=((a, b),),
+    )
+    with pytest.raises(NotImplementedError, match="Phase 5|Phase 6"):
+        _place_fragments(
+            mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
+            bc, rotation_perturbation=None,
+        )
+
+
+def test_kabsch_alignment_raises_when_anchor_pair_coincident(metathesis_atoms_setup):
+    """anchor_a と anchor_b が同じ位置に来た場合 RuntimeError を投げる
+    (= broken_within_reference の bond が既に切れている異常状態)。"""
+    from reactx.embed3d import _kabsch_alignment
+
+    mol_h, frag_indices, positions, bc = metathesis_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    # C と Cl を同じ位置に重ねる
+    bad_positions = positions.copy()
+    bad_positions[cl_idx] = bad_positions[c_idx]
+
+    with pytest.raises(RuntimeError, match="anchor pair coincident"):
+        _kabsch_alignment(
+            mol_h, frag_indices, bad_positions, bc,
+            rotation_perturbation=None,
         )

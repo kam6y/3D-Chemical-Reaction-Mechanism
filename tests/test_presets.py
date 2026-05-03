@@ -52,6 +52,7 @@ def test_presets_dict_keys():
         "e2",
         "sn1_dissoc",
         "sn1_recomb",
+        "metathesis_4center",
     }
 
 
@@ -98,3 +99,16 @@ def test_sn1_recomb_preset_values():
     assert p.r_broken == 4.0
     assert p.max_relax_steps == 200
     assert p.r_form is None
+
+
+def test_metathesis_4center_preset_values():
+    p = get_preset("metathesis_4center")
+    assert p.name == "metathesis_4center"
+    # Tuned via DoD slow test: k=1.0/r_broken=4.0 left trial stuck in partial
+    # product (C-Br opened instead of closing). Menshutkin-style k=2.0/r_broken=4.5
+    # achieves 8/8 reached_product on CH3Cl + LiBr.
+    assert p.k_form == 2.0
+    assert p.k_broken == 2.0
+    assert p.r_broken == 4.5
+    assert p.max_relax_steps == 300
+    assert p.r_form is None  # 元素表 (Cordero: C-Br ≈ 1.94, Li-Cl ≈ 2.02)

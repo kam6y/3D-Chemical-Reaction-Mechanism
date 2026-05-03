@@ -98,3 +98,11 @@ def test_build_restraints_scales_linearly_with_bond_count():
         r_form=1.5, r_broken=4.0,
     )
     assert len(cs) == 3  # 2 Hookeans + 1 PullApart
+
+
+def test_lookup_r_form_includes_phase5_pairs():
+    """Phase 5 metathesis 用の C-Br と Li-Cl が DEFAULT_R_FORM に含まれる。"""
+    assert lookup_r_form("C", "Br") == 1.94
+    assert lookup_r_form("Br", "C") == 1.94  # symmetric
+    assert lookup_r_form("Li", "Cl") == 2.02
+    assert lookup_r_form("Cl", "Li") == 2.02  # symmetric
