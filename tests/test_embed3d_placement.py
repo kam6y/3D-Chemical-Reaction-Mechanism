@@ -151,3 +151,23 @@ def test_embed_mol_to_atoms_unimolecular_skips_dispatcher():
     atoms = embed_mol_to_atoms(mol, calculator=None, seed=42)
     # Embedded successfully without bond_changes (which would be required for multi-fragment).
     assert len(atoms) > 0
+
+
+def test_find_substrate_by_size_picks_larger_heavy_count():
+    """Tier 2: 重原子数最大の fragment を substrate として返す。"""
+    from reactx.embed3d import _find_substrate_by_size
+    mol, frags = _make_mol_with_frags("[C+](C)(C)C.[Cl-]")
+    found = _find_substrate_by_size(frags)
+    # tBu+ fragment は 4 heavy (1 C+ + 3 methyl C), Cl- は 1 heavy。
+    syms = [a.GetSymbol() for a in mol.GetAtoms()]
+    heavy_in_found = sum(1 for i in found if syms[i] != "H")
+    assert heavy_in_found == 4
+
+
+def test_find_substrate_by_size_tie_break_smallest_atom_index():
+    """同じ heavy 数の場合、最小 atom index を含む fragment を選ぶ。"""
+    from reactx.embed3d import _find_substrate_by_size
+    # Cl- (heavy=1) と F- (heavy=1) の tie。frags[0] が smaller idx なので選ばれる。
+    mol, frags = _make_mol_with_frags("[Cl-].[F-]")
+    found = _find_substrate_by_size(frags)
+    assert found == frags[0], "tie-break should pick fragment with smallest atom index"

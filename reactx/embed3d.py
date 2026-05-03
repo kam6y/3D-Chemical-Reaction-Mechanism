@@ -138,6 +138,22 @@ def _find_substrate_fragment(
     return candidates[0]
 
 
+def _find_substrate_by_size(
+    frag_indices: tuple[tuple[int, ...], ...],
+) -> tuple[int, ...]:
+    """Tier 2 substrate identification: largest heavy-atom fragment.
+
+    Tie の場合は最小 atom index を含む方を選ぶ (deterministic)。
+    SN1 step 2 では cation = (CH₃)₃C⁺ (4 heavy) > Cl⁻ (1 heavy) で明確に決まる。
+    """
+    if not frag_indices:
+        raise ValueError("frag_indices is empty")
+    return max(
+        frag_indices,
+        key=lambda f: (len(f), -min(f)),
+    )
+
+
 def _directional_placement(
     frag_indices: tuple[tuple[int, ...], ...],
     positions: np.ndarray,
