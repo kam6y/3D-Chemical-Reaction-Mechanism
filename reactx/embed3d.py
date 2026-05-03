@@ -104,7 +104,8 @@ def _place_fragments(
     """Dispatch to the appropriate placement strategy.
 
     Tier 1 (directional, Phase 3): broken bond の方向情報がある反応 (E2 / SN2 / PT)。
-    Tier 2 (centroid, future):     broken=0 / multi-substrate metathesis。Phase 4+。
+    Tier 2 (planar face, Phase 4): broken=() かつ formed>=1 の bimolecular (SN1 step 2)。
+    Phase 4+ (未実装):              multi-substrate metathesis (broken が複数 frag に跨る)。
     """
     substrate = _find_substrate_fragment(frag_indices, bond_changes.broken)
     if substrate is not None and bond_changes.broken:
@@ -112,8 +113,16 @@ def _place_fragments(
             frag_indices, positions, bond_changes, substrate,
             rotation_perturbation=rotation_perturbation,
         )
+
+    if not bond_changes.broken and bond_changes.formed:
+        substrate = _find_substrate_by_size(frag_indices)
+        return _planar_face_placement(
+            mol_h, frag_indices, positions, bond_changes, substrate,
+            rotation_perturbation=rotation_perturbation,
+        )
+
     raise NotImplementedError(
-        "centroid-based placement (broken=0 / multi-substrate metathesis) is "
+        "multi-substrate metathesis (broken bonds spanning fragments) is "
         f"Phase 4+. Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
         f"frags={len(frag_indices)}."
     )

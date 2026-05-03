@@ -80,11 +80,39 @@ def test_place_fragments_e2_shape_directional_anchors_on_h(e2_atoms_setup):
     assert d_oh < 4.5, f"O should be close to anchor H, got {d_oh:.2f} A"
 
 
-def test_place_fragments_raises_for_broken_zero_bimolecular():
-    mol = Chem.AddHs(Chem.MolFromSmiles("[CH3+].[OH-]"))
+def test_place_fragments_dispatches_tier2_for_broken_zero_bimolecular(sn1_recomb_atoms_setup):
+    """Tier 2 dispatch: broken=() の bimolecular で _planar_face_placement に流す。
+
+    Phase 3 では NotImplementedError を投げていたが、Phase 4 で実装したので
+    placement が成功し、Cl の位置が plane normal 方向に動くことを確認する。
+    """
+    from reactx.embed3d import _place_fragments, FRAGMENT_SEPARATION
+
+    mol_h, frag_indices, positions, bc = sn1_recomb_atoms_setup
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    cl_idx = syms.index("Cl")
+    central = next(
+        i for i, a in enumerate(mol_h.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+
+    out = _place_fragments(
+        mol_h, frag_indices, positions.copy(), bc,
+        rotation_perturbation=None,
+    )
+    d = float(np.linalg.norm(out[cl_idx] - out[central]))
+    np.testing.assert_allclose(d, FRAGMENT_SEPARATION, atol=0.5)
+
+
+def test_place_fragments_still_raises_for_multi_substrate_metathesis_after_tier2():
+    """multi-substrate metathesis (broken bonds が複数 frag に跨る) は Tier 2 でも reject。"""
+    from reactx.embed3d import _place_fragments
+    mol = Chem.AddHs(Chem.MolFromSmiles("CC.OO"))
     frags = Chem.GetMolFrags(mol)
-    bc = BondChanges(formed=((frags[0][0], frags[1][0]),), broken=())
-    with pytest.raises(NotImplementedError, match="centroid"):
+    a = frags[0][0]
+    b = frags[1][0]
+    bc = BondChanges(formed=((frags[0][1], frags[1][1]),), broken=((a, b),))
+    with pytest.raises(NotImplementedError, match="multi-substrate"):
         _place_fragments(
             mol, frags, np.zeros((mol.GetNumAtoms(), 3)),
             bc, rotation_perturbation=None,
