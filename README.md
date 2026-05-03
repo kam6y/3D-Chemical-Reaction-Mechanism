@@ -6,6 +6,11 @@
 
 **Phase 3** で multi-bond 反応 (E2 elimination = 1 formed + 2 broken / SN1 step 1 解離 = 0 formed + 1 broken) に拡張。
 
+> **Breaking changes (Phase 3, develop ← phase-3):**
+> - `meta.json.effective_params.r_form: float` → `r_form_targets: list[float]` (per-formed-bond, formed=0 のとき空 list)
+> - `r_form` キーはもう書かれない。外部スクリプトで `meta["effective_params"]["r_form"]` を読んでいる場合は `r_form_targets` (list) に追従が必要。
+> - 内部 API: `_resolve_effective_params` の戻り値も `r_form_targets` キーに統一。
+
 ## セットアップ
 
 ```bash

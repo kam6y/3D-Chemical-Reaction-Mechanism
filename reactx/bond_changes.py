@@ -30,7 +30,10 @@ class BondChanges:
                     raise ValueError(f"{label} bond {(a, b)} is a self-loop")
                 key = (a, b) if a <= b else (b, a)
                 if key in seen:
-                    raise ValueError(f"{label} contains duplicate bond {key}")
+                    raise ValueError(
+                        f"{label} contains duplicate bond {(a, b)} "
+                        f"(canonical form {key} already seen)"
+                    )
                 seen.add(key)
         if len(self.formed) + len(self.broken) == 0:
             raise ValueError("BondChanges must have at least one formed or broken bond")

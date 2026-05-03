@@ -146,7 +146,12 @@ def _directional_placement(
     *,
     rotation_perturbation: np.ndarray | None,
 ) -> np.ndarray:
-    """Tier 1: anchor + leaving direction for each non-substrate fragment."""
+    """Tier 1: anchor + leaving direction for each non-substrate fragment.
+
+    同一 anchor に複数 broken bond が掛かる場合 (例: retro-cycloaddition で
+    将来現れうる)、leaving 原子は spec §9 (#3) に従い「相手側 atom index 最小」
+    で決定論的に選ぶ。
+    """
     substrate_set = set(substrate)
     non_substrate = [f for f in frag_indices if f is not substrate]
     if len(non_substrate) >= 2:
@@ -226,12 +231,10 @@ def _directional_placement(
             backside = rotation_perturbation @ backside
         target = a_pos + backside * FRAGMENT_SEPARATION
 
+        # bridging_bond は line 161-164 で (substrate↔fragment) と filter 済み、
+        # anchor は substrate 側端なので incoming (反対端) は構造的に必ず f_set ∋。
         incoming = bridging_bond[1] if bridging_bond[0] == anchor else bridging_bond[0]
-        if incoming in f_set:
-            nuc_centroid_anchor = positions[incoming]
-        else:
-            nuc_centroid_anchor = positions[list(fragment)].mean(axis=0)
-        positions[list(fragment)] += target - nuc_centroid_anchor
+        positions[list(fragment)] += target - positions[incoming]
 
     return positions
 
