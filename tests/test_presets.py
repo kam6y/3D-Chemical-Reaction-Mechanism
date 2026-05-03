@@ -51,6 +51,7 @@ def test_presets_dict_keys():
         "menshutkin",
         "e2",
         "sn1_dissoc",
+        "sn1_recomb",
     }
 
 
@@ -85,5 +86,15 @@ def test_sn1_dissoc_preset_values():
     assert p.k_form == 0.0
     assert p.k_broken == 2.0
     assert p.r_broken == 6.0
+    assert p.max_relax_steps == 200
+    assert p.r_form is None
+
+
+def test_sn1_recomb_preset_values():
+    p = get_preset("sn1_recomb")
+    assert p.name == "sn1_recomb"
+    assert p.k_form == 1.0
+    assert p.k_broken == 0.0
+    assert p.r_broken == 4.0
     assert p.max_relax_steps == 200
     assert p.r_form is None

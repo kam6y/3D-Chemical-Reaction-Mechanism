@@ -40,6 +40,31 @@ def test_neb_refine_rejected_for_e2_reaction(tmp_path, monkeypatch, caplog):
     assert "1 formed" in msgs and "1 broken" in msgs
 
 
+def test_neb_refine_rejected_for_sn1_recomb_reaction(tmp_path, monkeypatch, caplog):
+    """SN1 step 2 (formed=1, broken=0) も 1+1 以外なので reject される。"""
+    rxn = Path("examples/sn1_recomb.rxn")
+    if not rxn.exists():
+        pytest.skip("examples/sn1_recomb.rxn not yet created (Task 10)")
+
+    out = tmp_path / "out"
+    monkeypatch.setattr(cli, "_check_hf_auth", lambda: 0)
+    monkeypatch.setattr(cli, "_configure_reactx_logging", lambda: None)
+    cli.log.propagate = True
+    caplog.set_level("INFO", logger="reactx")
+
+    rc = cli.main([
+        "run", str(rxn), "-o", str(out),
+        "--backend", "lj", "--n-angles", "1", "--max-relax-steps", "5",
+        "--neb-refine",
+    ])
+    assert rc == 2, (
+        f"expected exit code 2 for SN1 step 2 + --neb-refine, got {rc}"
+    )
+    msgs = " ".join(rec.getMessage() for rec in caplog.records)
+    assert "Phase 3" in msgs
+    assert "1 formed" in msgs and "1 broken" in msgs
+
+
 def test_neb_refine_accepted_for_sn2(sn2_rxn_path, tmp_path, monkeypatch):
     """1+1 reactions (SN2) pass the CLI guard.
 

@@ -34,6 +34,11 @@ def sn1_dissoc_rxn_path(examples_dir: Path) -> Path:
 
 
 @pytest.fixture()
+def sn1_recomb_rxn_path(examples_dir: Path) -> Path:
+    return examples_dir / "sn1_recomb.rxn"
+
+
+@pytest.fixture()
 def sn2_atoms_setup():
     """3-fragment-style SN2 setup for placement dispatcher test (CH3Cl + OH-)."""
     mol = Chem.AddHs(Chem.MolFromSmiles("C(Cl).[OH-]"))
@@ -64,7 +69,6 @@ def e2_atoms_setup():
     for i in range(n):
         positions[i] = (float(i) * 0.5, float(i % 2), 0.0)
 
-    syms = [a.GetSymbol() for a in mol.GetAtoms()]
     map_to_idx = {a.GetAtomMapNum(): a.GetIdx() for a in mol.GetAtoms() if a.GetAtomMapNum()}
     c_alpha = map_to_idx[1]
     c_beta = map_to_idx[2]
@@ -78,4 +82,42 @@ def e2_atoms_setup():
         formed=((o, h_anchor),),
         broken=((c_alpha, cl), (c_beta, h_anchor)),
     )
+    return mol, frag_indices, positions, bc
+
+
+@pytest.fixture()
+def sn1_recomb_atoms_setup():
+    """SN1 step 2 setup: tBu+ + Cl- with formed=(C-Cl), broken=()."""
+    mol = Chem.AddHs(Chem.MolFromSmiles("[C+](C)(C)C.[Cl-]"))
+    Chem.SanitizeMol(mol)
+    frag_indices = Chem.GetMolFrags(mol)
+    n = mol.GetNumAtoms()
+    positions = np.zeros((n, 3))
+    # tBu+ を planar 三角形 + 中心 C+ に: 中心 C+ は (0,0,0)、3 methyl C は xy 平面
+    syms = [a.GetSymbol() for a in mol.GetAtoms()]
+    central = next(
+        i for i, a in enumerate(mol.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    positions[central] = (0.0, 0.0, 0.0)
+    methyl_carbons = [
+        nb.GetIdx() for nb in mol.GetAtomWithIdx(central).GetNeighbors()
+        if nb.GetSymbol() == "C"
+    ]
+    for k, m in enumerate(methyl_carbons):
+        theta = 2 * np.pi * k / 3
+        positions[m] = (np.cos(theta) * 1.5, np.sin(theta) * 1.5, 0.0)
+    # 各 methyl C の H 隣接を適当な位置に (test 内で正確には使わない)
+    for m in methyl_carbons:
+        for h_nb in mol.GetAtomWithIdx(m).GetNeighbors():
+            if h_nb.GetSymbol() == "H":
+                # methyl C の周りに H を散らす
+                positions[h_nb.GetIdx()] = positions[m] + np.array(
+                    [0.5 * (h_nb.GetIdx() % 3 - 1), 0.5, 0.5 * ((h_nb.GetIdx() // 3) % 2)]
+                )
+    # Cl- を遠くに置く (Tier 2 placement で動かされる)
+    cl_idx = syms.index("Cl")
+    positions[cl_idx] = (10.0, 10.0, 10.0)
+
+    bc = BondChanges(formed=((central, cl_idx),), broken=())
     return mol, frag_indices, positions, bc

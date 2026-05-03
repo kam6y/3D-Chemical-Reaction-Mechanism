@@ -1,7 +1,6 @@
 """Tests for unimolecular reaction handling: --n-angles auto-clamp + prescreen skip."""
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -15,9 +14,10 @@ def fake_unimolecular_pipeline(monkeypatch, tmp_path):
     We don't need a real UMA call; intercept calculator + relax to return
     immediately, then inspect meta.json behaviour.
     """
-    from reactx import calculators, embed3d, path_relax
     import numpy as np
     from ase import Atoms
+
+    from reactx import calculators, embed3d, path_relax
 
     def fake_calc(*args, **kwargs):
         from ase.calculators.lj import LennardJones

@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 MAX_EMBED_RETRIES = 5
 FRAGMENT_SEPARATION = 3.5  # Å — attack distance for multi-fragment placement
+PLANE_FIT_TOLERANCE = 0.3  # Å — SVD residual (smallest singular value) threshold
 
 
 def embed_mol_to_atoms(
@@ -103,7 +104,9 @@ def _place_fragments(
     """Dispatch to the appropriate placement strategy.
 
     Tier 1 (directional, Phase 3): broken bond の方向情報がある反応 (E2 / SN2 / PT)。
-    Tier 2 (centroid, future):     broken=0 / multi-substrate metathesis。Phase 4+。
+    Tier 2 (planar face, Phase 4): broken=() かつ formed=1 の bimolecular (SN1 step 2)。
+    Phase 5+ (未実装):              multi-substrate metathesis (broken が複数 frag に跨る) /
+                                   cycloaddition (formed>=2, broken=0)。
     """
     substrate = _find_substrate_fragment(frag_indices, bond_changes.broken)
     if substrate is not None and bond_changes.broken:
@@ -111,9 +114,22 @@ def _place_fragments(
             frag_indices, positions, bond_changes, substrate,
             rotation_perturbation=rotation_perturbation,
         )
+
+    if not bond_changes.broken and bond_changes.formed:
+        if len(bond_changes.formed) > 1:
+            raise NotImplementedError(
+                "cycloaddition (broken=0, formed>=2) is Phase 5+. "
+                f"Got formed={bond_changes.formed}, frags={len(frag_indices)}."
+            )
+        substrate = _find_substrate_by_size(frag_indices)
+        return _planar_face_placement(
+            mol_h, frag_indices, positions, bond_changes, substrate,
+            rotation_perturbation=rotation_perturbation,
+        )
+
     raise NotImplementedError(
-        "centroid-based placement (broken=0 / multi-substrate metathesis) is "
-        f"Phase 4+. Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
+        "multi-substrate metathesis (broken bonds spanning fragments) is "
+        f"Phase 5+. Got formed={bond_changes.formed}, broken={bond_changes.broken}, "
         f"frags={len(frag_indices)}."
     )
 
@@ -136,6 +152,77 @@ def _find_substrate_fragment(
     if len(candidates) != 1:
         return None
     return candidates[0]
+
+
+def _find_substrate_by_size(
+    frag_indices: tuple[tuple[int, ...], ...],
+) -> tuple[int, ...]:
+    """Tier 2 substrate identification: largest fragment by total atom count.
+
+    Heavy-atom-count proxy: len(f) counts heavy + H, not heavy-only. For SN1
+    step 2 (tBu⁺ 13 atoms vs Cl⁻ 1 atom) this is exact. Tie の場合は最小 atom
+    index を含む方を選ぶ (deterministic)。
+    """
+    if not frag_indices:
+        raise ValueError("frag_indices is empty")
+    # NOTE: len(f) is a heavy-count proxy. If a future caller needs true heavy-
+    # count ranking (e.g. H-rich substrate vs halide), pass mol_h and filter
+    # atoms with GetAtomicNum() > 1.
+    return max(
+        frag_indices,
+        key=lambda f: (len(f), -min(f)),
+    )
+
+
+def _plane_normal_at_anchor(
+    positions: np.ndarray,
+    anchor: int,
+    mol_h: Chem.Mol,
+    substrate: tuple[int, ...],
+) -> np.ndarray:
+    """Tier 2: anchor の sp²-like 平面の法線方向を返す (unit vector)。
+
+    Strategy (priority order):
+      1. anchor の substrate 内隣接 (heavy + H) を集める。
+      2. 隣接 ≥3 かつ平面 fit 残差 < PLANE_FIT_TOLERANCE: SVD 法線。
+         符号 disambiguation: direction[2] < 0 なら反転 (常に +z 寄り)。
+      3. 隣接 = 1 or 2、または平面 fit 残差が大きい:
+         direction = -unit(mean_neighbor - anchor)。norm < 1e-6 なら次へ。
+      4. degenerate: direction = [0, 0, 1] + warning ログ。
+    """
+    substrate_set = set(substrate)
+    neighbors_in_substrate = [
+        n.GetIdx() for n in mol_h.GetAtomWithIdx(anchor).GetNeighbors()
+        if n.GetIdx() in substrate_set
+    ]
+
+    if len(neighbors_in_substrate) >= 3:
+        coords = np.array([positions[i] for i in neighbors_in_substrate])
+        centered = coords - positions[anchor]
+        # SVD: 最小特異値方向が plane normal
+        _, S, Vt = np.linalg.svd(centered, full_matrices=False)
+        residual = float(S[-1])
+        if residual < PLANE_FIT_TOLERANCE:
+            normal = Vt[-1]
+            if normal[2] < 0:
+                normal = -normal
+            # Vt rows are orthonormal; division is defensive (norm == 1 by construction).
+            return normal / np.linalg.norm(normal)
+
+    # Fallback: -unit(mean_neighbor - anchor)
+    if neighbors_in_substrate:
+        coords = np.array([positions[i] for i in neighbors_in_substrate])
+        mean_neighbor = coords.mean(axis=0)
+        direction = positions[anchor] - mean_neighbor
+        norm = float(np.linalg.norm(direction))
+        if norm > 1e-6:
+            return direction / norm
+
+    log.warning(
+        "anchor %d has no usable substrate neighbors for plane-normal "
+        "computation; using +z fallback direction", anchor,
+    )
+    return np.array([0.0, 0.0, 1.0])
 
 
 def _directional_placement(
@@ -233,6 +320,88 @@ def _directional_placement(
 
         # bridging_bond は line 161-164 で (substrate↔fragment) と filter 済み、
         # anchor は substrate 側端なので incoming (反対端) は構造的に必ず f_set ∋。
+        incoming = bridging_bond[1] if bridging_bond[0] == anchor else bridging_bond[0]
+        positions[list(fragment)] += target - positions[incoming]
+
+    return positions
+
+
+def _planar_face_placement(
+    mol_h: Chem.Mol,
+    frag_indices: tuple[tuple[int, ...], ...],
+    positions: np.ndarray,
+    bond_changes: BondChanges,
+    substrate: tuple[int, ...],
+    *,
+    rotation_perturbation: np.ndarray | None,
+) -> np.ndarray:
+    """Tier 2 placement: anchor の sp²-like 平面の法線方向に nucleophile を置く。
+
+    For each non-substrate fragment F:
+      bridging = formed bond で substrate↔F を跨ぐもの (空なら ValueError)。
+      複数あれば canonical-ordered の最初の 1 本を deterministic に採用。
+      anchor   = bridging の substrate 側端。
+      direction = _plane_normal_at_anchor(...) を rotation_perturbation で回転。
+      F の incoming 原子を anchor + direction * FRAGMENT_SEPARATION に置く。
+
+    複数の non-substrate fragment が同じ anchor を共有する場合は
+    NotImplementedError("multi-base attack on single anchor not supported")。
+    """
+    substrate_set = set(substrate)
+    non_substrate = [f for f in frag_indices if f is not substrate]
+    if len(non_substrate) >= 2:
+        log.warning(
+            "Tier 2 termolecular placement (%d non-substrate fragments); "
+            "geometric quality may be reduced", len(non_substrate),
+        )
+
+    bridging_by_anchor: dict[int, list[tuple[tuple[int, ...], tuple[int, int]]]] = {}
+    for f_idx, f in enumerate(non_substrate):
+        f_set = set(f)
+        bridging = sorted([
+            (a, b) if a <= b else (b, a)
+            for a, b in bond_changes.formed
+            if (a in substrate_set and b in f_set) or (b in substrate_set and a in f_set)
+        ])
+        if not bridging:
+            raise ValueError(
+                f"fragment {f_idx} has no formed bond bridging to substrate; "
+                f"check input atom mapping (formed={bond_changes.formed}, "
+                f"substrate atoms={sorted(substrate_set)})"
+            )
+        chosen_bond = bridging[0]
+        anchor = chosen_bond[0] if chosen_bond[0] in substrate_set else chosen_bond[1]
+        bridging_by_anchor.setdefault(anchor, []).append((f, chosen_bond))
+
+    for anchor, hits in bridging_by_anchor.items():
+        unique_frags = {id(f) for f, _ in hits}
+        if len(unique_frags) > 1:
+            raise NotImplementedError(
+                f"multi-base attack on single anchor {anchor} not supported "
+                f"(Tier 2 supports at most one fragment per anchor)"
+            )
+
+    for fragment in non_substrate:
+        anchor: int | None = None
+        bridging_bond: tuple[int, int] | None = None
+        for a, hits in bridging_by_anchor.items():
+            for f, bond in hits:
+                if f is fragment:
+                    anchor, bridging_bond = a, bond
+                    break
+            if anchor is not None:
+                break
+        if anchor is None or bridging_bond is None:
+            raise RuntimeError(
+                f"fragment {fragment} has no entry in bridging_by_anchor — "
+                "logic error in _planar_face_placement"
+            )
+
+        direction = _plane_normal_at_anchor(positions, anchor, mol_h, substrate)
+        if rotation_perturbation is not None:
+            direction = rotation_perturbation @ direction
+        target = positions[anchor] + direction * FRAGMENT_SEPARATION
+
         incoming = bridging_bond[1] if bridging_bond[0] == anchor else bridging_bond[0]
         positions[list(fragment)] += target - positions[incoming]
 
