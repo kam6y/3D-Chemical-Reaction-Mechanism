@@ -7,27 +7,30 @@ from ase.io import read
 
 from reactx.cli import main
 
-
-@pytest.fixture()
-def proton_transfer_rxn_path(examples_dir: Path) -> Path:
-    return examples_dir / "proton_transfer.rxn"
+_PT_FAST = """\
+description = "Proton transfer fast"
+formed = [[1, 3]]
+broken = [[1, 2]]
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
+r_form = 1.05
+[sampling]
+n_angles = 4
+"""
 
 
 @pytest.mark.slow
-def test_re1_proton_transfer_end_to_end(
-    tmp_path: Path, proton_transfer_rxn_path: Path,
-):
+def test_re1_proton_transfer_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
+    rxn = tmp_rxn_with_toml("proton_transfer", toml_body=_PT_FAST)
     out = tmp_path / "proton_transfer"
-    rc = main([
-        "run", str(proton_transfer_rxn_path), "-o", str(out),
-        "--backend", "uma",
-        "--n-angles", "4",
-        "--max-relax-steps", "100",  # preset default; 50 was too short under k_form=0.5
-        "--r-form", "1.05",  # N-H equilibrium
-    ])
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
     assert rc == 0
 
     meta = json.loads((out / "meta.json").read_text())
+    assert meta["description"] == "Proton transfer fast"
     assert meta["selected_trial"] >= 0
     pre = meta["prescreen"]
     assert pre["enabled"] is True
@@ -55,28 +58,3 @@ def test_re1_proton_transfer_end_to_end(
     assert d_h_n_last < d_h_n_first - 0.5, (
         f"H-N should shrink: {d_h_n_first:.2f} -> {d_h_n_last:.2f}"
     )
-
-
-@pytest.mark.slow
-def test_re1_proton_transfer_via_preset(
-    tmp_path: Path, proton_transfer_rxn_path: Path,
-):
-    """Verify --reaction-type proton_transfer is equivalent to --r-form 1.05."""
-    out = tmp_path / "proton_transfer_preset"
-    rc = main([
-        "run", str(proton_transfer_rxn_path), "-o", str(out),
-        "--backend", "uma",
-        "--reaction-type", "proton_transfer",
-        "--n-angles", "4",
-        "--k-form", "0.6",  # individual flag overrides preset's 0.5
-    ])
-    assert rc == 0
-
-    meta = json.loads((out / "meta.json").read_text())
-    assert meta["reaction_type"] == "proton_transfer"
-    assert isinstance(meta["effective_params"]["r_form_targets"], list)
-    assert len(meta["effective_params"]["r_form_targets"]) == 1
-    assert meta["effective_params"]["r_form_targets"][0] == pytest.approx(1.05)
-    assert meta["effective_params"]["k_form"] == pytest.approx(0.6)  # override won
-    assert meta["effective_params"]["max_relax_steps"] == 100  # preset default
-    assert any(t["reached_product"] for t in meta["trials"])

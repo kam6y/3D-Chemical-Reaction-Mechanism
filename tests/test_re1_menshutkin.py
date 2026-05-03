@@ -1,9 +1,9 @@
 """End-to-end Menshutkin test (NH3 + CH3Cl -> CH3NH3+ + Cl-).
 
-Slow: requires UMA + GPU (~3 min). Validates the menshutkin preset:
+Slow: requires UMA + GPU (~3 min). Validates the menshutkin TOML config:
 - reached_product=True for at least one trial
 - C-N forms (final ≤ 1.7 Å)
-- C-Cl breaks (final ≥ 3.5 Å; full r_broken=5.0 may be unreachable due to ion-pair Coulomb attraction)
+- C-Cl breaks (final ≥ 3.5 Å)
 """
 import json
 from pathlib import Path
@@ -13,28 +13,34 @@ from ase.io import read
 
 from reactx.cli import main
 
+_MEN_FAST = """\
+description = "Menshutkin fast"
+formed = [[1, 5]]
+broken = [[5, 9]]
+[restraints]
+k_form = 2.0
+k_broken = 2.0
+r_broken = 5.0
+max_relax_steps = 200
+[sampling]
+n_angles = 4
+"""
+
 
 @pytest.mark.slow
-def test_re1_menshutkin_end_to_end(tmp_path: Path, menshutkin_rxn_path: Path):
+def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
+    rxn = tmp_rxn_with_toml("menshutkin", toml_body=_MEN_FAST)
     out = tmp_path / "menshutkin"
-    rc = main([
-        "run", str(menshutkin_rxn_path), "-o", str(out),
-        "--backend", "uma",
-        "--reaction-type", "menshutkin",
-        "--n-angles", "4",  # smaller for test speed
-    ])
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
     assert rc == 0
 
     meta = json.loads((out / "meta.json").read_text())
-    assert meta["reaction_type"] == "menshutkin"
+    assert meta["description"] == "Menshutkin fast"
     assert meta["effective_params"]["k_form"] == 2.0
     assert meta["effective_params"]["k_broken"] == 2.0
     assert meta["effective_params"]["r_broken"] == 5.0
     assert meta["effective_params"]["max_relax_steps"] == 200
     assert meta["selected_trial"] >= 0
-    # Menshutkin (neutral -> ion pair) sometimes outruns MMFF94 parameters; both
-    # outcomes (mmff_failed=True with all 4 trials kept, or success with K=3)
-    # should still produce at least one product-reaching trial via UMA.
     pre = meta["prescreen"]
     assert pre["enabled"] is True
     if pre["mmff_failed"]:

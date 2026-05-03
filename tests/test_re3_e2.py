@@ -7,16 +7,25 @@ from ase.io import read
 
 from reactx.cli import main
 
+_E2_FAST = """\
+description = "E2 fast"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+[restraints]
+k_form = 1.0
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
+[sampling]
+n_angles = 4
+"""
+
 
 @pytest.mark.slow
-def test_re3_e2_end_to_end(tmp_path: Path, e2_rxn_path: Path):
+def test_re3_e2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
+    rxn = tmp_rxn_with_toml("e2", toml_body=_E2_FAST)
     out = tmp_path / "e2"
-    rc = main([
-        "run", str(e2_rxn_path), "-o", str(out),
-        "--backend", "uma",
-        "--reaction-type", "e2",
-        "--n-angles", "4",
-    ])
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
     assert rc == 0
 
     meta = json.loads((out / "meta.json").read_text())
@@ -26,7 +35,7 @@ def test_re3_e2_end_to_end(tmp_path: Path, e2_rxn_path: Path):
     )
     assert isinstance(meta["effective_params"]["r_form_targets"], list)
     assert len(meta["effective_params"]["r_form_targets"]) == 1
-    assert meta["reaction_type"] == "e2"
+    assert meta["description"] == "E2 fast"
 
     frames = read(str(out / "trajectory.xyz"), index=":")
     assert len(frames) >= 3
