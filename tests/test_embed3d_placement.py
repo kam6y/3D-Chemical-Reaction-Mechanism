@@ -240,3 +240,66 @@ def test_plane_normal_at_anchor_sign_flip_when_svd_returns_minus_z():
         f"sign disambiguation should force +z hemisphere, got {direction}"
     )
     np.testing.assert_allclose(np.linalg.norm(direction), 1.0, atol=1e-6)
+
+
+def test_plane_normal_at_anchor_two_neighbors_falls_back_to_anti_mean():
+    """隣接 2 個の場合、direction = -unit(mean_neighbor - anchor)。"""
+    from reactx.embed3d import _plane_normal_at_anchor
+
+    # CH2=CH+ (vinyl cation): 中心 C+ に C 隣接 1 + H 隣接 1
+    mol = Chem.AddHs(Chem.MolFromSmiles("[CH+]=C"))
+    central = next(
+        i for i, a in enumerate(mol.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    n = mol.GetNumAtoms()
+    positions = np.zeros((n, 3))
+    positions[central] = (0.0, 0.0, 0.0)
+    # 2 substrate 隣接 (C と H) を +x 方向に置く (mean が +x)
+    neighbors = [
+        nb.GetIdx() for nb in mol.GetAtomWithIdx(central).GetNeighbors()
+    ]
+    assert len(neighbors) == 2, f"expected 2 neighbors, got {len(neighbors)}"
+    positions[neighbors[0]] = (1.5, 0.5, 0.0)
+    positions[neighbors[1]] = (1.5, -0.5, 0.0)
+
+    substrate = tuple(range(n))
+    direction = _plane_normal_at_anchor(positions, central, mol, substrate)
+
+    np.testing.assert_allclose(np.linalg.norm(direction), 1.0, atol=1e-6)
+    # mean_neighbor = (1.5, 0.0, 0.0), -unit = (-1.0, 0.0, 0.0)
+    np.testing.assert_allclose(direction, [-1.0, 0.0, 0.0], atol=1e-3)
+
+
+def test_plane_normal_at_anchor_non_planar_three_neighbors_falls_back():
+    """3 隣接でも平面 fit 残差が大きい (sp³-like) 場合は fallback。"""
+    from reactx.embed3d import _plane_normal_at_anchor
+
+    mol = Chem.AddHs(Chem.MolFromSmiles("[C+](C)(C)C"))
+    central = next(
+        i for i, a in enumerate(mol.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    methyl_carbons = [
+        nb.GetIdx() for nb in mol.GetAtomWithIdx(central).GetNeighbors()
+        if nb.GetSymbol() == "C"
+    ]
+    n = mol.GetNumAtoms()
+    positions = np.zeros((n, 3))
+    positions[central] = (0.0, 0.0, 0.0)
+    # 3 methyl C を sp3 風に配置 (z 方向に大きな散らばり; 平面 fit 残差が大きい)
+    sp3_dirs = np.array([
+        [1.0, 0.0, 1.0],
+        [-0.5, 0.866, 1.0],
+        [-0.5, -0.866, 1.0],
+    ])
+    sp3_dirs /= np.linalg.norm(sp3_dirs, axis=1, keepdims=True)
+    for m, d in zip(methyl_carbons, sp3_dirs, strict=True):
+        positions[m] = d * 1.5
+
+    substrate = tuple(range(n))
+    direction = _plane_normal_at_anchor(positions, central, mol, substrate)
+
+    np.testing.assert_allclose(np.linalg.norm(direction), 1.0, atol=1e-6)
+    # mean of 3 sp3 dirs is in +z direction → -unit(mean) is -z direction
+    assert direction[2] < 0, f"non-planar fallback should point -z, got {direction}"

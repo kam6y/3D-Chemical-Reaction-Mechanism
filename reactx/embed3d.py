@@ -194,7 +194,20 @@ def _plane_normal_at_anchor(
             # Vt rows are orthonormal; division is defensive (norm == 1 by construction).
             return normal / np.linalg.norm(normal)
 
-    raise NotImplementedError("fallback branches in later tasks")
+    # Fallback: -unit(mean_neighbor - anchor)
+    if neighbors_in_substrate:
+        coords = np.array([positions[i] for i in neighbors_in_substrate])
+        mean_neighbor = coords.mean(axis=0)
+        direction = positions[anchor] - mean_neighbor
+        norm = float(np.linalg.norm(direction))
+        if norm > 1e-6:
+            return direction / norm
+
+    log.warning(
+        "anchor %d has no usable substrate neighbors for plane-normal "
+        "computation; using +z fallback direction", anchor,
+    )
+    return np.array([0.0, 0.0, 1.0])
 
 
 def _directional_placement(
