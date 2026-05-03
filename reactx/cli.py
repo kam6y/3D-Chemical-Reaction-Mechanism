@@ -70,10 +70,6 @@ def _configure_reactx_logging() -> None:
     log.propagate = False
 
 
-def _fmt_fmax(v: float) -> str:
-    return "nan" if math.isnan(v) else f"{v:.4f}"
-
-
 def _sanitize_for_json(obj):
     if isinstance(obj, float):
         return None if math.isnan(obj) else obj
@@ -213,7 +209,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     # Phase 1: embed every rotation; collect successful embeds with their angles.
     # Embed failures still get a stub TrialResult so meta.json.trials[] length
-    # stays invariant at --n-angles (pre-Phase-2 contract).
+    # stays invariant at sampling.n_angles (pre-Phase-2 contract).
     embedded_by_idx: dict[int, tuple] = {}
     failed_embed_stubs: list[TrialResult] = []
     for i, R in enumerate(rotations):

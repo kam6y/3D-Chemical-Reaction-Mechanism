@@ -190,6 +190,23 @@ n_angles = 0
         load_config(rxn)
 
 
+def test_zero_prescreen_keep_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "x"
+formed = [[1, 2]]
+broken = []
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
+[prescreen]
+keep = 0
+""")
+    with pytest.raises(ValueError, match="keep.*> 0"):
+        load_config(rxn)
+
+
 def test_r_form_list_length_mismatch_rejected(tmp_path: Path):
     rxn = _write(tmp_path, """\
 description = "x"
