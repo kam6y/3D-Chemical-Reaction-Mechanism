@@ -191,6 +191,7 @@ def _plane_normal_at_anchor(
             normal = Vt[-1]
             if normal[2] < 0:
                 normal = -normal
+            # Vt rows are orthonormal; division is defensive (norm == 1 by construction).
             return normal / np.linalg.norm(normal)
 
     raise NotImplementedError("fallback branches in later tasks")

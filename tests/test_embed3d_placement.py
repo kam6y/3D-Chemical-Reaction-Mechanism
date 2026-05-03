@@ -178,7 +178,6 @@ def test_plane_normal_at_anchor_planar_three_neighbors():
     from reactx.embed3d import _plane_normal_at_anchor
 
     mol = Chem.AddHs(Chem.MolFromSmiles("[C+](C)(C)C"))
-    syms = [a.GetSymbol() for a in mol.GetAtoms()]
     central = next(
         i for i, a in enumerate(mol.GetAtoms())
         if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
@@ -207,3 +206,37 @@ def test_plane_normal_at_anchor_planar_three_neighbors():
     assert abs(direction[0]) < 1e-3 and abs(direction[1]) < 1e-3, (
         f"direction should be along z, got {direction}"
     )
+
+
+def test_plane_normal_at_anchor_sign_flip_when_svd_returns_minus_z():
+    """SVD が -z を返す配置でも sign disambiguation で +z 寄りに統一される。"""
+    from reactx.embed3d import _plane_normal_at_anchor
+
+    mol = Chem.AddHs(Chem.MolFromSmiles("[C+](C)(C)C"))
+    central = next(
+        i for i, a in enumerate(mol.GetAtoms())
+        if a.GetSymbol() == "C" and a.GetFormalCharge() == 1
+    )
+    methyl_carbons = [
+        n.GetIdx() for n in mol.GetAtomWithIdx(central).GetNeighbors()
+        if n.GetSymbol() == "C"
+    ]
+
+    n = mol.GetNumAtoms()
+    positions = np.zeros((n, 3))
+    positions[central] = (0.0, 0.0, 0.0)
+    # 3 methyl C を、わずかに -z へ傾けた xy 平面の三角形に置く。
+    # こうすると SVD の最小特異値方向が ±z 近傍になり、実装によっては -z を返す。
+    # sign-flip 後は必ず +z 寄りであることを確認する。
+    for k, m in enumerate(methyl_carbons):
+        theta = 2 * np.pi * k / 3
+        positions[m] = (np.cos(theta) * 1.5, np.sin(theta) * 1.5, -0.01)
+
+    substrate = tuple(range(n))
+    direction = _plane_normal_at_anchor(positions, central, mol, substrate)
+
+    # disambiguation 後は +z 寄り (direction[2] >= 0)。
+    assert direction[2] >= 0, (
+        f"sign disambiguation should force +z hemisphere, got {direction}"
+    )
+    np.testing.assert_allclose(np.linalg.norm(direction), 1.0, atol=1e-6)
