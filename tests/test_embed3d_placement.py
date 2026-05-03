@@ -5,7 +5,6 @@ from rdkit import Chem
 
 from reactx.bond_changes import BondChanges
 from reactx.embed3d import (
-    _directional_placement,
     _find_substrate_fragment,
     _place_fragments,
     embed_mol_to_atoms,
@@ -20,7 +19,6 @@ def _make_mol_with_frags(smiles: str) -> tuple[Chem.Mol, tuple[tuple[int, ...], 
 def test_find_substrate_fragment_unique():
     mol, frags = _make_mol_with_frags("CC(Cl).[OH-]")
     substrate = frags[0]
-    other = frags[1]
     broken = ((substrate[0], substrate[1]), (substrate[1], substrate[2]))
     found = _find_substrate_fragment(frags, broken)
     assert found == substrate
@@ -86,7 +84,7 @@ def test_place_fragments_dispatches_tier2_for_broken_zero_bimolecular(sn1_recomb
     Phase 3 では NotImplementedError を投げていたが、Phase 4 で実装したので
     placement が成功し、Cl の位置が plane normal 方向に動くことを確認する。
     """
-    from reactx.embed3d import _place_fragments, FRAGMENT_SEPARATION
+    from reactx.embed3d import FRAGMENT_SEPARATION, _place_fragments
 
     mol_h, frag_indices, positions, bc = sn1_recomb_atoms_setup
     syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
@@ -158,9 +156,8 @@ def test_place_fragments_bystander_fragment_raises():
     frags = Chem.GetMolFrags(mol)
     c0, c1 = frags[0][0], frags[0][1]
     f_idx = frags[1][0]
-    cl_idx = frags[2][0]
     # formed C-F は substrate-base 橋渡し、broken C-C は substrate intra。
-    # Cl- は formed/broken いずれにも関与しない bystander。
+    # frags[2] (Cl-) は formed/broken いずれにも関与しない bystander。
     bc = BondChanges(
         formed=((c0, f_idx),),
         broken=((c0, c1),),
@@ -174,7 +171,6 @@ def test_place_fragments_bystander_fragment_raises():
 
 def test_embed_mol_to_atoms_unimolecular_skips_dispatcher():
     """unimolecular (1 fragment) では _place_fragments が呼ばれず、bond_changes も不要。"""
-    from reactx.embed3d import embed_mol_to_atoms
     mol = Chem.MolFromSmiles("CCO")  # 1 fragment, no bond_changes needed
     atoms = embed_mol_to_atoms(mol, calculator=None, seed=42)
     # Embedded successfully without bond_changes (which would be required for multi-fragment).
@@ -336,6 +332,7 @@ def test_plane_normal_at_anchor_non_planar_three_neighbors_falls_back():
 def test_plane_normal_at_anchor_degenerate_uses_z_fallback(caplog, monkeypatch):
     """隣接 0 個の場合 (anchor が単独 atom) は [0, 0, 1] + warning。"""
     import logging
+
     from reactx.embed3d import _plane_normal_at_anchor
 
     # 他のテスト (cli.py の _configure_reactx_logging) で reactx logger の
@@ -377,7 +374,7 @@ def test_sn1_recomb_fixture_shape(sn1_recomb_atoms_setup):
 
 def test_planar_face_placement_places_cl_along_plane_normal(sn1_recomb_atoms_setup):
     """Tier 2: Cl の最終位置が anchor + plane_normal * FRAGMENT_SEPARATION。"""
-    from reactx.embed3d import _planar_face_placement, FRAGMENT_SEPARATION
+    from reactx.embed3d import FRAGMENT_SEPARATION, _planar_face_placement
 
     mol_h, frag_indices, positions, bc = sn1_recomb_atoms_setup
     syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
@@ -402,7 +399,7 @@ def test_planar_face_placement_places_cl_along_plane_normal(sn1_recomb_atoms_set
 
 def test_planar_face_placement_respects_rotation_perturbation(sn1_recomb_atoms_setup):
     """rotation_perturbation で Cl の位置が回転されることを確認。"""
-    from reactx.embed3d import _planar_face_placement, FRAGMENT_SEPARATION
+    from reactx.embed3d import FRAGMENT_SEPARATION, _planar_face_placement
 
     mol_h, frag_indices, positions, bc = sn1_recomb_atoms_setup
     syms = [a.GetSymbol() for a in mol_h.GetAtoms()]

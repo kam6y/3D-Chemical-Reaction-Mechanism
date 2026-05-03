@@ -205,7 +205,7 @@ def _compute_bond_mask(
     pair_mask = pair_dist_sq <= pair_threshold_sq  # (F, n_pairs)
 
     union = pair_mask.any(axis=0)
-    bond_pairs = list(zip(iu[union].tolist(), ju[union].tolist()))
+    bond_pairs = list(zip(iu[union].tolist(), ju[union].tolist(), strict=True))
     bonded_mask = pair_mask[:, union]
     return bond_pairs, bonded_mask
 

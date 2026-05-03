@@ -12,8 +12,9 @@ from reactx.scoring import TrialResult
 
 def test_resolve_effective_params_returns_list_for_r_form_targets():
     """_resolve_effective_params returns r_form_targets as list[float] (Phase 3)."""
-    from reactx.cli import _resolve_effective_params
     import argparse
+
+    from reactx.cli import _resolve_effective_params
     args = argparse.Namespace(
         reaction_type="sn2_anion",
         k_form=None, k_broken=None, r_broken=None, r_form=None,
@@ -28,8 +29,9 @@ def test_resolve_effective_params_returns_list_for_r_form_targets():
 
 
 def test_resolve_effective_params_empty_formed_returns_empty_list():
-    from reactx.cli import _resolve_effective_params
     import argparse
+
+    from reactx.cli import _resolve_effective_params
     args = argparse.Namespace(
         reaction_type="sn1_dissoc",
         k_form=None, k_broken=None, r_broken=None, r_form=None,
@@ -40,8 +42,9 @@ def test_resolve_effective_params_empty_formed_returns_empty_list():
 
 
 def test_resolve_effective_params_scalar_r_form_broadcasts():
-    from reactx.cli import _resolve_effective_params
     import argparse
+
+    from reactx.cli import _resolve_effective_params
     args = argparse.Namespace(
         reaction_type="sn2_anion",
         k_form=None, k_broken=None, r_broken=None, r_form=1.10,
@@ -272,6 +275,7 @@ def test_meta_json_prescreen_disabled(tmp_path: Path):
             neb_refined=False, rc=0,
             effective=None, prescreen_meta=prescreen_meta,
         )
+    assert rc == 0
     meta = json.loads((tmp_path / "meta.json").read_text())
     assert meta["prescreen"]["enabled"] is False
     assert meta["prescreen"]["kept"] is None

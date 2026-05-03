@@ -69,7 +69,6 @@ def e2_atoms_setup():
     for i in range(n):
         positions[i] = (float(i) * 0.5, float(i % 2), 0.0)
 
-    syms = [a.GetSymbol() for a in mol.GetAtoms()]
     map_to_idx = {a.GetAtomMapNum(): a.GetIdx() for a in mol.GetAtoms() if a.GetAtomMapNum()}
     c_alpha = map_to_idx[1]
     c_beta = map_to_idx[2]
