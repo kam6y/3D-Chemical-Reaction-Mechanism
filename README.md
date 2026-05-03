@@ -1,17 +1,15 @@
-# reactx — Phase Re1 Multi-Angle Path Engine
+# reactx — Multi-Angle Reaction Path Engine
 
-2D 反応機構 (`.rxn`) から多角度サンプリング + Hookean/PullApart 拘束 + FIRE 緩和で 3D 反応経路を探索し、Blender で ball-and-stick アニメーションを生成するパイプライン。
+2D 反応機構 (`.rxn`) と sidecar TOML config から多角度サンプリング + Hookean/PullApart 拘束 + FIRE 緩和で 3D 反応経路を探索し、Blender で ball-and-stick アニメーションを生成するパイプライン。
 
-**Phase Re1 の目標**: 正確な TS エネルギーではなく、妥当なアニメーション。NEB はオプション。対応反応: SN2 / proton transfer。
+目的は妥当なアニメーション (正確な TS エネルギーは目標としない)。NEB refine はオプション。対応反応:
 
-**Phase 3** で multi-bond 反応 (E2 elimination = 1 formed + 2 broken / SN1 step 1 解離 = 0 formed + 1 broken) に拡張。
-
-**Phase 4** で SN1 step 2 cation + nucleophile recombination (1 formed + 0 broken) を Tier 2 plane-normal placement で追加。
-
-> **Breaking changes (Phase 6, develop ← phase-6):**
-> - CLI フラグ `--reaction-type` および `--k-* / --r-* / --max-relax-steps / --n-angles / --cone-half-deg / --no-mmff-prescreen / --prescreen-keep / --prescreen-steps` は **全削除**。各反応の設定は `<rxn_path>.toml` (sidecar TOML) に書く。
-> - `meta.json.reaction_type` キー → 削除、代わりに `meta.json.description` (TOML の `description` 値そのまま) を書く。
-> - `reactx.presets` モジュール削除、`reactx.bond_changes.compute_bond_changes` 削除。`BondChanges.from_atom_map_pairs(formed_map, broken_map, atom_map_to_idx)` を使用。
+- **SN2** (`O⁻ + CH₃Cl` 等、1 formed + 1 broken)
+- **Proton transfer** (`HCl + NH₃` 等、1 formed + 1 broken)
+- **Menshutkin** (`NH₃ + CH₃Cl`、1 formed + 1 broken、中性 → イオン対)
+- **E2 elimination** (1 formed + 2 broken)
+- **SN1 step 1 解離** (0 formed + 1 broken、unimolecular)
+- **SN1 step 2 recombination** (1 formed + 0 broken、Tier 2 plane-normal placement)
 
 ## セットアップ
 
@@ -39,7 +37,8 @@ reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render
 - `--model uma-m-1p1` (UMA model name)
 - `--seed 0` (sampling 再現性デバッグ)
 - `--relax-fmax 0.1`, `--traj-stride 5` (出力品質)
-- `--neb-refine` + `--neb-images 7` (1 formed + 1 broken のみ対応)
+- `--neb-refine` + `--neb-images 7`
+  - 1 formed + 1 broken 反応のみ対応 — 他は exit 2
 - `--render` + `--blender-exe blender`
 
 生成物:
@@ -83,24 +82,22 @@ reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
 reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
 ```
 
-> **Phase 6 で削除されたフラグ:** `--reaction-type`, `--k-form`, `--k-broken`, `--r-form`, `--r-broken`, `--max-relax-steps`, `--n-angles`, `--cone-half-deg`, `--no-mmff-prescreen`, `--prescreen-keep`, `--prescreen-steps`。これらはすべて `.rxn.toml` 側で指定する。
+## 動作確認
 
-## Phase Re1 + Phase 3 + Phase 4 動作確認
+各反応の最小確認手順:
 
-DoD は以下の手順で確認する:
-
-1. `reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render` を実行 → `meta.json` の `selected_trial >= 0`, `trials[].reached_product` で少なくとも 1 件 True を確認
-2. `out/sn2/scene.blend` を Blender GUI で開いて Walden 反転を視認
-3. `reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render` を実行 → 同様に視認
-4. `pytest -m slow` で SN2 + proton_transfer 統合テストが pass
-5. `reactx run examples/e2.rxn -o out/e2/ --backend uma --render` を実行
-   → `meta.json` で `selected_trial >= 0`, `reached_product=True` の trial が ≥1 件、`out/e2/scene.blend` で C–H と C–Cl の同時切断 + base (OH⁻) 接近を視認
-6. `reactx run examples/sn1_dissoc.rxn -o out/sn1d/ --backend uma` を実行
-   → `meta.json.trials` が 1 件 (unimolecular auto-clamp), `trajectory.xyz` で C–Br 距離が ≥4.5 Å まで伸びる
-7. `pytest -m slow` で `test_re3_e2` + `test_re3_sn1_dissoc` + 既存 SN2/PT/Menshutkin が全 pass
-8. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --backend uma --render` を実行
-   → `meta.json.trials` が 8 件 (bimolecular)、`reached_product=True` の trial が ≥1 件、`out/sn1r/scene.blend` で Cl⁻ が tBu⁺ の平面に向かって接近 → C–Cl 結合形成を視認
-9. `pytest -m slow` で `test_re4_sn1_recomb` + 既存 `test_re1_*` / `test_re3_*` が全 pass
+1. `reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render`
+   → `meta.json` で `selected_trial >= 0`, `trials[].reached_product` ≥1 件 True、`out/sn2/scene.blend` を Blender GUI で開いて Walden 反転を視認
+2. `reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render` → 同様に視認
+3. `reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render`
+   → C–N 形成 ≤ 1.7 Å、C–Cl 切断 ≥ 3.5 Å を視認
+4. `reactx run examples/e2.rxn -o out/e2/ --backend uma --render`
+   → C–H と C–Cl の同時切断 + base (OH⁻) 接近を視認
+5. `reactx run examples/sn1_dissoc.rxn -o out/sn1d/ --backend uma`
+   → unimolecular auto-clamp で `meta.json.trials` が 1 件、`trajectory.xyz` で C–Br 距離 ≥ 4.5 Å
+6. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --backend uma --render`
+   → bimolecular で 8 trials → prescreen で top-3、Cl⁻ が tBu⁺ の平面に向かって接近 → C–Cl 結合形成を視認
+7. `pytest -m slow` で 6 反応すべての統合テストが pass
 
 ## レンダリング: 原子球サイズと結合棒
 
@@ -113,33 +110,34 @@ DoD は以下の手順で確認する:
 
 詳細仕様: `docs/superpowers/specs/2026-04-26-vdw-radii-design.md`
 
-## Phase Re1 + Phase 3 + Phase 4 の方針と限界
+## 方針と限界
 
-- 目的は妥当なアニメーション (TS エネルギーの正確さは目標としない)
-- NEB は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc / SN1 recomb では CLI が exit code 2 で reject)
-- 対応反応 (Phase 4 時点): SN2 / proton transfer / Menshutkin (1 formed + 1 broken) + **E2 elimination (1 formed + 2 broken)** + **SN1 step 1 解離 (0 formed + 1 broken)** + **SN1 step 2 recombination (1 formed + 0 broken)**。中性 addition / cycloaddition / metathesis / Diels–Alder などは Phase 5+
+- 目的は妥当なアニメーション。TS エネルギーの正確さは保証しない
+- NEB refine は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc / SN1 recomb では CLI が exit code 2 で reject)
+- 対応反応は上節「対応反応」を参照。中性 addition / cycloaddition / metathesis / Diels–Alder などは未対応
 - ラジカル / open-shell / 溶媒効果は対象外
-- multi-bond NEB endpoint construction は Phase 5+
-- 詳細仕様: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md` (Phase Re1) / `docs/superpowers/specs/2026-05-03-phase-3-multibond-design.md` (Phase 3) / `docs/superpowers/specs/2026-05-03-phase-4-sn1-recomb-design.md` (Phase 4)
+- σ-only connectivity diff のため、結合次数変化 (single↔double) は明示的に追跡しない (π 形成は QM calculator に委ねる)
+
+詳細仕様: `docs/superpowers/specs/2026-05-03-rxn-config-sidecar-design.md`
 
 ## Wall-clock (実測)
 
-RTX 5070 Ti + UMA-m-1p1 で実測 (default sampling.n_angles=8, prescreen.keep=3 from the sidecar TOML):
+RTX 5070 Ti + UMA-m-1p1 で実測 (sidecar TOML default の `n_angles=8 keep=3`):
 
-| Reaction | wall-clock (旧, 8/8 UMA) | wall-clock (新, prescreen + 3/8 UMA) | 備考 |
-|---|---|---|---|
-| SN2 (`examples/sn2.rxn`) | ~67 s | **~54 s** | MMFF 動作、3/3 reached_product |
-| Proton transfer (`examples/proton_transfer.rxn`) | ~116 s | **~117 s** | HCl で MMFF parameterize 失敗 → 8/8 UMA に fallback |
-| Menshutkin (`examples/menshutkin.rxn`) | ~3 min | **~41 s** | MMFF 動作、3/3 reached_product |
-| E2 (`examples/e2.rxn`) | — (新規) | **~54 s** | Phase 3, 1 formed + 2 broken、3/3 reached_product |
-| SN1 dissoc (`examples/sn1_dissoc.rxn`) | — (新規) | **~21 s** | Phase 3, unimolecular → n_angles=1 強制、prescreen skipped |
-| SN1 recomb (`examples/sn1_recomb.rxn`) | — (新規) | **~30-60 s** | Phase 4, 1 formed + 0 broken、bimolecular で 8 trials → prescreen で top-3 |
+| Reaction | wall-clock | 備考 |
+|---|---|---|
+| SN2 (`examples/sn2.rxn`) | ~54 s | MMFF prescreen 動作、3/3 reached_product |
+| Proton transfer (`examples/proton_transfer.rxn`) | ~117 s | HCl で MMFF parameterize 失敗 → 8/8 UMA に fallback |
+| Menshutkin (`examples/menshutkin.rxn`) | ~41 s | MMFF 動作、3/3 reached_product |
+| E2 (`examples/e2.rxn`) | ~54 s | 1 formed + 2 broken、3/3 reached_product |
+| SN1 dissoc (`examples/sn1_dissoc.rxn`) | ~21 s | unimolecular → n_angles=1 強制、prescreen skipped |
+| SN1 recomb (`examples/sn1_recomb.rxn`) | ~30–60 s | 1 formed + 0 broken、bimolecular で 8 trials → prescreen で top-3 |
 
-MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗してフォールバック (= 旧挙動と同一の wall-clock) する。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、`prescreen.enabled = false` を TOML に書けば旧挙動を再現できる。
+MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗し、prescreen を skip して全 trial を UMA で relax する fallback に入る。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、明示的に prescreen を無効化したい場合は TOML に `prescreen.enabled = false` を書く。
 
 UMA model load (~25-30 s) が固定コストとして wall-clock を支配するため、prescreen による短縮幅は SN2 で ~20 %、Menshutkin で ~75 % など反応や trial 当たりの relax コストに依存する。
 
-`--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (DoD 用テスト `test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
+`--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (`test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 
 各実行の trial 全件スコアと prescreen 結果と wall_clock_seconds は `out/<rxn>/meta.json` に残る。
 
@@ -147,7 +145,7 @@ UMA model load (~25-30 s) が固定コストとして wall-clock を支配する
 
 ```bash
 pytest                   # 高速ユニットテストのみ (slow / blender マーカーは除外)
-pytest -m slow           # UMA 依存の SN2 統合テスト
+pytest -m slow           # UMA 依存の 6 反応統合テスト
 pytest -m blender        # Blender smoke test (ローカル環境のみ)
 ```
 
@@ -175,5 +173,5 @@ pytest -m blender        # Blender smoke test (ローカル環境のみ)
                                                trajectory.xyz → blender/render.py → .blend
 ```
 
-詳細設計: `docs/superpowers/specs/2026-04-27-reactx-phase-Re1-design.md`
-実装計画: `docs/superpowers/plans/2026-04-27-reactx-phase-Re1-implementation.md`
+詳細設計: `docs/superpowers/specs/2026-05-03-rxn-config-sidecar-design.md`
+実装計画: `docs/superpowers/plans/2026-05-03-rxn-config-sidecar.md`
