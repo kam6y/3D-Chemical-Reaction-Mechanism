@@ -1,6 +1,6 @@
-# reactx — Multi-Angle Reaction Path Engine
+# reactx — Generic Steric-Aware Reaction Path Engine
 
-2D 反応機構 (`.rxn`) と sidecar TOML config から多角度サンプリング + Hookean/PullApart 拘束 + FIRE 緩和で 3D 反応経路を探索し、Blender で ball-and-stick アニメーションを生成するパイプライン。
+2D 反応機構 (`.rxn`) と sidecar TOML config から、反応点 (anchor) を中心とした全球面 (4π sr) Fibonacci サンプリング + steric blocking filter (角度シャドウ + d_min ceiling) + Hookean/PullApart 拘束 + FIRE 緩和で 3D 反応経路を探索し、Blender で ball-and-stick アニメーションを生成するパイプライン。
 
 目的は妥当なアニメーション (正確な TS エネルギーは目標としない)。NEB refine はオプション。対応反応:
 
@@ -9,7 +9,7 @@
 - **Menshutkin** (`NH₃ + CH₃Cl`、1 formed + 1 broken、中性 → イオン対)
 - **E2 elimination** (1 formed + 2 broken)
 - **SN1 step 1 解離** (0 formed + 1 broken、unimolecular)
-- **SN1 step 2 recombination** (1 formed + 0 broken、Tier 2 plane-normal placement)
+- **SN1 step 2 recombination** (1 formed + 0 broken)
 
 ## セットアップ
 
@@ -50,7 +50,7 @@ reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render
 
 ## Per-reaction `.rxn.toml` config
 
-各 `examples/<name>.rxn` には同階層に同名 stem の sidecar TOML (`<name>.rxn.toml`) を **必須で** 配置する。CLI は `<rxn_path>.toml` を機械的にロードし、結合変化情報 (`formed` / `broken`, atom-map 番号) と物理パラメータ (`k_form` / `k_broken` / `r_broken` / `max_relax_steps` / 任意 `r_form`) と sampling/prescreen 設定をすべてここから取る。
+各 `examples/<name>.rxn` には同階層に同名 stem の sidecar TOML (`<name>.rxn.toml`) を **必須で** 配置する。CLI は `<rxn_path>.toml` を機械的にロードし、結合変化情報 (`formed` / `broken`, atom-map 番号) と物理パラメータ (`k_form` / `k_broken` / `r_broken` / `max_relax_steps` / 任意 `r_form`) と sampling 設定をすべてここから取る。
 
 最小例 (`examples/sn2.rxn.toml`):
 
@@ -66,16 +66,16 @@ r_broken = 4.0
 max_relax_steps = 100
 ```
 
-| `.rxn` | description | formed (map) | broken (map) | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form | n_angles |
+| `.rxn` | description | formed (map) | broken (map) | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form | n_candidates |
 |---|---|---|---|---|---|---|---|---|---|
-| sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 8 |
-| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 8 |
-| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 8 |
-| e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 1.0 | 1.0 | 4.0 | 200 | 元素表 | 8 |
+| sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 64 |
+| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 1.0 | 2.0 | 4.0 | 100 | 1.05 | 64 |
+| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 4.0 | 2.0 | 5.0 | 200 | 元素表 | 64 |
+| e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 1.0 | 1.0 | 4.0 | 200 | 元素表 | 64 |
 | sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | 0.0 | 2.0 | 6.0 | 200 | — | **1** |
-| sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (C-Cl 1.78) | 8 |
+| sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (C-Cl 1.78) | 64 |
 
-`r_form` は省略時に Cordero (2008) 共有結合半径表で per-bond ルックアップ、scalar で全 formed 同値、list で per-bond 指定。`[sampling]` / `[prescreen]` は省略可能で、それぞれ `n_angles=8 cone_half_deg=30.0`、`enabled=true keep=3 steps=30` がデフォルト。
+`r_form` は省略時に Cordero (2008) 共有結合半径表で per-bond ルックアップ、scalar で全 formed 同値、list で per-bond 指定。`[sampling]` は省略可能で `n_candidates=64` がデフォルト。各反応とも反応点 (anchor) を中心とした全球面 (4π sr) Fibonacci サンプリングで初期方向を生成し、ステリック blocking (角度シャドウ + d_min ceiling) を通過した方向すべてを UMA で full relax する。`n_candidates` を `[sampling]` で調整可能 (例: ステリックに混雑した anchor で生存数が少ない場合は大きく)。
 
 ```bash
 reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
@@ -96,7 +96,7 @@ reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
 5. `reactx run examples/sn1_dissoc.rxn -o out/sn1d/ --backend uma`
    → unimolecular auto-clamp で `meta.json.trials` が 1 件、`trajectory.xyz` で C–Br 距離 ≥ 4.5 Å
 6. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --backend uma --render`
-   → bimolecular で 8 trials → prescreen で top-3、Cl⁻ が tBu⁺ の平面に向かって接近 → C–Cl 結合形成を視認
+   → bimolecular で 64 候補、blocking 後の生存全件を UMA で full relax、Cl⁻ が tBu⁺ の平面方向から接近 → C–Cl 結合形成を視認
 7. `pytest -m slow` で 6 反応すべての統合テストが pass
 
 ## レンダリング: 原子球サイズと結合棒
@@ -117,29 +117,33 @@ reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
 - 対応反応は上節「対応反応」を参照。中性 addition / cycloaddition / metathesis / Diels–Alder などは未対応
 - ラジカル / open-shell / 溶媒効果は対象外
 - σ-only connectivity diff のため、結合次数変化 (single↔double) は明示的に追跡しない (π 形成は QM calculator に委ねる)
+- 初期配置は反応点 (anchor) を中心とした全球面 (4π sr) Fibonacci サンプル + ステリック blocking (角度シャドウ + d_min ceiling) で決定する。anchor が完全に埋まった (全候補が blocked) 場合は `RuntimeError` で停止する
+- `[prescreen]` セクション、`n_angles` キー、`cone_half_deg` キーは Phase 7 で廃止。古い TOML を読ませると `ConfigError` で reject される
 
 詳細仕様: `docs/superpowers/specs/2026-05-03-rxn-config-sidecar-design.md`
 
 ## Wall-clock (実測)
 
-RTX 5070 Ti + UMA-m-1p1 で実測 (sidecar TOML default の `n_angles=8 keep=3`):
+RTX 5070 Ti + UMA-m-1p1 で実測 (`n_candidates=64`、Blender 4.5 LTS で `--render` まで含む):
 
-| Reaction | wall-clock | 備考 |
-|---|---|---|
-| SN2 (`examples/sn2.rxn`) | ~54 s | MMFF prescreen 動作、3/3 reached_product |
-| Proton transfer (`examples/proton_transfer.rxn`) | ~117 s | HCl で MMFF parameterize 失敗 → 8/8 UMA に fallback |
-| Menshutkin (`examples/menshutkin.rxn`) | ~41 s | MMFF 動作、3/3 reached_product |
-| E2 (`examples/e2.rxn`) | ~54 s | 1 formed + 2 broken、3/3 reached_product |
-| SN1 dissoc (`examples/sn1_dissoc.rxn`) | ~21 s | unimolecular → n_angles=1 強制、prescreen skipped |
-| SN1 recomb (`examples/sn1_recomb.rxn`) | ~30–60 s | 1 formed + 0 broken、bimolecular で 8 trials → prescreen で top-3 |
+| Reaction | wall-clock | n_valid | reached / valid | 備考 |
+|---|---|---|---|---|
+| SN2 (`examples/sn2.rxn`) | 232 s | 20 | 6 / 20 | 64 候補、44 blocked (3-H + Cl の角度シャドウ) |
+| Proton transfer (`examples/proton_transfer.rxn`) | 447 s | 32 | 32 / 32 | k_form=1.0 / k_broken=2.0 に強化、全 trial で proton 移動 |
+| Menshutkin (`examples/menshutkin.rxn`) | 417 s | 25 | 9 / 25 | k_form=4.0 で gas-phase repulsive PES を押し切り、N-C 形成 |
+| E2 (`examples/e2.rxn`) | 740 s | 42 | 42 / 42 | 1 formed + 2 broken、全方向が product 到達 |
+| SN1 dissoc (`examples/sn1_dissoc.rxn`) | 25 s | 1 | 1 / 1 | unimolecular auto-clamp で n_candidates=1、UMA model load 後ほぼ即終了 |
+| SN1 recomb (`examples/sn1_recomb.rxn`) | 339 s | 27 | 16 / 27 | bimolecular、Cl⁻ が tBu⁺ の sp²-平面方向から接近 |
 
-MMFF94 prescreen は実測上 **HCl のように小さく原子タイプを取りにくい fragment** を含む系 (proton transfer 等) では parameterize に失敗し、prescreen を skip して全 trial を UMA で relax する fallback に入る。SN2 (anion 含む) と Menshutkin (中性) ではいずれも MMFF が成功する。失敗は `meta.json.prescreen.mmff_failed=true` で確認でき、明示的に prescreen を無効化したい場合は TOML に `prescreen.enabled = false` を書く。
+UMA model load (~25–30 s) が固定コスト。Phase 7 では MMFF prescreen を廃止したため、blocking で生存した候補の数 (`n_valid`) が wall-clock を直接決める。`n_candidates=64` で各反応の anchor 周辺ステリックにより 20–42 程度が生存し、それぞれ UMA で full relax する。混雑した anchor で生存が少ないとログ警告が出る (`only K/N candidates survived blocking ...`)。生存ゼロは `RuntimeError` で停止する。
 
-UMA model load (~25-30 s) が固定コストとして wall-clock を支配するため、prescreen による短縮幅は SN2 で ~20 %、Menshutkin で ~75 % など反応や trial 当たりの relax コストに依存する。
+全球面サンプリングでは個々の trial が「正確な backside」から数十度ずれることが多いため、Phase 6 の cone サンプル時代より restraint をやや強めにする必要がある。特に Menshutkin のように gas-phase で product が contact ion pair より高エネルギーになる反応では、`k_form` を 4.0 程度まで強くしないと UMA の repulsive 領域を押し切れず N-C bond が形成されない。
+
+`reached_product=True` 数が valid 数より少ないのは正常で、`scoring.score_trials` が peak_energy 最小の trial を選択する。0 / N でも `least bad` フォールバックで selected_trial が決まる。
 
 `--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (`test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 
-各実行の trial 全件スコアと prescreen 結果と wall_clock_seconds は `out/<rxn>/meta.json` に残る。
+各実行の trial 全件スコアと placement 結果 (`n_candidates` / `n_blocked` / `n_valid`) と wall_clock_seconds は `out/<rxn>/meta.json` に残る。
 
 ## テスト
 
@@ -158,20 +162,27 @@ pytest -m blender        # Blender smoke test (ローカル環境のみ)
                                                BondChanges (formed/broken)
                                                        │
                                                        ▼
-                                              embed3d (rotation perturb)
-                                                ├ trial 1
-                                                ├ trial 2  ─┐
-                                                ├ ...        │ FIRE + Hookean/PullApart restraints
-                                                └ trial N  ─┘
+                                       embed_fragments_to_positions
+                                       (per-fragment ETKDG + MMFF)
                                                        │
                                                        ▼
-                                                scoring → best trial
+                                       placement.valid_placements
+                                       (4π sr Fibonacci + 角度シャドウ + d_min ceiling)
+                                                       │
+                                                       ▼
+                              ┌── trial 1 ──┐
+                              ├── trial 2 ──┤  FIRE + Hookean/PullApart restraints
+                              ├── ...        │  (生存全件を UMA full relax)
+                              └── trial K ──┘
+                                                       │
+                                                       ▼
+                                              scoring → best trial
                                                        │
                                           (optional) neb refinement
                                                        │
                                                        ▼
-                                               trajectory.xyz → blender/render.py → .blend
+                                trajectory.xyz → blender/render.py → .blend
 ```
 
-詳細設計: `docs/superpowers/specs/2026-05-03-rxn-config-sidecar-design.md`
-実装計画: `docs/superpowers/plans/2026-05-03-rxn-config-sidecar.md`
+詳細設計: `docs/superpowers/specs/2026-05-04-generic-placement-design.md`
+実装計画: `docs/superpowers/plans/2026-05-04-generic-placement.md`

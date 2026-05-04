@@ -28,15 +28,7 @@ class RestraintConfig:
 
 @dataclass(frozen=True)
 class SamplingConfig:
-    n_angles: int = 8
-    cone_half_deg: float = 30.0
-
-
-@dataclass(frozen=True)
-class PrescreenConfig:
-    enabled: bool = True
-    keep: int = 3
-    steps: int = 30
+    n_candidates: int = 64
 
 
 @dataclass(frozen=True)
@@ -46,14 +38,12 @@ class ReactionConfig:
     broken: tuple[tuple[int, int], ...]
     restraints: RestraintConfig
     sampling: SamplingConfig = field(default_factory=SamplingConfig)
-    prescreen: PrescreenConfig = field(default_factory=PrescreenConfig)
 
 
-_TOP_LEVEL_KEYS = {"description", "formed", "broken", "restraints", "sampling", "prescreen"}
+_TOP_LEVEL_KEYS = {"description", "formed", "broken", "restraints", "sampling"}
 _RESTRAINTS_KEYS = {"k_form", "k_broken", "r_broken", "max_relax_steps", "r_form"}
 _RESTRAINTS_REQUIRED = {"k_form", "k_broken", "r_broken", "max_relax_steps"}
-_SAMPLING_KEYS = {"n_angles", "cone_half_deg"}
-_PRESCREEN_KEYS = {"enabled", "keep", "steps"}
+_SAMPLING_KEYS = {"n_candidates"}
 _TOP_LEVEL_REQUIRED = {"description", "formed", "broken", "restraints"}
 
 
@@ -79,6 +69,11 @@ def load_config(rxn_path: Path) -> ReactionConfig:
 
 
 def _validate(raw: dict, *, source: str) -> ReactionConfig:
+    if "prescreen" in raw:
+        raise ValueError(
+            f"{source}: [prescreen] section is removed in Phase 7; "
+            f"delete it from the TOML"
+        )
     _check_keys(raw, _TOP_LEVEL_KEYS, _TOP_LEVEL_REQUIRED, scope="<top>", source=source)
 
     description = raw["description"]
@@ -94,7 +89,6 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
 
     restraints = _build_restraints(raw["restraints"], formed_count=len(formed), source=source)
     sampling = _build_sampling(raw.get("sampling", {}), source=source)
-    prescreen = _build_prescreen(raw.get("prescreen", {}), source=source)
 
     return ReactionConfig(
         description=description,
@@ -102,7 +96,6 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
         broken=broken,
         restraints=restraints,
         sampling=sampling,
-        prescreen=prescreen,
     )
 
 
@@ -194,20 +187,10 @@ def _normalize_r_form(
 
 def _build_sampling(raw: dict, *, source: str) -> SamplingConfig:
     _check_keys(raw, _SAMPLING_KEYS, set(), scope="sampling", source=source)
-    n_angles = _as_int(raw.get("n_angles", 8), "sampling.n_angles", source, positive=True)
-    cone = _as_float(raw.get("cone_half_deg", 30.0), "sampling.cone_half_deg",
-                     source, positive=True)
-    return SamplingConfig(n_angles=n_angles, cone_half_deg=cone)
-
-
-def _build_prescreen(raw: dict, *, source: str) -> PrescreenConfig:
-    _check_keys(raw, _PRESCREEN_KEYS, set(), scope="prescreen", source=source)
-    enabled = raw.get("enabled", True)
-    if not isinstance(enabled, bool):
-        raise ValueError(f"{source}: 'prescreen.enabled' must be bool")
-    keep = _as_int(raw.get("keep", 3), "prescreen.keep", source, positive=True)
-    steps = _as_int(raw.get("steps", 30), "prescreen.steps", source, positive=True)
-    return PrescreenConfig(enabled=enabled, keep=keep, steps=steps)
+    n_candidates = _as_int(
+        raw.get("n_candidates", 64), "sampling.n_candidates", source, positive=True,
+    )
+    return SamplingConfig(n_candidates=n_candidates)
 
 
 def _as_float(

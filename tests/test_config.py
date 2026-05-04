@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 
 from reactx.config import (
-    PrescreenConfig,
     ReactionConfig,
     RestraintConfig,
     SamplingConfig,
@@ -40,8 +39,8 @@ max_relax_steps = 100
         k_form=0.5, k_broken=1.0, r_broken=4.0,
         max_relax_steps=100, r_form=None,
     )
-    assert cfg.sampling == SamplingConfig(n_angles=8, cone_half_deg=30.0)
-    assert cfg.prescreen == PrescreenConfig(enabled=True, keep=3, steps=30)
+    assert cfg.sampling == SamplingConfig(n_candidates=64)
+    assert not hasattr(cfg, "prescreen")
 
 
 def test_load_full_keys(tmp_path: Path):
@@ -56,22 +55,13 @@ r_broken = 5.0
 max_relax_steps = 200
 r_form = [1.78, 1.05]
 [sampling]
-n_angles = 1
-cone_half_deg = 45.0
-[prescreen]
-enabled = false
-keep = 5
-steps = 50
+n_candidates = 32
 """)
     cfg = load_config(rxn)
     assert cfg.formed == ((1, 5), (2, 6))
     assert cfg.broken == ((3, 4),)
     assert cfg.restraints.r_form == (1.78, 1.05)
-    assert cfg.sampling.n_angles == 1
-    assert cfg.sampling.cone_half_deg == 45.0
-    assert cfg.prescreen.enabled is False
-    assert cfg.prescreen.keep == 5
-    assert cfg.prescreen.steps == 50
+    assert cfg.sampling.n_candidates == 32
 
 
 def test_load_scalar_r_form(tmp_path: Path):
@@ -188,7 +178,7 @@ max_relax_steps = 100
         load_config(rxn)
 
 
-def test_zero_n_angles_rejected(tmp_path: Path):
+def test_zero_n_candidates_rejected(tmp_path: Path):
     rxn = _write(tmp_path, """\
 description = "x"
 formed = [[1, 2]]
@@ -199,26 +189,9 @@ k_broken = 1.0
 r_broken = 4.0
 max_relax_steps = 100
 [sampling]
-n_angles = 0
+n_candidates = 0
 """)
-    with pytest.raises(ValueError, match="n_angles.*> 0"):
-        load_config(rxn)
-
-
-def test_zero_prescreen_keep_rejected(tmp_path: Path):
-    rxn = _write(tmp_path, """\
-description = "x"
-formed = [[1, 2]]
-broken = []
-[restraints]
-k_form = 0.5
-k_broken = 1.0
-r_broken = 4.0
-max_relax_steps = 100
-[prescreen]
-keep = 0
-""")
-    with pytest.raises(ValueError, match="keep.*> 0"):
+    with pytest.raises(ValueError, match=r"n_candidates.*> 0"):
         load_config(rxn)
 
 
@@ -318,3 +291,72 @@ def test_resolve_r_form_targets_empty_formed():
         ),
     )
     assert resolve_r_form_targets(cfg, ["C", "Br"], []) == []
+
+
+def test_legacy_n_angles_key_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "x"
+formed = [[1, 2]]
+broken = []
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
+[sampling]
+n_angles = 8
+""")
+    with pytest.raises(ValueError, match="n_angles"):
+        load_config(rxn)
+
+
+def test_legacy_cone_half_deg_key_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "x"
+formed = [[1, 2]]
+broken = []
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
+[sampling]
+n_candidates = 16
+cone_half_deg = 30.0
+""")
+    with pytest.raises(ValueError, match="cone_half_deg"):
+        load_config(rxn)
+
+
+def test_legacy_prescreen_section_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "x"
+formed = [[1, 2]]
+broken = []
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
+[prescreen]
+enabled = true
+keep = 3
+steps = 30
+""")
+    with pytest.raises(ValueError, match=r"\[prescreen\] section is removed in Phase 7"):
+        load_config(rxn)
+
+
+def test_default_n_candidates_is_64(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "x"
+formed = [[1, 2]]
+broken = []
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 100
+""")
+    cfg = load_config(rxn)
+    assert cfg.sampling.n_candidates == 64

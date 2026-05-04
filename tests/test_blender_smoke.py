@@ -101,7 +101,7 @@ k_broken = 1.0
 r_broken = 4.0
 max_relax_steps = 30
 [sampling]
-n_angles = 2
+n_candidates = 4
 """
 
 _PT_BLENDER = """\
@@ -115,7 +115,7 @@ r_broken = 4.0
 max_relax_steps = 30
 r_form = 1.05
 [sampling]
-n_angles = 2
+n_candidates = 4
 """
 
 _E2_BLENDER = """\
@@ -128,7 +128,7 @@ k_broken = 1.0
 r_broken = 4.0
 max_relax_steps = 30
 [sampling]
-n_angles = 2
+n_candidates = 4
 """
 
 

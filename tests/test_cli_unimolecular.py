@@ -1,4 +1,4 @@
-"""Tests for unimolecular reaction handling: n_angles auto-clamp + prescreen skip."""
+"""Tests for unimolecular reaction handling: n_candidates auto-clamp to 1."""
 import json
 from pathlib import Path
 
@@ -14,14 +14,14 @@ k_broken = 2.0
 r_broken = 6.0
 max_relax_steps = 5
 [sampling]
-n_angles = 8
+n_candidates = 8
 """
 
 
 @pytest.fixture()
 def fake_unimolecular_pipeline(monkeypatch):
     import numpy as np
-    from ase import Atoms
+    from rdkit import Chem
 
     from reactx import calculators, embed3d, path_relax
 
@@ -29,24 +29,27 @@ def fake_unimolecular_pipeline(monkeypatch):
         from ase.calculators.lj import LennardJones
         return LennardJones()
 
-    def fake_embed(mol, **kw):
-        atoms = Atoms("CCCCC", positions=np.array([
-            [0, 0, 0], [1.5, 0, 0], [3.0, 0, 0], [-1.5, 0, 0], [0, 1.5, 0],
-        ]))
-        return atoms
+    def fake_embed(mol, *, seed=0):
+        mol_h = Chem.AddHs(mol)
+        n = mol_h.GetNumAtoms()
+        positions = np.zeros((n, 3))
+        # Lay atoms on a line so LJ has finite gradients.
+        for i in range(n):
+            positions[i] = (i * 1.5, 0.0, 0.0)
+        return mol_h, Chem.GetMolFrags(mol_h), positions
 
     def fake_relax(atoms_init, restraints, calc, **kw):
         return [atoms_init], [0.0]
 
     monkeypatch.setattr(calculators, "make_calculator", fake_calc)
-    monkeypatch.setattr(embed3d, "embed_mol_to_atoms", fake_embed)
+    monkeypatch.setattr(embed3d, "embed_fragments_to_positions", fake_embed)
     monkeypatch.setattr(path_relax, "relax_with_restraints", fake_relax)
 
 
-def test_unimolecular_n_angles_clamped_to_one(
+def test_unimolecular_n_candidates_clamped_to_one(
     fake_unimolecular_pipeline, tmp_path: Path, tmp_rxn_with_toml,
 ):
-    """When reactant has 1 fragment and TOML claims n_angles=8, clamp to 1."""
+    """When reactant has 1 fragment and TOML claims n_candidates=8, clamp to 1."""
     rxn = tmp_rxn_with_toml("sn1_dissoc", toml_body=_SN1_DISSOC_FAST)
     out = tmp_path / "out"
     from reactx.cli import main
@@ -54,5 +57,7 @@ def test_unimolecular_n_angles_clamped_to_one(
     assert rc == 0
     meta = json.loads((out / "meta.json").read_text())
     assert len(meta["trials"]) == 1
-    assert meta["prescreen"]["enabled"] is False
-    assert meta["prescreen"]["kept"] is None
+    assert meta["placement"]["n_candidates"] == 1
+    assert meta["placement"]["n_valid"] == 1
+    assert meta["placement"]["n_blocked"] == 0
+    assert "prescreen" not in meta

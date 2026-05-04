@@ -138,7 +138,7 @@ def tmp_rxn_with_toml(tmp_path: Path):
             r_broken = 4.0
             max_relax_steps = 30
             [sampling]
-            n_angles = 1
+            n_candidates = 1
         ''')
 
     Returns the temp `.rxn` Path. The .rxn body is unchanged from

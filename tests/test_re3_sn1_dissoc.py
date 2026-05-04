@@ -17,7 +17,7 @@ k_broken = 2.0
 r_broken = 6.0
 max_relax_steps = 100
 [sampling]
-n_angles = 1
+n_candidates = 1
 """
 
 
@@ -36,8 +36,10 @@ def test_re3_sn1_dissoc_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert meta["effective_params"]["r_form_targets"] == []
     assert meta["description"] == "SN1 dissoc fast"
 
-    pre = meta["prescreen"]
-    assert pre["enabled"] is False or pre["kept"] is None
+    pl = meta["placement"]
+    assert pl["n_candidates"] == 1
+    assert pl["n_valid"] == 1
+    assert pl["n_blocked"] == 0
 
     frames = read(str(out / "trajectory.xyz"), index=":")
     assert len(frames) >= 3
