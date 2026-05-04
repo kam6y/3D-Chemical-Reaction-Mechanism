@@ -124,11 +124,20 @@ reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
 
 ## Wall-clock (実測)
 
-| Reaction | wall-clock | 備考 |
-|---|---|---|
-| (Phase 7 で再実測予定) | — | n_candidates=64 default、prescreen 撤廃で全 blocking 生存を UMA full relax |
+RTX 5070 Ti + UMA-m-1p1 で実測 (`n_candidates=64`、Blender 4.5 LTS で `--render` まで含む):
 
-UMA model load (~25–30 s) が固定コストとして wall-clock を支配する。Phase 7 では MMFF prescreen を廃止したため、blocking で生存した候補の数 (n_valid) が wall-clock を直接決める。`n_candidates=64` で各反応の anchor 周辺ステリックにより 8–32 程度が生存し、それぞれ UMA で full relax する想定。混雑した anchor で生存が少ないとログ警告が出る (`only K/N candidates survived blocking ...`)。生存ゼロは `RuntimeError` で停止する。
+| Reaction | wall-clock | n_valid | reached / valid | 備考 |
+|---|---|---|---|---|
+| SN2 (`examples/sn2.rxn`) | 232 s | 20 | 6 / 20 | 64 候補、44 blocked (3-H + Cl の角度シャドウ) |
+| Proton transfer (`examples/proton_transfer.rxn`) | 442 s | 32 | 3 / 32 | HCl 側 anchor は H なので shadowing が緩く生存数多め |
+| Menshutkin (`examples/menshutkin.rxn`) | 367 s | 25 | 0 / 25 | 全 trial が部分到達止まり、peak_energy 最小 trial を選択 |
+| E2 (`examples/e2.rxn`) | 740 s | 42 | 42 / 42 | 1 formed + 2 broken、全方向が product 到達 |
+| SN1 dissoc (`examples/sn1_dissoc.rxn`) | 25 s | 1 | 1 / 1 | unimolecular auto-clamp で n_candidates=1、UMA model load 後ほぼ即終了 |
+| SN1 recomb (`examples/sn1_recomb.rxn`) | 339 s | 27 | 16 / 27 | bimolecular、Cl⁻ が tBu⁺ の sp²-平面方向から接近 |
+
+UMA model load (~25–30 s) が固定コスト。Phase 7 では MMFF prescreen を廃止したため、blocking で生存した候補の数 (`n_valid`) が wall-clock を直接決める。`n_candidates=64` で各反応の anchor 周辺ステリックにより 20–42 程度が生存し、それぞれ UMA で full relax する。混雑した anchor で生存が少ないとログ警告が出る (`only K/N candidates survived blocking ...`)。生存ゼロは `RuntimeError` で停止する。
+
+`reached_product=True` 数が valid 数より少ないのは正常で、`scoring.score_trials` が peak_energy 最小の trial を選択する。0 / N でも `least bad` フォールバックで selected_trial が決まる (Menshutkin の例)。
 
 `--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (`test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 
