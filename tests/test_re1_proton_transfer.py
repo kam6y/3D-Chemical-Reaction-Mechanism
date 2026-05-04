@@ -18,7 +18,7 @@ r_broken = 4.0
 max_relax_steps = 100
 r_form = 1.05
 [sampling]
-n_angles = 4
+n_candidates = 8
 """
 
 
@@ -32,11 +32,11 @@ def test_re1_proton_transfer_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     meta = json.loads((out / "meta.json").read_text())
     assert meta["description"] == "Proton transfer fast"
     assert meta["selected_trial"] >= 0
-    pre = meta["prescreen"]
-    assert pre["enabled"] is True
-    if not pre["mmff_failed"]:
-        assert len(pre["kept"]) == 3
-        assert len(meta["trials"]) == 3
+    pl = meta["placement"]
+    assert pl["n_candidates"] >= 1
+    assert pl["n_valid"] >= 1
+    assert pl["n_blocked"] == pl["n_candidates"] - pl["n_valid"]
+    assert len(meta["trials"]) == pl["n_valid"]
     assert any(t["reached_product"] for t in meta["trials"])
 
     frames = read(str(out / "trajectory.xyz"), index=":")

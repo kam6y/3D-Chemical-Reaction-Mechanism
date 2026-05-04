@@ -17,7 +17,7 @@ k_broken = 0.0
 r_broken = 4.0
 max_relax_steps = 100
 [sampling]
-n_angles = 8
+n_candidates = 16
 """
 
 
@@ -30,11 +30,11 @@ def test_re4_sn1_recomb_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
 
     meta = json.loads((out / "meta.json").read_text())
 
-    pre = meta["prescreen"]
-    assert pre["enabled"] is True
-    if not pre["mmff_failed"]:
-        assert len(pre["kept"]) == 3
-        assert len(meta["trials"]) == 3
+    pl = meta["placement"]
+    assert pl["n_candidates"] >= 1
+    assert pl["n_valid"] >= 1
+    assert pl["n_blocked"] == pl["n_candidates"] - pl["n_valid"]
+    assert len(meta["trials"]) == pl["n_valid"]
     assert meta["selected_trial"] >= 0
     assert meta["description"] == "SN1 recomb fast"
 

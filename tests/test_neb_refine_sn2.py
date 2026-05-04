@@ -17,7 +17,7 @@ k_broken = 1.0
 r_broken = 4.0
 max_relax_steps = 30
 [sampling]
-n_angles = 2
+n_candidates = 4
 """
 
 

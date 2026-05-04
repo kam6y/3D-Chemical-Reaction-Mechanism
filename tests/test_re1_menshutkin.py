@@ -23,7 +23,7 @@ k_broken = 2.0
 r_broken = 5.0
 max_relax_steps = 200
 [sampling]
-n_angles = 4
+n_candidates = 8
 """
 
 
@@ -41,13 +41,11 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert meta["effective_params"]["r_broken"] == 5.0
     assert meta["effective_params"]["max_relax_steps"] == 200
     assert meta["selected_trial"] >= 0
-    pre = meta["prescreen"]
-    assert pre["enabled"] is True
-    if pre["mmff_failed"]:
-        assert len(meta["trials"]) == 4
-    else:
-        assert len(pre["kept"]) == 3
-        assert len(meta["trials"]) == 3
+    pl = meta["placement"]
+    assert pl["n_candidates"] >= 1
+    assert pl["n_valid"] >= 1
+    assert pl["n_blocked"] == pl["n_candidates"] - pl["n_valid"]
+    assert len(meta["trials"]) == pl["n_valid"]
     assert any(t["reached_product"] for t in meta["trials"]), (
         f"No trial reached product. trials={meta['trials']}"
     )
