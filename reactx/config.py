@@ -32,18 +32,48 @@ class SamplingConfig:
 
 
 @dataclass(frozen=True)
+class ModelConfig:
+    screening_model: str = "uma-s-1p2"
+    neb_model: str = "uma-s-1p2"
+
+
+@dataclass(frozen=True)
+class NebConfig:
+    top_k: int = 4
+    n_images: int = 7
+    fmax: float = 0.05
+    max_steps: int = 200
+    pad_frames: int = 0
+
+
+@dataclass(frozen=True)
+class ParallelConfig:
+    screening_workers: int = 3
+    neb_workers: int = 3
+
+
+@dataclass(frozen=True)
 class ReactionConfig:
     description: str
     formed: tuple[tuple[int, int], ...]
     broken: tuple[tuple[int, int], ...]
     restraints: RestraintConfig
     sampling: SamplingConfig = field(default_factory=SamplingConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    neb: NebConfig = field(default_factory=NebConfig)
+    parallel: ParallelConfig = field(default_factory=ParallelConfig)
 
 
-_TOP_LEVEL_KEYS = {"description", "formed", "broken", "restraints", "sampling"}
+_TOP_LEVEL_KEYS = {
+    "description", "formed", "broken", "restraints",
+    "sampling", "model", "neb", "parallel",
+}
 _RESTRAINTS_KEYS = {"k_form", "k_broken", "r_broken", "max_relax_steps", "r_form"}
 _RESTRAINTS_REQUIRED = {"k_form", "k_broken", "r_broken", "max_relax_steps"}
 _SAMPLING_KEYS = {"n_candidates"}
+_MODEL_KEYS = {"screening_model", "neb_model"}
+_NEB_KEYS = {"top_k", "n_images", "fmax", "max_steps", "pad_frames"}
+_PARALLEL_KEYS = {"screening_workers", "neb_workers"}
 _TOP_LEVEL_REQUIRED = {"description", "formed", "broken", "restraints"}
 
 
@@ -89,6 +119,9 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
 
     restraints = _build_restraints(raw["restraints"], formed_count=len(formed), source=source)
     sampling = _build_sampling(raw.get("sampling", {}), source=source)
+    model = _build_model(raw.get("model", {}), source=source)
+    neb = _build_neb(raw.get("neb", {}), source=source)
+    parallel = _build_parallel(raw.get("parallel", {}), source=source)
 
     return ReactionConfig(
         description=description,
@@ -96,6 +129,9 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
         broken=broken,
         restraints=restraints,
         sampling=sampling,
+        model=model,
+        neb=neb,
+        parallel=parallel,
     )
 
 
@@ -191,6 +227,47 @@ def _build_sampling(raw: dict, *, source: str) -> SamplingConfig:
         raw.get("n_candidates", 64), "sampling.n_candidates", source, positive=True,
     )
     return SamplingConfig(n_candidates=n_candidates)
+
+
+def _build_model(raw: dict, *, source: str) -> ModelConfig:
+    _check_keys(raw, _MODEL_KEYS, set(), scope="model", source=source)
+    screening = _as_str(raw.get("screening_model", "uma-s-1p2"), "model.screening_model", source)
+    neb = _as_str(raw.get("neb_model", "uma-s-1p2"), "model.neb_model", source)
+    return ModelConfig(screening_model=screening, neb_model=neb)
+
+
+def _build_neb(raw: dict, *, source: str) -> NebConfig:
+    _check_keys(raw, _NEB_KEYS, set(), scope="neb", source=source)
+    top_k = _as_int(raw.get("top_k", 4), "neb.top_k", source, positive=True)
+    n_images = _as_int(raw.get("n_images", 7), "neb.n_images", source, positive=True)
+    if n_images < 3:
+        raise ValueError(f"{source}: 'neb.n_images' must be >= 3 (got {n_images})")
+    fmax = _as_float(raw.get("fmax", 0.05), "neb.fmax", source, positive=True)
+    max_steps = _as_int(raw.get("max_steps", 200), "neb.max_steps", source, positive=True)
+    pad_frames_raw = raw.get("pad_frames", 0)
+    if not isinstance(pad_frames_raw, int) or isinstance(pad_frames_raw, bool):
+        raise ValueError(f"{source}: 'neb.pad_frames' must be an int")
+    if pad_frames_raw < 0:
+        raise ValueError(f"{source}: 'neb.pad_frames' must be >= 0 (got {pad_frames_raw})")
+    return NebConfig(
+        top_k=top_k, n_images=n_images, fmax=fmax,
+        max_steps=max_steps, pad_frames=int(pad_frames_raw),
+    )
+
+
+def _build_parallel(raw: dict, *, source: str) -> ParallelConfig:
+    _check_keys(raw, _PARALLEL_KEYS, set(), scope="parallel", source=source)
+    screening = _as_int(
+        raw.get("screening_workers", 3), "parallel.screening_workers", source, positive=True,
+    )
+    neb = _as_int(raw.get("neb_workers", 3), "parallel.neb_workers", source, positive=True)
+    return ParallelConfig(screening_workers=screening, neb_workers=neb)
+
+
+def _as_str(raw: object, key: str, source: str) -> str:
+    if not isinstance(raw, str) or not raw:
+        raise ValueError(f"{source}: '{key}' must be a non-empty string")
+    return raw
 
 
 def _as_float(

@@ -360,3 +360,110 @@ max_relax_steps = 100
 """)
     cfg = load_config(rxn)
     assert cfg.sampling.n_candidates == 64
+
+
+def test_config_default_model_section_uma_s(tmp_path: Path):
+    rxn = tmp_path / "x.rxn"
+    rxn.write_text("$RXN\n", encoding="utf-8")
+    (tmp_path / "x.rxn.toml").write_text(
+        'description="x"\nformed=[[1,2]]\nbroken=[]\n'
+        '[restraints]\nk_form=1\nk_broken=1\nr_broken=4\nmax_relax_steps=10\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(rxn)
+    assert cfg.model.screening_model == "uma-s-1p2"
+    assert cfg.model.neb_model == "uma-s-1p2"
+
+
+def test_config_default_neb_section(tmp_path: Path):
+    rxn = tmp_path / "x.rxn"
+    rxn.write_text("$RXN\n", encoding="utf-8")
+    (tmp_path / "x.rxn.toml").write_text(
+        'description="x"\nformed=[[1,2]]\nbroken=[]\n'
+        '[restraints]\nk_form=1\nk_broken=1\nr_broken=4\nmax_relax_steps=10\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(rxn)
+    assert cfg.neb.top_k == 4
+    assert cfg.neb.n_images == 7
+    assert cfg.neb.fmax == 0.05
+    assert cfg.neb.max_steps == 200
+    assert cfg.neb.pad_frames == 0
+
+
+def test_config_default_parallel_section(tmp_path: Path):
+    rxn = tmp_path / "x.rxn"
+    rxn.write_text("$RXN\n", encoding="utf-8")
+    (tmp_path / "x.rxn.toml").write_text(
+        'description="x"\nformed=[[1,2]]\nbroken=[]\n'
+        '[restraints]\nk_form=1\nk_broken=1\nr_broken=4\nmax_relax_steps=10\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(rxn)
+    assert cfg.parallel.screening_workers == 3
+    assert cfg.parallel.neb_workers == 3
+
+
+def test_config_neb_top_k_must_be_positive(tmp_path: Path):
+    rxn = tmp_path / "x.rxn"
+    rxn.write_text("$RXN\n", encoding="utf-8")
+    (tmp_path / "x.rxn.toml").write_text(
+        'description="x"\nformed=[[1,2]]\nbroken=[]\n'
+        '[restraints]\nk_form=1\nk_broken=1\nr_broken=4\nmax_relax_steps=10\n'
+        '[neb]\ntop_k=0\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="neb.top_k"):
+        load_config(rxn)
+
+
+def test_config_neb_n_images_min_3(tmp_path: Path):
+    rxn = tmp_path / "x.rxn"
+    rxn.write_text("$RXN\n", encoding="utf-8")
+    (tmp_path / "x.rxn.toml").write_text(
+        'description="x"\nformed=[[1,2]]\nbroken=[]\n'
+        '[restraints]\nk_form=1\nk_broken=1\nr_broken=4\nmax_relax_steps=10\n'
+        '[neb]\nn_images=2\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="neb.n_images"):
+        load_config(rxn)
+
+
+def test_config_parallel_workers_must_be_positive(tmp_path: Path):
+    rxn = tmp_path / "x.rxn"
+    rxn.write_text("$RXN\n", encoding="utf-8")
+    (tmp_path / "x.rxn.toml").write_text(
+        'description="x"\nformed=[[1,2]]\nbroken=[]\n'
+        '[restraints]\nk_form=1\nk_broken=1\nr_broken=4\nmax_relax_steps=10\n'
+        '[parallel]\nscreening_workers=0\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="parallel.screening_workers"):
+        load_config(rxn)
+
+
+def test_config_model_screening_must_be_nonempty(tmp_path: Path):
+    rxn = tmp_path / "x.rxn"
+    rxn.write_text("$RXN\n", encoding="utf-8")
+    (tmp_path / "x.rxn.toml").write_text(
+        'description="x"\nformed=[[1,2]]\nbroken=[]\n'
+        '[restraints]\nk_form=1\nk_broken=1\nr_broken=4\nmax_relax_steps=10\n'
+        '[model]\nscreening_model=""\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="model.screening_model"):
+        load_config(rxn)
+
+
+def test_config_unknown_keys_in_neb_rejected(tmp_path: Path):
+    rxn = tmp_path / "x.rxn"
+    rxn.write_text("$RXN\n", encoding="utf-8")
+    (tmp_path / "x.rxn.toml").write_text(
+        'description="x"\nformed=[[1,2]]\nbroken=[]\n'
+        '[restraints]\nk_form=1\nk_broken=1\nr_broken=4\nmax_relax_steps=10\n'
+        '[neb]\nbogus=1\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown config key"):
+        load_config(rxn)
