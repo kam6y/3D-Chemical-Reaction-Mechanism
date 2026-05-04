@@ -16,7 +16,7 @@ from reactx.config import (
     SamplingConfig,
 )
 from reactx.placement import PlacementResult, PlacementTrial
-from reactx.scoring import TrialResult
+from reactx.scoring import ScreeningTrialResult
 
 
 def _sample_cfg() -> ReactionConfig:
@@ -84,7 +84,7 @@ def test_meta_json_includes_description_and_effective_params(tmp_path: Path):
     args = argparse.Namespace(backend="lj", output=tmp_path)
     cfg = _sample_cfg()
     r_form_targets = [1.47]
-    trials = [TrialResult(
+    trials = [ScreeningTrialResult(
         trial_idx=0, direction=np.array([0.0, 0.0, 1.0]),
         frames=[], energies=[1.0, 2.0],
         reached_product=True, peak_energy=2.0, n_steps=2,
@@ -111,7 +111,7 @@ def test_meta_json_placement_block(tmp_path: Path):
     args = argparse.Namespace(backend="lj", output=tmp_path)
     cfg = _sample_cfg()
     placement = _sample_placement()
-    trials = [TrialResult(
+    trials = [ScreeningTrialResult(
         trial_idx=0, direction=np.array([0.0, 0.0, 1.0]),
         frames=[], energies=[1.0, 2.0],
         reached_product=True, peak_energy=2.0, n_steps=2,
@@ -135,7 +135,7 @@ def test_meta_json_placement_block(tmp_path: Path):
 def test_meta_json_trials_have_direction_field(tmp_path: Path):
     args = argparse.Namespace(backend="lj", output=tmp_path)
     cfg = _sample_cfg()
-    trials = [TrialResult(
+    trials = [ScreeningTrialResult(
         trial_idx=0, direction=np.array([0.5, -0.5, 0.7071]),
         frames=[], energies=[1.0, 2.0],
         reached_product=True, peak_energy=2.0, n_steps=2,

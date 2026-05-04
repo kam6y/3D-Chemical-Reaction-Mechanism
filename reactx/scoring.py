@@ -1,9 +1,9 @@
-"""Trial scoring + final-best selection for placement trials.
+"""Trial scoring + final-best selection for screening trials.
 
-Phase 7: rotation_deg field replaced by direction (3-vec) since trials are
-indexed by Fibonacci-sphere unit vectors, not deviations from a single
-ideal direction. select_best_trial moved here from prescreen.select_top_k_indices
-(top-K -> 1) to centralize all "pick best trial" logic.
+Phase 8: TrialResult renamed to ScreeningTrialResult to reflect its role
+as Stage 1 (screening) output. Adds top_k_trials for the screening->NEB
+hand-off: pick top-K by reached_product first, then by peak_energy
+ascending; if fewer than K reached, fill from unreached pool by peak.
 """
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ from ase import Atoms
 
 
 @dataclass
-class TrialResult:
-    """Outcome of a single placement / relaxation trial.
+class ScreeningTrialResult:
+    """Outcome of one Stage 1 (artificial-force) relax trial.
 
-    `direction` is the unit vector (shape (3,), dtype float) used for
-    sphere-based fragment placement. For unimolecular passthrough trials
-    it is a placeholder +z with no physical meaning. dtype is float since
-    cli.py serializes it to meta.json as a list of floats.
+    `direction` is the unit vector used for sphere-based fragment placement
+    (placeholder +z for unimolecular passthrough).
+    `error` is the relax exception string when frames=[]/energies=[];
+    None on success.
     """
 
     trial_idx: int
@@ -30,6 +30,7 @@ class TrialResult:
     reached_product: bool
     peak_energy: float
     n_steps: int
+    error: str | None = None
 
 
 def reached_product(
@@ -61,21 +62,34 @@ def reached_product(
     return True
 
 
-def score_trials(results: list[TrialResult]) -> TrialResult:
-    """Return the best TrialResult (preference: reached then peak_energy up).
+def top_k_trials(
+    results: list[ScreeningTrialResult],
+    k: int,
+) -> list[ScreeningTrialResult]:
+    """Return up to k results ranked by (reached_product desc, peak_energy asc).
 
-    1. reached_product=True 群の最低 peak_energy
-    2. 全部 False なら全体の最低 peak_energy (= 'least bad' fallback)
+    1. reached_product=True 群を peak_energy 昇順で並べる
+    2. reached_product=False 群を peak_energy 昇順で並べる
+    3. 連結して先頭から k 件
     """
     if not results:
-        raise ValueError("score_trials called with empty list")
-    reached = [r for r in results if r.reached_product]
-    pool = reached if reached else results
-    return min(pool, key=lambda r: r.peak_energy)
+        raise ValueError("top_k_trials called with empty results list")
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
+    reached = sorted(
+        (r for r in results if r.reached_product), key=lambda r: r.peak_energy,
+    )
+    unreached = sorted(
+        (r for r in results if not r.reached_product), key=lambda r: r.peak_energy,
+    )
+    return (reached + unreached)[:k]
 
 
-def select_best_trial(trials: list[TrialResult]) -> int:
-    """Return the trial_idx of the best TrialResult (same preference as score_trials)."""
-    if not trials:
-        raise ValueError("select_best_trial called with empty list")
+def score_trials(results: list[ScreeningTrialResult]) -> ScreeningTrialResult:
+    """Return the best ScreeningTrialResult (top_k_trials(..., 1)[0])."""
+    return top_k_trials(results, 1)[0]
+
+
+def select_best_trial(trials: list[ScreeningTrialResult]) -> int:
+    """Return the trial_idx of the best result."""
     return score_trials(trials).trial_idx

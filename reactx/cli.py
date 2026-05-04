@@ -26,7 +26,7 @@ from reactx.placement import (
     valid_placements,
 )
 from reactx.rxn_parser import atom_map_to_reactant_idx, heavy_to_hydrogen_groups, parse_rxn
-from reactx.scoring import TrialResult, reached_product, score_trials
+from reactx.scoring import ScreeningTrialResult, reached_product, score_trials
 
 log = logging.getLogger("reactx")
 
@@ -233,7 +233,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
 
     # Phase 7: UMA full relax for every blocking-survivor (no prescreen).
-    trials: list[TrialResult] = []
+    trials: list[ScreeningTrialResult] = []
     for i, t in enumerate(placement.trials):
         atoms_init = build_atoms_from_positions(mol_h_r, t.positions)
         log.info("trial %d (direction=%s)",
@@ -256,7 +256,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("trial %d relax failed: %s", i, exc)
-            trials.append(TrialResult(
+            trials.append(ScreeningTrialResult(
                 trial_idx=i, direction=t.direction, frames=[], energies=[],
                 reached_product=False, peak_energy=float("inf"), n_steps=0,
             ))
@@ -270,7 +270,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             r_broken_target=cfg.restraints.r_broken,
         )
         peak = max(energies) if energies else float("inf")
-        trials.append(TrialResult(
+        trials.append(ScreeningTrialResult(
             trial_idx=i, direction=t.direction,
             frames=frames, energies=energies,
             reached_product=ok, peak_energy=float(peak),
@@ -360,7 +360,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 def _write_outputs_and_exit(
     args: argparse.Namespace,
-    trials: list[TrialResult],
+    trials: list[ScreeningTrialResult],
     t_start: float,
     *,
     neb_refined: bool,
@@ -369,7 +369,7 @@ def _write_outputs_and_exit(
     r_form_targets: list[float] | None = None,
     placement: PlacementResult | None = None,
 ) -> int:
-    best: TrialResult | None = None
+    best: ScreeningTrialResult | None = None
     if rc == 0 and trials:
         try:
             best = score_trials(trials)
