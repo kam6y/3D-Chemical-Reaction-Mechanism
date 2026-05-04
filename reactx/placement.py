@@ -8,8 +8,14 @@ per-direction d_min based on each fragment's projection onto d.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
+from ase import Atoms
+from rdkit import Chem
+
+from reactx.bond_changes import BondChanges
+from reactx.vdw_radii import vdw_radius
 
 log = logging.getLogger(__name__)
 
@@ -127,3 +133,229 @@ def evaluate_direction(
     if d_min > d_min_ceiling:
         return True, d_min, f"d_min_ceiling:value={d_min:.3f}"
     return False, d_min, None
+
+
+@dataclass(frozen=True)
+class PlacementTrial:
+    direction: np.ndarray   # (3,) unit vector
+    d_min: float            # placement distance applied along direction
+    positions: np.ndarray   # (N, 3) full-system coordinates after translation
+
+
+@dataclass(frozen=True)
+class PlacementResult:
+    trials: list[PlacementTrial]
+    n_candidates: int
+    n_blocked: int
+    blocked_reasons: list[str | None]
+
+
+def _identify_substrate(
+    frag_indices: tuple[tuple[int, ...], ...],
+) -> tuple[int, ...]:
+    """Largest fragment by atom count; tie-break by smallest minimum atom index."""
+    if not frag_indices:
+        raise ValueError("frag_indices is empty")
+    return max(frag_indices, key=lambda f: (len(f), -min(f)))
+
+
+def _find_bridging_formed(
+    formed: tuple[tuple[int, int], ...],
+    substrate: set[int],
+    fragment: set[int],
+) -> tuple[int, int]:
+    """Return the unique formed bond bridging substrate ↔ fragment.
+
+    Multiple → NotImplementedError (cycloaddition is Phase 8+).
+    None → ValueError.
+    """
+    bridges = [
+        (a, b) for a, b in formed
+        if (a in substrate and b in fragment) or (b in substrate and a in fragment)
+    ]
+    if len(bridges) > 1:
+        raise NotImplementedError(
+            f"multi-anchor placement (cycloaddition) is out of scope for Phase 7; "
+            f"got {len(bridges)} formed bonds bridging this fragment"
+        )
+    if not bridges:
+        raise ValueError(
+            f"fragment has no formed bond bridging to substrate; "
+            f"check input atom mapping (formed={list(formed)})"
+        )
+    return bridges[0]
+
+
+def build_atoms_from_positions(
+    mol_h: Chem.Mol,
+    positions: np.ndarray,
+) -> Atoms:
+    """Build an ase.Atoms with symbols, formal charges, and given positions.
+
+    Mirrors the Atoms construction path that used to live inside
+    embed3d.embed_mol_to_atoms (symbols + initial_charges + info[charge/spin]).
+    """
+    if positions.shape != (mol_h.GetNumAtoms(), 3):
+        raise ValueError(
+            f"positions shape {positions.shape} does not match "
+            f"mol_h atom count {mol_h.GetNumAtoms()}"
+        )
+    symbols = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    charges = [a.GetFormalCharge() for a in mol_h.GetAtoms()]
+    atoms = Atoms(symbols=symbols, positions=positions)
+    atoms.set_initial_charges(charges)
+    atoms.info["charge"] = int(sum(charges))
+    atoms.info["spin"] = 1   # Phase Re1 baseline: closed-shell singlet
+    return atoms
+
+
+def _broken_bridges_fragments(
+    broken: tuple[tuple[int, int], ...],
+    frag_indices: tuple[tuple[int, ...], ...],
+) -> bool:
+    """True iff at least one broken bond has its two atoms in different fragments."""
+    if not broken:
+        return False
+    atom_to_frag: dict[int, int] = {}
+    for k, frag in enumerate(frag_indices):
+        for a in frag:
+            atom_to_frag[a] = k
+    for a, b in broken:
+        if atom_to_frag.get(a) != atom_to_frag.get(b):
+            return True
+    return False
+
+
+def valid_placements(
+    mol_h: Chem.Mol,
+    frag_indices: tuple[tuple[int, ...], ...],
+    positions: np.ndarray,
+    bond_changes: BondChanges,
+    *,
+    n_candidates: int = 64,
+    seed: int = 0,
+    gap: float = 0.5,
+    d_min_ceiling: float = 8.0,
+) -> PlacementResult:
+    """Sphere-sample directions, filter by angular shadow + d_min ceiling, place.
+
+    Unimolecular (1 fragment): returns single passthrough trial (direction=+z, d_min=0).
+    Bimolecular: identifies substrate (largest fragment) and one non-substrate fragment;
+    samples n_candidates directions; for each, evaluates blocking and applies translation.
+
+    Raises:
+        NotImplementedError: when broken bond bridges fragments (metathesis), or when
+            a non-substrate fragment is connected to the substrate by ≥2 formed bonds
+            (cycloaddition).
+        RuntimeError: when 0 candidates survive blocking.
+        ValueError: when a non-substrate fragment has no bridging formed bond.
+    """
+    # Unimolecular: passthrough.
+    if len(frag_indices) == 1:
+        return PlacementResult(
+            trials=[PlacementTrial(
+                direction=np.array([0.0, 0.0, 1.0]),
+                d_min=0.0,
+                positions=positions.copy(),
+            )],
+            n_candidates=1,
+            n_blocked=0,
+            blocked_reasons=[None],
+        )
+
+    # Bimolecular: refuse metathesis up front.
+    if _broken_bridges_fragments(bond_changes.broken, frag_indices):
+        raise NotImplementedError(
+            "multi-substrate metathesis (broken bonds spanning fragments) "
+            "is out of scope for Phase 7"
+        )
+
+    substrate = _identify_substrate(frag_indices)
+    substrate_set = set(substrate)
+    non_substrate = [f for f in frag_indices if f is not substrate]
+
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    vdw_all = np.array([vdw_radius(s) for s in syms])
+
+    # Phase 7 supports a single non-substrate fragment per call.
+    if len(non_substrate) > 1:
+        log.warning(
+            "Phase 7: %d non-substrate fragments detected; placing each "
+            "independently with the same sphere sample (geometric quality "
+            "may degrade for termolecular)", len(non_substrate),
+        )
+
+    out_positions = positions.copy()
+    survivors: list[PlacementTrial] | None = None
+    blocked_reasons_final: list[str | None] = []
+    n_blocked_total = 0
+
+    directions = sample_sphere_directions(n_candidates, seed=seed)
+
+    for fragment in non_substrate:
+        fragment_set = set(fragment)
+        bridge = _find_bridging_formed(bond_changes.formed, substrate_set, fragment_set)
+        anchor = bridge[0] if bridge[0] in substrate_set else bridge[1]
+        incoming_anchor = bridge[1] if bridge[0] == anchor else bridge[0]
+
+        substrate_atoms = [i for i in substrate if i != anchor]
+        sub_pos = out_positions[substrate_atoms]
+        sub_vdw = vdw_all[substrate_atoms]
+        inc_pos = out_positions[list(fragment)]
+        inc_vdw = vdw_all[list(fragment)]
+
+        anchor_pos = out_positions[anchor]
+        incoming_anchor_pos = out_positions[incoming_anchor]
+
+        per_direction_trials: list[PlacementTrial] = []
+        per_direction_reasons: list[str | None] = []
+        for d in directions:
+            blocked, d_min, reason = evaluate_direction(
+                d, anchor_pos, sub_pos, sub_vdw,
+                inc_pos, inc_vdw, incoming_anchor_pos,
+                gap=gap, d_min_ceiling=d_min_ceiling,
+            )
+            if blocked:
+                per_direction_reasons.append(reason)
+                continue
+            target = anchor_pos + d * d_min
+            new_positions = out_positions.copy()
+            new_positions[list(fragment)] += target - incoming_anchor_pos
+            per_direction_trials.append(PlacementTrial(
+                direction=d, d_min=d_min, positions=new_positions,
+            ))
+            per_direction_reasons.append(None)
+
+        n_blocked_this = sum(1 for r in per_direction_reasons if r is not None)
+        if not per_direction_trials:
+            raise RuntimeError(
+                f"anchor at atom {anchor} has no valid placement direction "
+                f"(all {n_candidates} candidates blocked); substrate may be "
+                f"fully enclosed"
+            )
+        if len(per_direction_trials) < max(1, n_candidates // 4):
+            log.warning(
+                "only %d/%d candidates survived blocking at anchor %d; "
+                "consider larger n_candidates or check substrate geometry",
+                len(per_direction_trials), n_candidates, anchor,
+            )
+
+        if survivors is None:
+            survivors = per_direction_trials
+            blocked_reasons_final = per_direction_reasons
+            n_blocked_total = n_blocked_this
+        else:
+            # 2 つ目以降の non-substrate fragment は 1 つ目で生存した direction だけ
+            # で配置を続ける (termolecular は警告済み)。実用上 Phase 7 では発火しない。
+            log.warning(
+                "termolecular placement: applying first-fragment survivors to "
+                "subsequent fragment without re-filtering (best-effort)"
+            )
+
+    assert survivors is not None
+    return PlacementResult(
+        trials=survivors,
+        n_candidates=n_candidates,
+        n_blocked=n_blocked_total,
+        blocked_reasons=blocked_reasons_final,
+    )

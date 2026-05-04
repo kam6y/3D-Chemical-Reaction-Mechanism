@@ -167,3 +167,142 @@ def test_evaluate_direction_unblocked_clear_path():
     # max_incoming_back = 0 + 0.5 = 0.5
     # d_min = -0.5 + 0.5 + 0.5 = 0.5
     assert d_min == pytest.approx(0.5)
+
+
+from ase import Atoms
+from rdkit import Chem
+
+from reactx.bond_changes import BondChanges
+from reactx.placement import (
+    PlacementResult,
+    PlacementTrial,
+    _identify_substrate,
+    _find_bridging_formed,
+    build_atoms_from_positions,
+    valid_placements,
+)
+
+
+def test_identify_substrate_picks_largest():
+    # frag 0 has 3 atoms, frag 1 has 5 atoms → frag 1 is substrate
+    frags = ((0, 1, 2), (3, 4, 5, 6, 7))
+    sub = _identify_substrate(frags)
+    assert sub == (3, 4, 5, 6, 7)
+
+
+def test_identify_substrate_tie_breaks_by_min_atom_index():
+    # equal sizes → tie-break by minimum atom index
+    frags = ((5, 6, 7), (0, 1, 2))
+    sub = _identify_substrate(frags)
+    assert sub == (0, 1, 2)
+
+
+def test_find_bridging_formed_returns_unique():
+    formed = ((0, 5),)
+    sub = {0, 1, 2, 3, 4}
+    frag = {5, 6}
+    bridge = _find_bridging_formed(formed, sub, frag)
+    assert bridge == (0, 5)
+
+
+def test_find_bridging_formed_multiple_raises_not_implemented():
+    formed = ((0, 5), (1, 6))  # 同じ pair を 2 本接続
+    sub = {0, 1, 2, 3, 4}
+    frag = {5, 6}
+    with pytest.raises(NotImplementedError, match="multi-anchor"):
+        _find_bridging_formed(formed, sub, frag)
+
+
+def test_find_bridging_formed_no_bridge_raises_value():
+    formed = ((0, 1),)  # 内部結合のみ、bridge なし
+    sub = {0, 1}
+    frag = {5, 6}
+    with pytest.raises(ValueError, match="no formed bond bridging"):
+        _find_bridging_formed(formed, sub, frag)
+
+
+def _ch3cl_plus_oh_minus_setup():
+    """Build a (mol_h, frag_indices, positions, bond_changes) for SN2."""
+    mol = Chem.MolFromSmiles("CCl.[OH-]")
+    mol_h = Chem.AddHs(mol)
+    frag_indices = Chem.GetMolFrags(mol_h)
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    o_idx = syms.index("O")
+    n = mol_h.GetNumAtoms()
+    # Hand-crafted positions: CH3Cl along x-axis, OH near origin (will be moved by placement).
+    positions = np.zeros((n, 3))
+    positions[c_idx] = [0.0, 0.0, 0.0]
+    positions[cl_idx] = [1.78, 0.0, 0.0]  # +x
+    h_idxs = [i for i in frag_indices[0] if syms[i] == "H"]
+    # 3 H around C in tetrahedral angles (rough)
+    positions[h_idxs[0]] = [-0.36, 1.03, 0.0]
+    positions[h_idxs[1]] = [-0.36, -0.51, 0.89]
+    positions[h_idxs[2]] = [-0.36, -0.51, -0.89]
+    # OH placed somewhere arbitrary
+    positions[o_idx] = [10.0, 10.0, 0.0]
+    h_oh = [i for i in frag_indices[1] if syms[i] == "H"][0]
+    positions[h_oh] = [10.96, 10.0, 0.0]
+    bc = BondChanges(formed=((c_idx, o_idx),), broken=((c_idx, cl_idx),))
+    return mol_h, frag_indices, positions, bc, c_idx, cl_idx, o_idx
+
+
+def test_valid_placements_sn2_backside_present_and_frontside_rejected():
+    mol_h, frags, pos, bc, c_idx, cl_idx, o_idx = _ch3cl_plus_oh_minus_setup()
+    result = valid_placements(mol_h, frags, pos, bc, n_candidates=64, seed=0)
+    assert isinstance(result, PlacementResult)
+    assert result.n_candidates == 64
+    assert len(result.trials) > 0
+    # backside direction = -unit(C->Cl) = (-1, 0, 0)
+    backside = np.array([-1.0, 0.0, 0.0])
+    frontside = np.array([1.0, 0.0, 0.0])
+    backside_present = any(np.dot(t.direction, backside) > 0.85 for t in result.trials)
+    frontside_present = any(np.dot(t.direction, frontside) > 0.7 for t in result.trials)
+    assert backside_present, "SN2 backside direction not in survivors"
+    assert not frontside_present, "SN2 frontside direction wrongly survived"
+
+
+def test_valid_placements_unimolecular_passthrough():
+    mol = Chem.MolFromSmiles("CCBr")
+    mol_h = Chem.AddHs(mol)
+    frags = Chem.GetMolFrags(mol_h)
+    n = mol_h.GetNumAtoms()
+    positions = np.random.default_rng(0).normal(size=(n, 3))
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c0 = next(i for i, s in enumerate(syms) if s == "C")
+    br = next(i for i, s in enumerate(syms) if s == "Br")
+    bc = BondChanges(formed=(), broken=((c0, br),))
+    result = valid_placements(mol_h, frags, positions, bc, n_candidates=64, seed=0)
+    assert len(result.trials) == 1
+    np.testing.assert_array_equal(result.trials[0].positions, positions)
+
+
+def test_valid_placements_metathesis_not_implemented():
+    # 2 fragments, broken bond crossing fragments → not yet supported
+    mol = Chem.MolFromSmiles("CCl.[OH-]")
+    mol_h = Chem.AddHs(mol)
+    frags = Chem.GetMolFrags(mol_h)
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    o_idx = syms.index("O")
+    bc = BondChanges(formed=((c_idx, o_idx),), broken=((cl_idx, o_idx),))
+    n = mol_h.GetNumAtoms()
+    positions = np.zeros((n, 3))
+    with pytest.raises(NotImplementedError, match="metathesis"):
+        valid_placements(mol_h, frags, positions, bc, n_candidates=8, seed=0)
+
+
+def test_build_atoms_from_positions_preserves_symbols_and_charges():
+    mol = Chem.MolFromSmiles("[OH-]")
+    mol_h = Chem.AddHs(mol)
+    n = mol_h.GetNumAtoms()
+    positions = np.array([[0.0, 0.0, 0.0], [0.96, 0.0, 0.0]])
+    atoms = build_atoms_from_positions(mol_h, positions)
+    assert isinstance(atoms, Atoms)
+    assert len(atoms) == n
+    assert sorted(atoms.get_chemical_symbols()) == ["H", "O"]
+    # OH- → formal charge sum -1
+    assert atoms.info["charge"] == -1
+    np.testing.assert_array_equal(atoms.positions, positions)
