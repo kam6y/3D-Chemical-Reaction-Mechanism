@@ -154,3 +154,48 @@ def tmp_rxn_with_toml(tmp_path: Path):
         return dst_rxn
 
     return _make
+
+
+@pytest.fixture()
+def screening_result_factory(examples_dir, tmp_path):
+    """Build a minimal ScreeningTrialResult list for a given example reaction.
+
+    Runs the placement + 1 short artificial-force relax under LJ to produce
+    realistic frames quickly (no UMA load).
+    """
+    def _factory(stem: str, n_results: int = 1):
+        from dataclasses import replace
+
+        from reactx.bond_changes import BondChanges
+        from reactx.config import load_config
+        from reactx.embed3d import embed_fragments_to_positions
+        from reactx.placement import valid_placements
+        from reactx.rxn_parser import atom_map_to_reactant_idx, parse_rxn
+        from reactx.screening import screen_all_trials
+
+        rxn_path = examples_dir / f"{stem}.rxn"
+        cfg = load_config(rxn_path)
+        cfg = replace(
+            cfg,
+            sampling=replace(cfg.sampling, n_candidates=n_results),
+            parallel=replace(cfg.parallel, screening_workers=1),
+        )
+        r_mol, _, _ = parse_rxn(rxn_path)
+        bond_changes = BondChanges.from_atom_map_pairs(
+            formed_map=cfg.formed,
+            broken_map=cfg.broken,
+            atom_map_to_idx=atom_map_to_reactant_idx(r_mol),
+        )
+        mol_h, frag_indices, positions = embed_fragments_to_positions(
+            r_mol, seed=0,
+        )
+        placement = valid_placements(
+            mol_h, frag_indices, positions, bond_changes,
+            n_candidates=cfg.sampling.n_candidates, seed=0,
+        )
+        return screen_all_trials(
+            placement, mol_h, bond_changes, cfg,
+            backend="lj", screening_model="",
+            workers=1, relax_fmax=0.5, traj_stride=5, seed=0,
+        )
+    return _factory

@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from ase import Atoms
 from ase.calculators.calculator import Calculator
 from ase.io import write
 from ase.optimize import FIRE
+
+from reactx.endpoints import relax_endpoint
+from reactx.parallel import (
+    get_cached_calculator,
+    init_lj_worker,
+    init_uma_worker,
+    run_with_pool,
+)
 
 try:
     from ase.mep import NEB
@@ -120,3 +129,122 @@ def run_neb(
         "image_energies": image_energies,
         "pad_frames": pad_frames,
     }
+
+
+@dataclass(frozen=True)
+class _NebJob:
+    """Pickle-friendly per-trial input for NEB worker."""
+    trial_idx: int
+    reactant_atoms: Atoms
+    product_atoms: Atoms
+    n_images: int
+    fmax: float
+    max_steps: int
+    pad_frames: int
+    output_xyz: Path
+    backend: str
+    neb_model: str
+
+
+def run_neb_for_trial(
+    reactant_atoms: Atoms,
+    product_atoms: Atoms,
+    *,
+    calc: Calculator,
+    n_images: int,
+    fmax: float,
+    max_steps: int,
+    pad_frames: int,
+    output_xyz: Path,
+) -> dict:
+    """Run un-restrained endpoint relax + 2-phase NEB for one trial.
+
+    Returns a dict {converged, n_images, image_energies, peak_energy,
+    final_fmax, xyz_path}. xyz_path is the basename only.
+    """
+    R = relax_endpoint(reactant_atoms, calc, fmax=0.05, max_steps=50)
+    P = relax_endpoint(product_atoms, calc, fmax=0.05, max_steps=50)
+    info = run_neb(
+        reactant=R, product=P, calculator=calc,
+        n_images=n_images, output_xyz=output_xyz,
+        fmax=fmax, max_steps=max_steps, pad_frames=pad_frames,
+    )
+    image_energies = info.get("image_energies") or []
+    finite = [e for e in image_energies if e == e]
+    peak = max(finite) if finite else float("nan")
+    return {
+        "converged": info.get("converged", False),
+        "n_images": info.get("n_images", n_images),
+        "image_energies": image_energies,
+        "peak_energy": float(peak) if peak == peak else float("nan"),
+        "final_fmax": info.get("final_fmax", float("nan")),
+        "xyz_path": output_xyz.name,
+    }
+
+
+def _run_one_neb(job: _NebJob) -> dict:
+    try:
+        calc = get_cached_calculator()
+    except RuntimeError:
+        from reactx.calculators import make_calculator
+        calc = make_calculator(
+            job.backend,
+            **({"model_name": job.neb_model} if job.backend == "uma" else {}),
+        )
+    result = run_neb_for_trial(
+        job.reactant_atoms, job.product_atoms, calc=calc,
+        n_images=job.n_images, fmax=job.fmax, max_steps=job.max_steps,
+        pad_frames=job.pad_frames, output_xyz=job.output_xyz,
+    )
+    result["trial_idx"] = job.trial_idx
+    return result
+
+
+def run_neb_top_k(
+    top_k_results: list,           # list[ScreeningTrialResult]
+    *,
+    backend: str,
+    neb_model: str,
+    workers: int,
+    n_images: int,
+    fmax: float,
+    max_steps: int,
+    pad_frames: int,
+    output_dir: Path,
+) -> list[dict]:
+    """Run NEB on each top-K screening result, parallel via Pool when workers>=2.
+
+    Returns list of NEB result dicts in the same order as top_k_results.
+    Skips entries with no frames (logs warning); if all skipped, returns [].
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    jobs: list[_NebJob] = []
+    for r in top_k_results:
+        if not r.frames:
+            log.warning("skipping NEB for trial %d: no frames", r.trial_idx)
+            continue
+        out_xyz = output_dir / f"trajectory_neb_trial_{r.trial_idx}.xyz"
+        jobs.append(_NebJob(
+            trial_idx=r.trial_idx,
+            reactant_atoms=r.frames[0],
+            product_atoms=r.frames[-1],
+            n_images=n_images, fmax=fmax, max_steps=max_steps,
+            pad_frames=pad_frames, output_xyz=out_xyz,
+            backend=backend, neb_model=neb_model,
+        ))
+    if not jobs:
+        return []
+
+    if backend == "uma":
+        initializer, initargs = init_uma_worker, (neb_model,)
+    elif backend == "lj":
+        initializer, initargs = init_lj_worker, ()
+    else:
+        raise ValueError(f"unsupported backend: {backend!r}")
+
+    return run_with_pool(
+        _run_one_neb, jobs,
+        workers=workers, initializer=initializer, initargs=initargs,
+    )
