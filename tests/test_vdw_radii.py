@@ -1,4 +1,6 @@
 """vdW radii lookup: Alvarez (2013) Dalton Trans. 42, 8617."""
+import logging
+
 import pytest
 
 from reactx.vdw_radii import VDW_RADII_ANGSTROM, FALLBACK_RADIUS, vdw_radius
@@ -36,8 +38,17 @@ def test_vdw_radius_known_values():
 
 def test_vdw_radius_fallback_for_unknown_symbol(caplog):
     # Z > 83 (例: "Po", "U") はテーブル外 → fallback + warning
-    with caplog.at_level("WARNING"):
-        r = vdw_radius("Po")
+    # cli._configure_reactx_logging が `reactx` parent で propagate=False を
+    # 設定するため (test_cli_* 後)、caplog の root handler が捕捉できない。
+    # 当該テスト中だけ propagation を一時的に有効化する。
+    reactx_log = logging.getLogger("reactx")
+    saved = reactx_log.propagate
+    reactx_log.propagate = True
+    try:
+        with caplog.at_level("WARNING"):
+            r = vdw_radius("Po")
+    finally:
+        reactx_log.propagate = saved
     assert r == FALLBACK_RADIUS
     assert "Po" in caplog.text
 
