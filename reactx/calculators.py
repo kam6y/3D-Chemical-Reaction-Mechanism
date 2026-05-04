@@ -29,7 +29,7 @@ def make_calculator(name: str = "uma", **kwargs: Any) -> Calculator:
 
 def _build_uma_calculator(
     *,
-    model_name: str = "uma-m-1p1",
+    model_name: str = "uma-s-1p2",
     device: str | None = None,
     task_name: str = "omol",
     **kwargs: Any,
@@ -37,7 +37,7 @@ def _build_uma_calculator(
     """Build a fairchem-core FAIRChemCalculator for the UMA backend.
 
     See the fairchem-core docs for the current list of supported model names
-    (e.g. "uma-m-1p1", "uma-s-1p2"). A local checkpoint path is also accepted.
+    (e.g. "uma-s-1p2", "uma-m-1p1"). A local checkpoint path is also accepted.
     """
     try:
         import torch
