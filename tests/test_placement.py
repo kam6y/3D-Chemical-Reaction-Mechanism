@@ -1,8 +1,20 @@
 """Unit tests for reactx.placement (Phase 7)."""
 import numpy as np
 import pytest
+from ase import Atoms
+from rdkit import Chem
 
-from reactx.placement import compute_d_min, evaluate_direction, sample_sphere_directions
+from reactx.bond_changes import BondChanges
+from reactx.placement import (
+    PlacementResult,
+    _find_bridging_formed,
+    _identify_substrate,
+    build_atoms_from_positions,
+    compute_d_min,
+    evaluate_direction,
+    sample_sphere_directions,
+    valid_placements,
+)
 
 
 def test_sample_sphere_returns_unit_vectors():
@@ -167,20 +179,6 @@ def test_evaluate_direction_unblocked_clear_path():
     # max_incoming_back = 0 + 0.5 = 0.5
     # d_min = -0.5 + 0.5 + 0.5 = 0.5
     assert d_min == pytest.approx(0.5)
-
-
-from ase import Atoms
-from rdkit import Chem
-
-from reactx.bond_changes import BondChanges
-from reactx.placement import (
-    PlacementResult,
-    PlacementTrial,
-    _identify_substrate,
-    _find_bridging_formed,
-    build_atoms_from_positions,
-    valid_placements,
-)
 
 
 def test_identify_substrate_picks_largest():

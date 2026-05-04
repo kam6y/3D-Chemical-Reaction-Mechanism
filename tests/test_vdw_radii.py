@@ -3,7 +3,7 @@ import logging
 
 import pytest
 
-from reactx.vdw_radii import VDW_RADII_ANGSTROM, FALLBACK_RADIUS, vdw_radius
+from reactx.vdw_radii import FALLBACK_RADIUS, VDW_RADII_ANGSTROM, vdw_radius
 
 
 def test_vdw_radii_alvarez_z1_to_z83_exact_set():
@@ -57,4 +57,4 @@ def test_vdw_radius_fallback_value_is_lower_quartile():
     # FALLBACK_RADIUS = 1.50 Å は O の値 (= Alvarez Z=1..83 の lower quartile 付近)。
     # 「unknown 元素では小さめに見積もって blocking を緩める」方針の固定値。
     # 実用上 OMol25 は Z=1..83 しか出ないので発火しない安全網。
-    assert FALLBACK_RADIUS == pytest.approx(1.50)
+    assert pytest.approx(1.50) == FALLBACK_RADIUS

@@ -244,10 +244,7 @@ def _broken_bridges_fragments(
     for k, frag in enumerate(frag_indices):
         for a in frag:
             atom_to_frag[a] = k
-    for a, b in broken:
-        if atom_to_frag.get(a) != atom_to_frag.get(b):
-            return True
-    return False
+    return any(atom_to_frag.get(a) != atom_to_frag.get(b) for a, b in broken)
 
 
 def valid_placements(
