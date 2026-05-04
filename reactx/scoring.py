@@ -1,10 +1,9 @@
-"""Trial scoring for multi-angle path generation.
+"""Trial scoring + final-best selection for placement trials.
 
-After each angle trial produces a relaxation trajectory, score_trials picks
-the best one: prefer trials that actually reached the product topology
-(formed bond close, broken bond far), then minimum peak energy among those.
-If no trial reached the product, fall back to the trial with lowest peak
-(= 'least bad' partial path).
+Phase 7: rotation_deg field replaced by direction (3-vec) since trials are
+indexed by Fibonacci-sphere unit vectors, not deviations from a single
+ideal direction. select_best_trial moved here from prescreen.select_top_k_indices
+(top-K -> 1) to centralize all "pick best trial" logic.
 """
 from __future__ import annotations
 
@@ -16,10 +15,10 @@ from ase import Atoms
 
 @dataclass
 class TrialResult:
-    """Outcome of a single multi-angle relaxation trial."""
+    """Outcome of a single placement / relaxation trial."""
 
     trial_idx: int
-    rotation_deg: float  # angular deviation from ideal direction
+    direction: np.ndarray  # (3,) unit vector - sphere-sampled placement direction
     frames: list[Atoms]
     energies: list[float]
     reached_product: bool
@@ -57,12 +56,20 @@ def reached_product(
 
 
 def score_trials(results: list[TrialResult]) -> TrialResult:
-    """Return the best trial. Preference order:
-    1. reached_product=True, lowest peak_energy
-    2. all failed: lowest peak_energy (= 'least bad' fallback)
+    """Return the best TrialResult (preference: reached then peak_energy up).
+
+    1. reached_product=True 群の最低 peak_energy
+    2. 全部 False なら全体の最低 peak_energy (= 'least bad' fallback)
     """
     if not results:
         raise ValueError("score_trials called with empty list")
     reached = [r for r in results if r.reached_product]
     pool = reached if reached else results
     return min(pool, key=lambda r: r.peak_energy)
+
+
+def select_best_trial(trials: list[TrialResult]) -> int:
+    """Return the trial_idx of the best TrialResult (same preference as score_trials)."""
+    if not trials:
+        raise ValueError("select_best_trial called with empty list")
+    return score_trials(trials).trial_idx
