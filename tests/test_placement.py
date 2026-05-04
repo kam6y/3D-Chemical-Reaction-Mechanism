@@ -294,6 +294,25 @@ def test_valid_placements_metathesis_not_implemented():
         valid_placements(mol_h, frags, positions, bc, n_candidates=8, seed=0)
 
 
+def test_valid_placements_termolecular_not_implemented():
+    # 3 fragments (CH3Cl + 2 nucleophiles) → 1 substrate + 2 non-substrate
+    # → out of scope for Phase 7.
+    mol = Chem.MolFromSmiles("CCl.[OH-].[F-]")
+    mol_h = Chem.AddHs(mol)
+    frags = Chem.GetMolFrags(mol_h)
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    c_idx = syms.index("C")
+    cl_idx = syms.index("Cl")
+    o_idx = syms.index("O")
+    f_idx = syms.index("F")
+    # formed: both OH- and F- attempt to attack C; broken: C-Cl
+    bc = BondChanges(formed=((c_idx, o_idx), (c_idx, f_idx)), broken=((c_idx, cl_idx),))
+    n = mol_h.GetNumAtoms()
+    positions = np.zeros((n, 3))
+    with pytest.raises(NotImplementedError, match="termolecular"):
+        valid_placements(mol_h, frags, positions, bc, n_candidates=8, seed=0)
+
+
 def test_build_atoms_from_positions_preserves_symbols_and_charges():
     mol = Chem.MolFromSmiles("[OH-]")
     mol_h = Chem.AddHs(mol)

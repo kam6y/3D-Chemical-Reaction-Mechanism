@@ -137,13 +137,37 @@ def evaluate_direction(
 
 @dataclass(frozen=True)
 class PlacementTrial:
-    direction: np.ndarray   # (3,) unit vector
-    d_min: float            # placement distance applied along direction
-    positions: np.ndarray   # (N, 3) full-system coordinates after translation
+    """A single surviving placement candidate.
+
+    Invariants:
+    - `direction` is a unit vector (||direction||₂ == 1 to float tolerance).
+    - `d_min` is the placement distance applied along `direction` from the
+      anchor; for the unimolecular passthrough trial it is 0.0; for
+      bimolecular trials it is `compute_d_min(...)` and may be negative
+      when all substrate atoms lie behind the anchor relative to direction.
+    - `positions` shape is `(N, 3)` matching `mol_h.GetNumAtoms()`. Substrate
+      atoms are unchanged from input; the placed fragment(s) have been
+      translated so `incoming_anchor` lands at `anchor_pos + direction * d_min`.
+    """
+    direction: np.ndarray
+    d_min: float
+    positions: np.ndarray
 
 
 @dataclass(frozen=True)
 class PlacementResult:
+    """Aggregated outcome of `valid_placements` on a single bond_changes.
+
+    Invariants (bimolecular case):
+    - `len(trials) + n_blocked == n_candidates`
+    - `len(blocked_reasons) == n_candidates`; element is None for survivors,
+      a string like "angle_shadow:atom_index=K" or "d_min_ceiling:value=V"
+      for blocked candidates.
+
+    Invariants (unimolecular passthrough):
+    - `n_candidates == 1`, `n_blocked == 0`, `len(trials) == 1`,
+      `blocked_reasons == [None]`.
+    """
     trials: list[PlacementTrial]
     n_candidates: int
     n_blocked: int
@@ -274,88 +298,71 @@ def valid_placements(
     substrate_set = set(substrate)
     non_substrate = [f for f in frag_indices if f is not substrate]
 
-    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
-    vdw_all = np.array([vdw_radius(s) for s in syms])
-
     # Phase 7 supports a single non-substrate fragment per call.
     if len(non_substrate) > 1:
-        log.warning(
-            "Phase 7: %d non-substrate fragments detected; placing each "
-            "independently with the same sphere sample (geometric quality "
-            "may degrade for termolecular)", len(non_substrate),
+        raise NotImplementedError(
+            f"termolecular placement ({len(non_substrate)} non-substrate "
+            f"fragments) is out of scope for Phase 7; only one non-substrate "
+            f"fragment is supported"
         )
 
-    out_positions = positions.copy()
-    survivors: list[PlacementTrial] | None = None
-    blocked_reasons_final: list[str | None] = []
-    n_blocked_total = 0
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+    vdw_all = np.array([vdw_radius(s) for s in syms], dtype=float)
 
+    out_positions = positions.copy()
     directions = sample_sphere_directions(n_candidates, seed=seed)
 
-    for fragment in non_substrate:
-        fragment_set = set(fragment)
-        bridge = _find_bridging_formed(bond_changes.formed, substrate_set, fragment_set)
-        anchor = bridge[0] if bridge[0] in substrate_set else bridge[1]
-        incoming_anchor = bridge[1] if bridge[0] == anchor else bridge[0]
+    fragment = non_substrate[0]
+    fragment_set = set(fragment)
+    bridge = _find_bridging_formed(bond_changes.formed, substrate_set, fragment_set)
+    anchor = bridge[0] if bridge[0] in substrate_set else bridge[1]
+    incoming_anchor = bridge[1] if bridge[0] == anchor else bridge[0]
 
-        substrate_atoms = [i for i in substrate if i != anchor]
-        sub_pos = out_positions[substrate_atoms]
-        sub_vdw = vdw_all[substrate_atoms]
-        inc_pos = out_positions[list(fragment)]
-        inc_vdw = vdw_all[list(fragment)]
+    substrate_atoms = [i for i in substrate if i != anchor]
+    sub_pos = out_positions[substrate_atoms]
+    sub_vdw = vdw_all[substrate_atoms]
+    inc_pos = out_positions[list(fragment)]
+    inc_vdw = vdw_all[list(fragment)]
 
-        anchor_pos = out_positions[anchor]
-        incoming_anchor_pos = out_positions[incoming_anchor]
+    anchor_pos = out_positions[anchor]
+    incoming_anchor_pos = out_positions[incoming_anchor]
 
-        per_direction_trials: list[PlacementTrial] = []
-        per_direction_reasons: list[str | None] = []
-        for d in directions:
-            blocked, d_min, reason = evaluate_direction(
-                d, anchor_pos, sub_pos, sub_vdw,
-                inc_pos, inc_vdw, incoming_anchor_pos,
-                gap=gap, d_min_ceiling=d_min_ceiling,
-            )
-            if blocked:
-                per_direction_reasons.append(reason)
-                continue
-            target = anchor_pos + d * d_min
-            new_positions = out_positions.copy()
-            new_positions[list(fragment)] += target - incoming_anchor_pos
-            per_direction_trials.append(PlacementTrial(
-                direction=d, d_min=d_min, positions=new_positions,
-            ))
-            per_direction_reasons.append(None)
+    survivors: list[PlacementTrial] = []
+    blocked_reasons: list[str | None] = []
+    for d in directions:
+        blocked, d_min, reason = evaluate_direction(
+            d, anchor_pos, sub_pos, sub_vdw,
+            inc_pos, inc_vdw, incoming_anchor_pos,
+            gap=gap, d_min_ceiling=d_min_ceiling,
+        )
+        if blocked:
+            blocked_reasons.append(reason)
+            continue
+        target = anchor_pos + d * d_min
+        new_positions = out_positions.copy()
+        new_positions[list(fragment)] += target - incoming_anchor_pos
+        survivors.append(PlacementTrial(
+            direction=d, d_min=d_min, positions=new_positions,
+        ))
+        blocked_reasons.append(None)
 
-        n_blocked_this = sum(1 for r in per_direction_reasons if r is not None)
-        if not per_direction_trials:
-            raise RuntimeError(
-                f"anchor at atom {anchor} has no valid placement direction "
-                f"(all {n_candidates} candidates blocked); substrate may be "
-                f"fully enclosed"
-            )
-        if len(per_direction_trials) < max(1, n_candidates // 4):
-            log.warning(
-                "only %d/%d candidates survived blocking at anchor %d; "
-                "consider larger n_candidates or check substrate geometry",
-                len(per_direction_trials), n_candidates, anchor,
-            )
+    n_blocked_total = sum(1 for r in blocked_reasons if r is not None)
+    if not survivors:
+        raise RuntimeError(
+            f"anchor at atom {anchor} has no valid placement direction "
+            f"(all {n_candidates} candidates blocked); substrate may be "
+            f"fully enclosed"
+        )
+    if len(survivors) < max(1, n_candidates // 4):
+        log.warning(
+            "only %d/%d candidates survived blocking at anchor %d; "
+            "consider larger n_candidates or check substrate geometry",
+            len(survivors), n_candidates, anchor,
+        )
 
-        if survivors is None:
-            survivors = per_direction_trials
-            blocked_reasons_final = per_direction_reasons
-            n_blocked_total = n_blocked_this
-        else:
-            # 2 つ目以降の non-substrate fragment は 1 つ目で生存した direction だけ
-            # で配置を続ける (termolecular は警告済み)。実用上 Phase 7 では発火しない。
-            log.warning(
-                "termolecular placement: applying first-fragment survivors to "
-                "subsequent fragment without re-filtering (best-effort)"
-            )
-
-    assert survivors is not None
     return PlacementResult(
         trials=survivors,
         n_candidates=n_candidates,
         n_blocked=n_blocked_total,
-        blocked_reasons=blocked_reasons_final,
+        blocked_reasons=blocked_reasons,
     )
