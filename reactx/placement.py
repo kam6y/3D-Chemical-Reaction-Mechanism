@@ -64,6 +64,10 @@ def compute_d_min(
     max_substrate_fwd = max((p - anchor_pos) · d + r_vdW for p, r_vdW in substrate)
     max_incoming_back = max((p - incoming_anchor_pos) · (-d) + r_vdW for p, r_vdW in incoming)
     d_min = max_substrate_fwd + max_incoming_back + gap
+
+    Note: max_substrate_fwd は全原子が anchor の後ろ (-d 側) にあるとき負になりうる。
+    その値は clamp せずそのまま d_min に算入する (test_compute_d_min_substrate_behind_anchor_does_not_inflate
+    で挙動を固定済み)。
     """
     sub_proj = (substrate_positions - anchor_pos) @ d + substrate_vdw
     inc_proj = (incoming_positions - incoming_anchor_pos) @ (-d) + incoming_vdw
@@ -102,10 +106,11 @@ def evaluate_direction(
     safe = r > 1e-9
     if np.any(safe):
         cos_to_d = (rel[safe] @ d) / r[safe]
-        # angle threshold: atan(vdw / r) → cos threshold: r / sqrt(r^2 + vdw^2)
+        # Angle test: angle(d, rel) < atan(vdw / r)
+        # ⇔ (d は単位、r > 0 で) cos(angle) > r / sqrt(r² + vdw²)
+        # 形式変形により per-atom arctan を回避している。
         vdw_safe = substrate_vdw[safe]
         cos_thresh = r[safe] / np.sqrt(r[safe] ** 2 + vdw_safe ** 2)
-        # angle < threshold ⇔ cos > cos_thresh
         hits = np.where(cos_to_d > cos_thresh)[0]
         if hits.size:
             # safe-mask 上の index → 元 index へ戻す
