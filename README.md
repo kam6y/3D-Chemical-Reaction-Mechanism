@@ -9,7 +9,7 @@
 - **Menshutkin** (`NH₃ + CH₃Cl`、1 formed + 1 broken、中性 → イオン対)
 - **E2 elimination** (1 formed + 2 broken)
 - **SN1 step 1 解離** (0 formed + 1 broken、unimolecular)
-- **SN1 step 2 recombination** (1 formed + 0 broken、Tier 2 plane-normal placement)
+- **SN1 step 2 recombination** (1 formed + 0 broken)
 
 ## セットアップ
 
@@ -50,7 +50,7 @@ reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render
 
 ## Per-reaction `.rxn.toml` config
 
-各 `examples/<name>.rxn` には同階層に同名 stem の sidecar TOML (`<name>.rxn.toml`) を **必須で** 配置する。CLI は `<rxn_path>.toml` を機械的にロードし、結合変化情報 (`formed` / `broken`, atom-map 番号) と物理パラメータ (`k_form` / `k_broken` / `r_broken` / `max_relax_steps` / 任意 `r_form`) と sampling/prescreen 設定をすべてここから取る。
+各 `examples/<name>.rxn` には同階層に同名 stem の sidecar TOML (`<name>.rxn.toml`) を **必須で** 配置する。CLI は `<rxn_path>.toml` を機械的にロードし、結合変化情報 (`formed` / `broken`, atom-map 番号) と物理パラメータ (`k_form` / `k_broken` / `r_broken` / `max_relax_steps` / 任意 `r_form`) と sampling 設定をすべてここから取る。
 
 最小例 (`examples/sn2.rxn.toml`):
 
@@ -69,8 +69,8 @@ max_relax_steps = 100
 | `.rxn` | description | formed (map) | broken (map) | k_form | k_broken | r_broken (Å) | max_relax_steps | r_form | n_candidates |
 |---|---|---|---|---|---|---|---|---|---|
 | sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 元素表 | 64 |
-| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 0.5 | 1.0 | 4.0 | 100 | 1.05 | 64 |
-| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 2.0 | 2.0 | 5.0 | 200 | 元素表 | 64 |
+| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 1.0 | 2.0 | 4.0 | 100 | 1.05 | 64 |
+| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 4.0 | 2.0 | 5.0 | 200 | 元素表 | 64 |
 | e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 1.0 | 1.0 | 4.0 | 200 | 元素表 | 64 |
 | sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | 0.0 | 2.0 | 6.0 | 200 | — | **1** |
 | sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (C-Cl 1.78) | 64 |
@@ -129,19 +129,21 @@ RTX 5070 Ti + UMA-m-1p1 で実測 (`n_candidates=64`、Blender 4.5 LTS で `--re
 | Reaction | wall-clock | n_valid | reached / valid | 備考 |
 |---|---|---|---|---|
 | SN2 (`examples/sn2.rxn`) | 232 s | 20 | 6 / 20 | 64 候補、44 blocked (3-H + Cl の角度シャドウ) |
-| Proton transfer (`examples/proton_transfer.rxn`) | 442 s | 32 | 3 / 32 | HCl 側 anchor は H なので shadowing が緩く生存数多め |
-| Menshutkin (`examples/menshutkin.rxn`) | 367 s | 25 | 0 / 25 | 全 trial が部分到達止まり、peak_energy 最小 trial を選択 |
+| Proton transfer (`examples/proton_transfer.rxn`) | 447 s | 32 | 32 / 32 | k_form=1.0 / k_broken=2.0 に強化、全 trial で proton 移動 |
+| Menshutkin (`examples/menshutkin.rxn`) | 417 s | 25 | 9 / 25 | k_form=4.0 で gas-phase repulsive PES を押し切り、N-C 形成 |
 | E2 (`examples/e2.rxn`) | 740 s | 42 | 42 / 42 | 1 formed + 2 broken、全方向が product 到達 |
 | SN1 dissoc (`examples/sn1_dissoc.rxn`) | 25 s | 1 | 1 / 1 | unimolecular auto-clamp で n_candidates=1、UMA model load 後ほぼ即終了 |
 | SN1 recomb (`examples/sn1_recomb.rxn`) | 339 s | 27 | 16 / 27 | bimolecular、Cl⁻ が tBu⁺ の sp²-平面方向から接近 |
 
 UMA model load (~25–30 s) が固定コスト。Phase 7 では MMFF prescreen を廃止したため、blocking で生存した候補の数 (`n_valid`) が wall-clock を直接決める。`n_candidates=64` で各反応の anchor 周辺ステリックにより 20–42 程度が生存し、それぞれ UMA で full relax する。混雑した anchor で生存が少ないとログ警告が出る (`only K/N candidates survived blocking ...`)。生存ゼロは `RuntimeError` で停止する。
 
-`reached_product=True` 数が valid 数より少ないのは正常で、`scoring.score_trials` が peak_energy 最小の trial を選択する。0 / N でも `least bad` フォールバックで selected_trial が決まる (Menshutkin の例)。
+全球面サンプリングでは個々の trial が「正確な backside」から数十度ずれることが多いため、Phase 6 の cone サンプル時代より restraint をやや強めにする必要がある。特に Menshutkin のように gas-phase で product が contact ion pair より高エネルギーになる反応では、`k_form` を 4.0 程度まで強くしないと UMA の repulsive 領域を押し切れず N-C bond が形成されない。
+
+`reached_product=True` 数が valid 数より少ないのは正常で、`scoring.score_trials` が peak_energy 最小の trial を選択する。0 / N でも `least bad` フォールバックで selected_trial が決まる。
 
 `--neb-refine` を on にすると NEB の収束に追加で 5–10 分かかる (`test_neb_refine_sn2` で実測 ~7 分)。アニメーション目的なら off 推奨。
 
-各実行の trial 全件スコアと prescreen 結果と wall_clock_seconds は `out/<rxn>/meta.json` に残る。
+各実行の trial 全件スコアと placement 結果 (`n_candidates` / `n_blocked` / `n_valid`) と wall_clock_seconds は `out/<rxn>/meta.json` に残る。
 
 ## テスト
 
