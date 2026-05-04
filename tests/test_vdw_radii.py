@@ -4,8 +4,10 @@ import pytest
 from reactx.vdw_radii import VDW_RADII_ANGSTROM, FALLBACK_RADIUS, vdw_radius
 
 
-def test_vdw_radii_alvarez_z1_to_z83_present():
-    # 元素記号は Z=1..83 (H..Bi)。OMol25 / UMA omol 訓練範囲と一致。
+def test_vdw_radii_alvarez_z1_to_z83_exact_set():
+    # 元素記号は Z=1..83 (H..Bi) **だけ**。OMol25 / UMA omol 訓練範囲と一致。
+    # 将来 Z>83 を追加すると test_vdw_radius_fallback_for_unknown_symbol
+    # ("Po") が壊れるので両側等号でロック。
     expected_symbols = {
         "H", "He",
         "Li", "Be", "B", "C", "N", "O", "F", "Ne",
@@ -19,7 +21,8 @@ def test_vdw_radii_alvarez_z1_to_z83_present():
         "Tm", "Yb", "Lu",
         "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl", "Pb", "Bi",
     }
-    assert expected_symbols.issubset(VDW_RADII_ANGSTROM.keys())
+    assert set(VDW_RADII_ANGSTROM.keys()) == expected_symbols
+    assert len(VDW_RADII_ANGSTROM) == 83
 
 
 def test_vdw_radius_known_values():
@@ -39,6 +42,8 @@ def test_vdw_radius_fallback_for_unknown_symbol(caplog):
     assert "Po" in caplog.text
 
 
-def test_vdw_radius_fallback_value_is_alvarez_median_neighborhood():
-    # FALLBACK_RADIUS は 1.50 (Alvarez Z=1..83 median 近傍、O と一致するのは偶然)
+def test_vdw_radius_fallback_value_is_lower_quartile():
+    # FALLBACK_RADIUS = 1.50 Å は O の値 (= Alvarez Z=1..83 の lower quartile 付近)。
+    # 「unknown 元素では小さめに見積もって blocking を緩める」方針の固定値。
+    # 実用上 OMol25 は Z=1..83 しか出ないので発火しない安全網。
     assert FALLBACK_RADIUS == pytest.approx(1.50)

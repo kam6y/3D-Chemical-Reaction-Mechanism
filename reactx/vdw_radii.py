@@ -4,8 +4,14 @@ Alvarez (2013) "A cartography of the van der Waals territories"
 Dalton Trans. 42, 8617. Values in Angstrom for Z=1..83 (H..Bi),
 matching OMol25 / UMA omol task element coverage exactly.
 
-Z > 83 (Po, At, Rn, Fr, Ra, all actinides) は UMA omol25 訓練外なので
-実用上発火しないが、安全のため Alvarez 中央値近傍 (1.50 Å) で fallback する。
+Keyed by element symbol (str) rather than atomic number, since
+blender/render.py runs inside Blender's bundled Python and cannot rely
+on Z↔symbol conversion from ase / mendeleev.
+
+FALLBACK_RADIUS = 1.50 Å (= O の値、Alvarez 1..83 の lower-quartile 付近)。
+意図は「unknown 元素のときは小さめに見積もって blocking を緩める」。
+Z > 83 (Po, At, Rn, Fr, Ra, 全アクチノイド) は UMA omol25 訓練外なので
+実用上発火しない安全網であり、下流の UMA relax が overlap を解消する前提。
 """
 from __future__ import annotations
 
