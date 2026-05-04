@@ -46,14 +46,6 @@ def test_parse_rxn_raises_when_atom_map_missing(tmp_path: Path):
         parse_rxn(bad)
 
 
-def test_heavy_to_hydrogen_groups_on_methane():
-    from reactx.rxn_parser import heavy_to_hydrogen_groups
-    mol = Chem.MolFromSmiles("C")
-    mol_h = Chem.AddHs(mol)
-    groups = heavy_to_hydrogen_groups(mol_h)
-    assert groups == {0: [1, 2, 3, 4]}
-
-
 def test_parse_sn1_recomb_rxn(sn1_recomb_rxn_path):
     """examples/sn1_recomb.rxn が parse でき、TOML の formed=[[1,5]] が C-Cl 形成を表す。"""
     from reactx.bond_changes import BondChanges

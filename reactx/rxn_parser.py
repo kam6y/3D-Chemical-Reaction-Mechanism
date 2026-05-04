@@ -73,23 +73,6 @@ def _collect_atom_map_numbers(mol: Chem.Mol, *, side: str) -> dict[int, int]:
     return result
 
 
-def heavy_to_hydrogen_groups(mol_with_h: Chem.Mol) -> dict[int, list[int]]:
-    """Return {heavy_atom_idx: [bonded_h_idx, ...]} for a Mol with explicit Hs.
-
-    Use after Chem.AddHs so that hydrogen indices correspond to positions in the
-    Atoms object produced by embed3d.embed_mol_to_atoms, which preserves the
-    Chem.AddHs(mol) atom ordering exactly.
-    """
-    groups: dict[int, list[int]] = {}
-    for atom in mol_with_h.GetAtoms():
-        if atom.GetSymbol() == "H":
-            continue
-        heavy_idx = atom.GetIdx()
-        hs = [n.GetIdx() for n in atom.GetNeighbors() if n.GetSymbol() == "H"]
-        groups[heavy_idx] = hs
-    return groups
-
-
 def atom_map_to_reactant_idx(reactant_mol: Chem.Mol) -> dict[int, int]:
     """Return {atom_map_number: 0-based atom index} for the (pre-AddHs) reactant.
 
