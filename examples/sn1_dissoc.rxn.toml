@@ -10,3 +10,6 @@ max_relax_steps = 200
 
 [sampling]
 n_candidates = 1
+
+[neb]
+top_k = 1

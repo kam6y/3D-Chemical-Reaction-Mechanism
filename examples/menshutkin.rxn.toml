@@ -7,3 +7,6 @@ k_form = 4.0
 k_broken = 2.0
 r_broken = 5.0
 max_relax_steps = 200
+
+[neb]
+pad_frames = 3
