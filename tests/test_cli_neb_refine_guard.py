@@ -12,7 +12,7 @@ k_broken = 1.0
 r_broken = 4.0
 max_relax_steps = 5
 [sampling]
-n_angles = 1
+n_candidates = 1
 """
 
 _SN1_RECOMB_TOML = """\
@@ -25,7 +25,7 @@ k_broken = 0.0
 r_broken = 4.0
 max_relax_steps = 5
 [sampling]
-n_angles = 1
+n_candidates = 1
 """
 
 _SN2_TOML = """\
@@ -38,7 +38,7 @@ k_broken = 1.0
 r_broken = 4.0
 max_relax_steps = 5
 [sampling]
-n_angles = 1
+n_candidates = 8
 """
 
 
