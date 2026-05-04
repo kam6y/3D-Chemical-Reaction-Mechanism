@@ -10,13 +10,9 @@ caller is expected to call placement.valid_placements next.
 """
 from __future__ import annotations
 
-import logging
-
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem
-
-log = logging.getLogger(__name__)
 
 MAX_EMBED_RETRIES = 5
 
