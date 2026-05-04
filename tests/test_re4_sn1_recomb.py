@@ -10,7 +10,6 @@ from ase.io import read
 
 from reactx.cli import main
 
-
 _SN1R_FAST = """\
 description = "SN1 recomb fast"
 formed = [[1, 5]]

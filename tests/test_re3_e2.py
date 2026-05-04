@@ -7,7 +7,6 @@ from ase.io import read
 
 from reactx.cli import main
 
-
 _E2_FAST = """\
 description = "E2 fast"
 formed = [[4, 5]]

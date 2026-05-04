@@ -7,7 +7,6 @@ from ase.io import read
 
 from reactx.cli import main
 
-
 _SN1D_FAST = """\
 description = "SN1 dissoc fast"
 formed = []

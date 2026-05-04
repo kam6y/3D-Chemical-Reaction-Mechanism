@@ -20,8 +20,8 @@ from reactx.placement import (
     valid_placements,
 )
 from reactx.rxn_parser import atom_map_to_reactant_idx, parse_rxn
-from reactx.screening import screen_all_trials
 from reactx.scoring import ScreeningTrialResult, top_k_trials
+from reactx.screening import screen_all_trials
 
 log = logging.getLogger("reactx")
 

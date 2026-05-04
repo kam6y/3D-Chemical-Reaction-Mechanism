@@ -7,7 +7,6 @@ from ase.io import read
 
 from reactx.cli import main
 
-
 _PT_FAST = """\
 description = "Proton transfer fast"
 formed = [[1, 3]]

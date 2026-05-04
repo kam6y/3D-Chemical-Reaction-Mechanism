@@ -8,7 +8,6 @@ from ase.io import read
 
 from reactx.cli import main
 
-
 _SN2_FAST = """\
 description = "SN2 fast"
 formed = [[1, 3]]
