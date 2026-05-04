@@ -151,7 +151,7 @@ def valid_placements(
     positions: np.ndarray,             # 各 fragment 個別 embed 直後の (N, 3)
     bond_changes: BondChanges,
     *,
-    n_candidates: int = 16,
+    n_candidates: int = 64,
     seed: int = 0,
     gap: float = 0.5,
     d_min_ceiling: float = 8.0,
@@ -317,7 +317,7 @@ best_idx = select_best_trial(trial_results)
   bridging formed = (0, 6)  # C ∈ substrate, O ∈ incoming
   anchor = 0 (C), incoming_anchor = 6 (O)
 
-  directions = sample_sphere_directions(16, seed=0)
+  directions = sample_sphere_directions(64, seed=0)
 
   for each d in directions:
     blocked, d_min, reason = evaluate_direction(d, anchor_pos, ..., gap=0.5, d_min_ceiling=8.0)
@@ -329,14 +329,14 @@ best_idx = select_best_trial(trial_results)
     new_positions[list(incoming_frag)] += target - positions[incoming_anchor]
     trials.append(PlacementTrial(direction=d, d_min=d_min, positions=new_positions))
 
-  return PlacementResult(trials, n_candidates=16, n_blocked=len(blocked_reasons), ...)
+  return PlacementResult(trials, n_candidates=64, n_blocked=len(blocked_reasons), ...)
 
-  期待: SN2 では back hemisphere の ~7-9 directions が生存
+  期待: SN2 では back hemisphere の ~28-36 directions が生存
         (front-side: Cl が cone 半径 ~46° で覆う → blocked)
         (側面: 3 H が ~48° の cones で覆う → blocked)
         (back: 3 H の cone の隙間 → 生存)
 
-→ 7 trials 全件を UMA full relax (path_relax.relax_with_restraints)
+→ ~30 trials 全件を UMA full relax (path_relax.relax_with_restraints)
 
 → select_best_trial → trajectory.xyz, energies.json, meta.json 出力
 ```
@@ -438,7 +438,7 @@ steps = 30
 
 # 新 (Phase 7)
 [sampling]
-n_candidates = 16
+n_candidates = 64
 # cone_half_deg は削除 (常に 4π sr)
 # [prescreen] セクションごと削除
 ```
@@ -485,9 +485,9 @@ n_candidates = 16
 // 新 (Phase 7)
 {
   "selected_trial": 0,
-  "n_candidates": 16,
-  "n_blocked": 9,
-  "n_valid": 7,
+  "n_candidates": 64,
+  "n_blocked": 33,
+  "n_valid": 31,
   "trials": [
     {"trial_idx": 0, "direction": [0.0, 0.0, 1.0], "reached_product": true, ...}
   ]
@@ -508,7 +508,7 @@ n_candidates = 16
 
 ## 11. README 更新
 
-- 「対応反応」表の `n_angles` 列を `n_candidates` に rename、値を `16` に (SN1 dissoc は `1`)
+- 「対応反応」表の `n_angles` 列を `n_candidates` に rename、値を `64` に (SN1 dissoc は `1`)
 - 「Per-reaction `.rxn.toml` config」例から `cone_half_deg` / `[prescreen]` 例を削除
 - 「Wall-clock (実測)」表を Phase 7 で再計測した値に更新 (実装後)
 - 「MMFF94 prescreen は実測上 ...」段落 → 削除
@@ -520,7 +520,7 @@ n_candidates = 16
 
 | パラメータ | default | 根拠 |
 |---|---|---|
-| `n_candidates` | `16` | 全球面 (4π sr) を Fibonacci で 16 等分 → solid angle ≈ 0.785 sr/point。SN2 backside cone (~0.84 sr) に概ね 1 candidate 入る粒度。blocking で ~50% 生存と仮定し UMA full relax 8 件 ≒ 80 s で現状 SN2 (54 s) と同 order。下げたければ TOML で 8 等まで。 |
+| `n_candidates` | `64` | 全球面 (4π sr) を Fibonacci で 64 等分 → solid angle ≈ 0.196 sr/point。SN2 backside cone (~0.84 sr) に概ね 4 candidate 入る粒度で、cycloaddition / 表側 attack のような未知方向まで網羅的に探索できる。blocking で ~50% 生存と仮定し UMA full relax ~30 件 ≒ 300 s + UMA load 25 s ≒ 325 s。現状 SN2 (~54 s, prescreen 経由) より大幅に長いが、汎用性 + 全方向検証を優先する設計判断。wall-clock を下げたければ TOML で 32 / 16 等に減らせる。 |
 | `cone_half_deg` (削除) | — | 全球サンプルなので不要 |
 | `gap` | `0.5 Å` | RDKit MMFF 出力の典型的な座標誤差 + relax 初期に拘束力で吸収できる距離。Phase 0 の Phase 0 baseline で `FRAGMENT_SEPARATION = 3.5 Å` だったが、このうち vdW 部分を `d_min` に分離すると残差として 0.3-0.5 Å が経験的に妥当。 |
 | `d_min_ceiling` | `8.0 Å` | 8 Å を超えると Hookean restraint で結合形成距離 (~1.5 Å) まで引き寄せるのに > 200 step かかる経験則。anchor が壁に隠れているとほぼ確実にこれを超える。 |
