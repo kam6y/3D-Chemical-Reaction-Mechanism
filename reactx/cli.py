@@ -8,25 +8,20 @@ import math
 import time
 from pathlib import Path
 
-import numpy as np
 from ase.io import read, write
 from rdkit import Chem
 
-from reactx.align import align_product_to_reactant
-from reactx.artificial_force import build_restraints
 from reactx.bond_changes import BondChanges
-from reactx.calculators import make_calculator
 from reactx.config import ReactionConfig, load_config, resolve_r_form_targets
 from reactx.embed3d import embed_fragments_to_positions
-from reactx.neb import run_neb
-from reactx.path_relax import relax_with_restraints
+from reactx.neb import run_neb_top_k
 from reactx.placement import (
     PlacementResult,
-    build_atoms_from_positions,
     valid_placements,
 )
-from reactx.rxn_parser import atom_map_to_reactant_idx, heavy_to_hydrogen_groups, parse_rxn
-from reactx.scoring import ScreeningTrialResult, reached_product, score_trials
+from reactx.rxn_parser import atom_map_to_reactant_idx, parse_rxn
+from reactx.screening import screen_all_trials
+from reactx.scoring import ScreeningTrialResult, top_k_trials
 
 log = logging.getLogger("reactx")
 
@@ -34,24 +29,13 @@ log = logging.getLogger("reactx")
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="reactx")
     sub = p.add_subparsers(dest="cmd", required=True)
-
     run = sub.add_parser("run", help="Run full pipeline on a .rxn file (with sidecar .rxn.toml)")
     run.add_argument("rxn_path", type=Path)
     run.add_argument("-o", "--output", type=Path, required=True)
-
     run.add_argument("--backend", choices=["uma", "lj"], default="uma")
-    run.add_argument("--model", type=str, default="uma-m-1p1",
-                     help="UMA model name (uma-m-1p1, uma-s-1p2, ...)")
-
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--relax-fmax", type=float, default=0.1)
     run.add_argument("--traj-stride", type=int, default=5)
-
-    run.add_argument("--neb-refine", action="store_true",
-                     help="Refine the best trial trajectory with a short NEB "
-                          "(only supported for 1 formed + 1 broken reactions)")
-    run.add_argument("--neb-images", type=int, default=7)
-
     run.add_argument("--render", action="store_true",
                      help="Also invoke blender/render.py after pipeline")
     run.add_argument("--blender-exe", type=str, default="blender")
@@ -114,16 +98,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if not args.rxn_path.exists():
         log.error("Error: .rxn not found: %s", args.rxn_path)
         return 1
-
     try:
         cfg = load_config(args.rxn_path)
     except FileNotFoundError as exc:
         log.error("%s", exc)
-        log.error(
-            "A sidecar TOML config is REQUIRED. Create %s.toml. "
-            "See examples/sn2.rxn.toml for the schema.",
-            args.rxn_path,
-        )
         return 2
     except ValueError as exc:
         log.error("Invalid sidecar TOML: %s", exc)
@@ -136,10 +114,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     args.output.mkdir(parents=True, exist_ok=True)
     t_start = time.monotonic()
+    breakdown: dict[str, float] = {}
 
-    r_mol, p_mol, heavy_mapping = parse_rxn(args.rxn_path)
+    r_mol, _, _ = parse_rxn(args.rxn_path)
     r_h = Chem.AddHs(r_mol)
-    p_h = Chem.AddHs(p_mol)
     try:
         bond_changes = BondChanges.from_atom_map_pairs(
             formed_map=cfg.formed,
@@ -147,41 +125,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             atom_map_to_idx=atom_map_to_reactant_idx(r_mol),
         )
     except (KeyError, ValueError) as exc:
-        log.error("Invalid bond_changes from %s.toml: %s", args.rxn_path, exc)
+        log.error("Invalid bond_changes: %s", exc)
         return 2
-
-    if args.neb_refine and (
-        len(bond_changes.formed) != 1 or len(bond_changes.broken) != 1
-    ):
-        log.error(
-            "--neb-refine is only supported for 1 formed + 1 broken bond "
-            "reactions in Phase 3 (got formed=%d, broken=%d). Multi-bond NEB "
-            "endpoint construction is Phase 4+. Re-run without --neb-refine.",
-            len(bond_changes.formed), len(bond_changes.broken),
-        )
-        return 2
-
-    # bond_changes is reactant-space; for product embedding (neb-refine path)
-    # we feed embed3d a product-space BondChanges constructed by
-    # swapping roles + remapping indices. embed3d identifies the substrate as
-    # the fragment containing both atoms of `broken`, so for product we set
-    # `broken` = the reactant-formed bond (e.g. C-F in CH3F), which keeps the
-    # substrate fragment correctly grouped. `formed` then defines where the
-    # nucleophile-side fragment (Cl- in product) is placed via backside.
-    # NEB refine は 1+1 反応のみ対応; それ以外の場合は bond_changes_product=None
-    # として、neb-refine が要求された時点で embed3d 側でエラーになる。
-    if len(bond_changes.formed) == 1 and len(bond_changes.broken) == 1:
-        a_form_r, b_form_r = bond_changes.formed[0]
-        a_brk_r, b_brk_r = bond_changes.broken[0]
-        bond_changes_product = BondChanges(
-            formed=((heavy_mapping[a_brk_r], heavy_mapping[b_brk_r]),),
-            broken=((heavy_mapping[a_form_r], heavy_mapping[b_form_r]),),
-        )
-    else:
-        bond_changes_product = None
 
     formed_pairs = list(bond_changes.formed)
-    broken_pairs = list(bond_changes.broken)
     syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
     r_form_targets = resolve_r_form_targets(cfg, syms_r, formed_pairs)
     log.info(
@@ -193,20 +140,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
         [f"{x:.3f}" for x in r_form_targets] if r_form_targets else "[]",
     )
 
-    model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
-    calc = make_calculator(args.backend, **model_kwargs)
-
-    # Phase 7 placement: per-fragment embed -> sphere sample -> blocking -> trials
+    # --- placement
+    t_placement = time.monotonic()
     n_frags_reactant = len(Chem.GetMolFrags(r_h))
     effective_n_candidates = cfg.sampling.n_candidates
     if n_frags_reactant == 1 and effective_n_candidates > 1:
-        log.info(
-            "unimolecular reaction (1 reactant fragment); "
-            "n_candidates forced from %d to 1",
-            effective_n_candidates,
-        )
+        log.info("unimolecular reaction; n_candidates clamped %d -> 1",
+                 effective_n_candidates)
         effective_n_candidates = 1
-
     try:
         mol_h_r, frag_indices_r, base_positions = embed_fragments_to_positions(
             r_mol, seed=args.seed,
@@ -214,7 +155,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         log.error("per-fragment embed failed: %s", exc)
         return 1
-
     try:
         placement = valid_placements(
             mol_h_r, frag_indices_r, base_positions, bond_changes,
@@ -226,215 +166,163 @@ def _cmd_run(args: argparse.Namespace) -> int:
     except (RuntimeError, ValueError) as exc:
         log.error("placement failed: %s", exc)
         return 1
+    log.info("placement: %d/%d survived (%d blocked)",
+             len(placement.trials), placement.n_candidates, placement.n_blocked)
+    breakdown["placement"] = time.monotonic() - t_placement
 
-    log.info(
-        "placement: %d/%d candidates survived blocking (%d blocked)",
-        len(placement.trials), placement.n_candidates, placement.n_blocked,
+    # --- Stage 1: screening
+    t_screen = time.monotonic()
+    screen_results = screen_all_trials(
+        placement, mol_h_r, bond_changes, cfg,
+        backend=args.backend,
+        screening_model=cfg.model.screening_model,
+        workers=cfg.parallel.screening_workers,
+        relax_fmax=args.relax_fmax,
+        traj_stride=args.traj_stride,
+        seed=args.seed,
     )
+    breakdown["screening"] = time.monotonic() - t_screen
 
-    # Phase 7: UMA full relax for every blocking-survivor (no prescreen).
-    trials: list[ScreeningTrialResult] = []
-    for i, t in enumerate(placement.trials):
-        atoms_init = build_atoms_from_positions(mol_h_r, t.positions)
-        log.info("trial %d (direction=%s)",
-                 i, np.array2string(t.direction, precision=3))
-        restraints = build_restraints(
-            atoms_init,
-            formed=formed_pairs,
-            broken=broken_pairs,
-            r_form=r_form_targets[0] if r_form_targets else None,
-            r_broken=cfg.restraints.r_broken,
-            k_form=cfg.restraints.k_form,
-            k_broken=cfg.restraints.k_broken,
-        )
-        try:
-            frames, energies = relax_with_restraints(
-                atoms_init, restraints, calc,
-                max_steps=cfg.restraints.max_relax_steps,
-                fmax=args.relax_fmax,
-                traj_stride=args.traj_stride,
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.warning("trial %d relax failed: %s", i, exc)
-            trials.append(ScreeningTrialResult(
-                trial_idx=i, direction=t.direction, frames=[], energies=[],
-                reached_product=False, peak_energy=float("inf"), n_steps=0,
-            ))
-            continue
-
-        ok = reached_product(
-            frames[-1],
-            formed=formed_pairs,
-            broken=broken_pairs,
-            r_form_targets=r_form_targets,
-            r_broken_target=cfg.restraints.r_broken,
-        )
-        peak = max(energies) if energies else float("inf")
-        trials.append(ScreeningTrialResult(
-            trial_idx=i, direction=t.direction,
-            frames=frames, energies=energies,
-            reached_product=ok, peak_energy=float(peak),
-            n_steps=len(frames),
-        ))
-
-    if not any(t.frames for t in trials):
-        log.error("All trials failed. See meta.json for details.")
-        return _write_outputs_and_exit(
-            args, trials, t_start, neb_refined=False, rc=1,
-            cfg=cfg, r_form_targets=r_form_targets, placement=placement,
+    if not any(r.frames for r in screen_results):
+        log.error("All screening trials failed; see meta.json")
+        return _write_outputs(
+            args, cfg, screen_results, top_k_indices=[], neb_results=[],
+            placement=placement, t_start=t_start, breakdown=breakdown,
+            r_form_targets=r_form_targets, rc=1,
         )
 
-    best = score_trials(trials)
-    log.info(
-        "selected trial %d (direction=%s, reached=%s, peak=%.4f)",
-        best.trial_idx, np.array2string(best.direction, precision=3),
-        best.reached_product, best.peak_energy,
-    )
+    # --- top-K
+    top_k_list = top_k_trials(screen_results, cfg.neb.top_k)
+    top_k_indices = [r.trial_idx for r in top_k_list]
+    log.info("top-%d trials by screening score: %s",
+             cfg.neb.top_k, top_k_indices)
 
-    final_frames = best.frames
-    neb_refined = False
-    if args.neb_refine and len(final_frames) >= 2:
-        log.info("running NEB refinement (%d images)", args.neb_images)
-        from ase.optimize import BFGS
-        try:
-            mol_h_p, frag_indices_p, p_positions = embed_fragments_to_positions(
-                p_mol, seed=2,
-            )
-        except RuntimeError as exc:
-            log.error("NEB product per-fragment embed failed: %s", exc)
-            return 1
-        try:
-            placement_p = valid_placements(
-                mol_h_p, frag_indices_p, p_positions, bond_changes_product,
-                n_candidates=8, seed=2,
-            )
-        except NotImplementedError as exc:
-            log.error("NEB product placement not supported: %s", exc)
-            return 2
-        except (RuntimeError, ValueError) as exc:
-            log.error("NEB product placement failed: %s", exc)
-            return 1
-        product_raw = build_atoms_from_positions(
-            mol_h_p, placement_p.trials[0].positions,
+    # --- Stage 2: NEB
+    t_neb = time.monotonic()
+    try:
+        neb_results = run_neb_top_k(
+            top_k_list,
+            backend=args.backend,
+            neb_model=cfg.model.neb_model,
+            workers=cfg.parallel.neb_workers,
+            n_images=cfg.neb.n_images,
+            fmax=cfg.neb.fmax,
+            max_steps=cfg.neb.max_steps,
+            pad_frames=cfg.neb.pad_frames,
+            output_dir=args.output,
         )
-        product_raw.calc = calc
-        BFGS(product_raw, logfile=None).run(fmax=0.01, steps=300)
-        rH = heavy_to_hydrogen_groups(r_h)
-        pH = heavy_to_hydrogen_groups(p_h)
-        product = align_product_to_reactant(
-            final_frames[0], product_raw, heavy_mapping, rH, pH,
+    except Exception as exc:  # noqa: BLE001
+        log.error("Stage 2 NEB failed: %s: %s", type(exc).__name__, exc)
+        return _write_outputs(
+            args, cfg, screen_results, top_k_indices=top_k_indices, neb_results=[],
+            placement=placement, t_start=t_start, breakdown=breakdown,
+            r_form_targets=r_form_targets, rc=1,
         )
-        xyz_tmp = args.output / "trajectory_neb.xyz"
-        run_neb(
-            reactant=final_frames[0],
-            product=product,
-            calculator=calc,
-            n_images=args.neb_images,
-            output_xyz=xyz_tmp,
-            fmax=0.05,
-            max_steps=200,
-            pad_frames=0,
-        )
-        # Re-read NEB frames as the new trajectory
-        final_frames = read(str(xyz_tmp), index=":")
-        neb_refined = True
+    breakdown["neb"] = time.monotonic() - t_neb
 
-    xyz = args.output / "trajectory.xyz"
-    write(str(xyz), final_frames, format="extxyz")
+    if not neb_results:
+        log.error("All Stage 2 NEB jobs failed; see meta.json")
+        return _write_outputs(
+            args, cfg, screen_results, top_k_indices=top_k_indices, neb_results=[],
+            placement=placement, t_start=t_start, breakdown=breakdown,
+            r_form_targets=r_form_targets, rc=1,
+        )
 
-    rc = _write_outputs_and_exit(
-        args, trials, t_start, neb_refined=neb_refined, rc=0,
-        cfg=cfg, r_form_targets=r_form_targets, placement=placement,
+    final = min(neb_results, key=lambda r: r["peak_energy"])
+    final_xyz_src = args.output / final["xyz_path"]
+    final_frames = read(str(final_xyz_src), index=":")
+    final_xyz = args.output / "trajectory.xyz"
+    write(str(final_xyz), final_frames, format="extxyz")
+    log.info("selected trial=%d (NEB peak=%.4f)",
+             final["trial_idx"], final["peak_energy"])
+
+    rc = _write_outputs(
+        args, cfg, screen_results, top_k_indices=top_k_indices,
+        neb_results=neb_results,
+        placement=placement, t_start=t_start, breakdown=breakdown,
+        r_form_targets=r_form_targets, rc=0, selected_trial=final["trial_idx"],
     )
     if rc != 0:
         return rc
 
     if args.render:
-        rc = _invoke_blender(args, xyz)
-        if rc != 0:
-            return rc
-
-    log.info("OK: wrote %s (selected trial=%d)", xyz, best.trial_idx)
+        rc_render = _invoke_blender(args, final_xyz)
+        if rc_render != 0:
+            return rc_render
+    log.info("OK: wrote %s", final_xyz)
     return 0
 
 
-def _write_outputs_and_exit(
-    args: argparse.Namespace,
-    trials: list[ScreeningTrialResult],
-    t_start: float,
+def _write_outputs(
+    args, cfg: ReactionConfig,
+    screen_results: list[ScreeningTrialResult],
     *,
-    neb_refined: bool,
+    top_k_indices: list[int],
+    neb_results: list[dict],
+    placement: PlacementResult | None,
+    t_start: float,
+    breakdown: dict[str, float],
+    r_form_targets: list[float],
     rc: int,
-    cfg: ReactionConfig | None = None,
-    r_form_targets: list[float] | None = None,
-    placement: PlacementResult | None = None,
+    selected_trial: int = -1,
 ) -> int:
-    best: ScreeningTrialResult | None = None
-    if rc == 0 and trials:
-        try:
-            best = score_trials(trials)
-        except ValueError:
-            best = None
-    selected = best.trial_idx if best is not None else -1
-    converged = best.reached_product if best is not None else False
     placement_meta = (
-        {
-            "n_candidates": placement.n_candidates,
-            "n_blocked": placement.n_blocked,
-            "n_valid": len(placement.trials),
-        }
+        {"n_candidates": placement.n_candidates,
+         "n_blocked": placement.n_blocked,
+         "n_valid": len(placement.trials)}
         if placement is not None
         else {"n_candidates": 0, "n_blocked": 0, "n_valid": 0}
     )
-    meta: dict = {
+    meta = {
         "backend": args.backend,
-        "description": cfg.description if cfg is not None else None,
-        "converged": converged,
-        "selected_trial": selected,
+        "description": cfg.description,
+        "selected_trial": selected_trial,
         "placement": placement_meta,
-        "trials": [
+        "screening_trials": [
             {
-                "trial": t.trial_idx,
-                "reached_product": t.reached_product,
-                "peak_energy": float(t.peak_energy)
-                    if math.isfinite(t.peak_energy) else None,
-                "n_steps": t.n_steps,
-                "direction": [float(x) for x in t.direction],
+                "trial_idx": r.trial_idx,
+                "reached_product": r.reached_product,
+                "peak_energy": float(r.peak_energy)
+                    if math.isfinite(r.peak_energy) else None,
+                "n_steps": r.n_steps,
+                "direction": [float(x) for x in r.direction],
+                "error": r.error,
             }
-            for t in trials
+            for r in screen_results
         ],
+        "top_k_indices": list(top_k_indices),
+        "neb_results": list(neb_results),
         "wall_clock_seconds": float(time.monotonic() - t_start),
-        "neb_refined": neb_refined,
-        "effective_params": (
-            {
-                "k_form": cfg.restraints.k_form,
-                "k_broken": cfg.restraints.k_broken,
-                "r_broken": cfg.restraints.r_broken,
-                "max_relax_steps": cfg.restraints.max_relax_steps,
-                "r_form_targets": list(r_form_targets) if r_form_targets is not None else [],
-                "n_candidates": cfg.sampling.n_candidates,
-            }
-            if cfg is not None else None
-        ),
+        "wall_clock_breakdown": {k: float(v) for k, v in breakdown.items()},
+        "effective_params": {
+            "k_form": cfg.restraints.k_form,
+            "k_broken": cfg.restraints.k_broken,
+            "r_broken": cfg.restraints.r_broken,
+            "max_relax_steps": cfg.restraints.max_relax_steps,
+            "r_form_targets": list(r_form_targets) if r_form_targets else [],
+            "n_candidates": cfg.sampling.n_candidates,
+            "screening_model": cfg.model.screening_model,
+            "neb_model": cfg.model.neb_model,
+            "top_k": cfg.neb.top_k,
+            "n_images": cfg.neb.n_images,
+            "screening_workers": cfg.parallel.screening_workers,
+            "neb_workers": cfg.parallel.neb_workers,
+        },
     }
-    meta_clean = _sanitize_for_json(meta)
-    (args.output / "meta.json").write_text(json.dumps(meta_clean, indent=2))
-
-    if best is not None:
-        (args.output / "energies.json").write_text(json.dumps(best.energies))
+    (args.output / "meta.json").write_text(
+        json.dumps(_sanitize_for_json(meta), indent=2)
+    )
+    if neb_results:
+        best = min(neb_results, key=lambda r: r["peak_energy"])
+        (args.output / "energies.json").write_text(json.dumps(best["image_energies"]))
     return rc
 
 
-def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
+def _invoke_blender(args, xyz: Path) -> int:
     import shutil
     import subprocess
     if shutil.which(args.blender_exe) is None:
-        log.error(
-            "Blender executable not found on PATH: %s. Install Blender 4.x "
-            "(https://www.blender.org/download/) or pass --blender-exe "
-            "/path/to/blender.",
-            args.blender_exe,
-        )
+        log.error("Blender executable not found on PATH: %s", args.blender_exe)
         return 1
     script = Path(__file__).resolve().parent.parent / "blender" / "render.py"
     blend = args.output / "scene.blend"
@@ -443,6 +331,6 @@ def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
     log.info("Running: %s", " ".join(cmd))
     result = subprocess.run(cmd)
     if result.returncode != 0:
-        log.error("Error: blender exited with code %d", result.returncode)
+        log.error("blender exited with code %d", result.returncode)
         return 1
     return 0
