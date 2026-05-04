@@ -296,23 +296,29 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.neb_refine and len(final_frames) >= 2:
         log.info("running NEB refinement (%d images)", args.neb_images)
         from ase.optimize import BFGS
-        mol_h_p, frag_indices_p, p_positions = embed_fragments_to_positions(
-            p_mol, seed=2,
-        )
+        try:
+            mol_h_p, frag_indices_p, p_positions = embed_fragments_to_positions(
+                p_mol, seed=2,
+            )
+        except RuntimeError as exc:
+            log.error("NEB product per-fragment embed failed: %s", exc)
+            return 1
         try:
             placement_p = valid_placements(
                 mol_h_p, frag_indices_p, p_positions, bond_changes_product,
                 n_candidates=8, seed=2,
             )
-        except (NotImplementedError, RuntimeError, ValueError) as exc:
+        except NotImplementedError as exc:
+            log.error("NEB product placement not supported: %s", exc)
+            return 2
+        except (RuntimeError, ValueError) as exc:
             log.error("NEB product placement failed: %s", exc)
             return 1
         product_raw = build_atoms_from_positions(
             mol_h_p, placement_p.trials[0].positions,
         )
-        if calc is not None:
-            product_raw.calc = calc
-            BFGS(product_raw, logfile=None).run(fmax=0.01, steps=300)
+        product_raw.calc = calc
+        BFGS(product_raw, logfile=None).run(fmax=0.01, steps=300)
         rH = heavy_to_hydrogen_groups(r_h)
         pH = heavy_to_hydrogen_groups(p_h)
         product = align_product_to_reactant(
