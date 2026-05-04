@@ -15,10 +15,16 @@ from ase import Atoms
 
 @dataclass
 class TrialResult:
-    """Outcome of a single placement / relaxation trial."""
+    """Outcome of a single placement / relaxation trial.
+
+    `direction` is the unit vector (shape (3,), dtype float) used for
+    sphere-based fragment placement. For unimolecular passthrough trials
+    it is a placeholder +z with no physical meaning. dtype is float since
+    cli.py serializes it to meta.json as a list of floats.
+    """
 
     trial_idx: int
-    direction: np.ndarray  # (3,) unit vector - sphere-sampled placement direction
+    direction: np.ndarray
     frames: list[Atoms]
     energies: list[float]
     reached_product: bool
