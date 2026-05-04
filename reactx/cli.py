@@ -17,13 +17,16 @@ from reactx.artificial_force import build_restraints
 from reactx.bond_changes import BondChanges
 from reactx.calculators import make_calculator
 from reactx.config import ReactionConfig, load_config, resolve_r_form_targets
-from reactx.embed3d import embed_mol_to_atoms
+from reactx.embed3d import embed_fragments_to_positions
 from reactx.neb import run_neb
 from reactx.path_relax import relax_with_restraints
-from reactx.prescreen import prescreen_trials
+from reactx.placement import (
+    PlacementResult,
+    build_atoms_from_positions,
+    valid_placements,
+)
 from reactx.rxn_parser import atom_map_to_reactant_idx, heavy_to_hydrogen_groups, parse_rxn
 from reactx.scoring import TrialResult, reached_product, score_trials
-from reactx.trials import sample_attack_rotations
 
 log = logging.getLogger("reactx")
 
@@ -193,88 +196,48 @@ def _cmd_run(args: argparse.Namespace) -> int:
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
     calc = make_calculator(args.backend, **model_kwargs)
 
+    # Phase 7 placement: per-fragment embed -> sphere sample -> blocking -> trials
     n_frags_reactant = len(Chem.GetMolFrags(r_h))
-    effective_n_angles = cfg.sampling.n_angles
-    if n_frags_reactant == 1 and effective_n_angles > 1:
+    effective_n_candidates = cfg.sampling.n_candidates
+    if n_frags_reactant == 1 and effective_n_candidates > 1:
         log.info(
             "unimolecular reaction (1 reactant fragment); "
-            "n_angles forced from %d to 1, prescreen skipped",
-            effective_n_angles,
+            "n_candidates forced from %d to 1",
+            effective_n_candidates,
         )
-        effective_n_angles = 1
+        effective_n_candidates = 1
 
-    rotations = sample_attack_rotations(
-        n=effective_n_angles, cone_half_deg=cfg.sampling.cone_half_deg, seed=args.seed,
+    try:
+        mol_h_r, frag_indices_r, base_positions = embed_fragments_to_positions(
+            r_mol, seed=args.seed,
+        )
+    except RuntimeError as exc:
+        log.error("per-fragment embed failed: %s", exc)
+        return 1
+
+    try:
+        placement = valid_placements(
+            mol_h_r, frag_indices_r, base_positions, bond_changes,
+            n_candidates=effective_n_candidates, seed=args.seed,
+        )
+    except NotImplementedError as exc:
+        log.error("placement not supported: %s", exc)
+        return 2
+    except (RuntimeError, ValueError) as exc:
+        log.error("placement failed: %s", exc)
+        return 1
+
+    log.info(
+        "placement: %d/%d candidates survived blocking (%d blocked)",
+        len(placement.trials), placement.n_candidates, placement.n_blocked,
     )
 
-    # Phase 1: embed every rotation; collect successful embeds with their angles.
-    # Embed failures still get a stub TrialResult so meta.json.trials[] length
-    # stays invariant at sampling.n_angles (pre-Phase-2 contract).
-    embedded_by_idx: dict[int, tuple] = {}
-    failed_embed_stubs: list[TrialResult] = []
-    for i, R in enumerate(rotations):
-        rot_deg = _angle_from_identity_deg(R)
-        try:
-            atoms_init = embed_mol_to_atoms(
-                r_mol, calculator=None, seed=1 + i,
-                bond_changes=bond_changes, rotation_perturbation=R,
-            )
-            embedded_by_idx[i] = (atoms_init, rot_deg)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("trial %d embed failed: %s", i, exc)
-            failed_embed_stubs.append(TrialResult(
-                trial_idx=i, rotation_deg=rot_deg, frames=[], energies=[],
-                reached_product=False, peak_energy=float("inf"), n_steps=0,
-            ))
-
-    # Phase 2: optionally prescreen with MMFF94 to pick top-K of N for UMA.
-    prescreen_meta: dict | None = None
-    keep_trial_indices: list[int]
-    if n_frags_reactant == 1:
-        log.info("prescreen: skipped (single trial / unimolecular)")
-        keep_trial_indices = sorted(embedded_by_idx.keys())
-        prescreen_meta = {
-            "enabled": False, "kept": None, "skipped": None,
-            "mmff_failed": None, "wall_clock_seconds": 0.0,
-        }
-    elif not cfg.prescreen.enabled:
-        log.info("prescreen: disabled (config: prescreen.enabled = false)")
-        keep_trial_indices = sorted(embedded_by_idx.keys())
-        prescreen_meta = {
-            "enabled": False, "kept": None, "skipped": None,
-            "mmff_failed": None, "wall_clock_seconds": 0.0,
-        }
-    elif embedded_by_idx:
-        ordered = sorted(embedded_by_idx.keys())
-        atoms_for_prescreen = [embedded_by_idx[i][0] for i in ordered]
-        mol_h_template = Chem.AddHs(r_mol)
-        pre = prescreen_trials(
-            atoms_list=atoms_for_prescreen,
-            mol_h_template=mol_h_template,
-            formed=formed_pairs, broken=broken_pairs,
-            r_form_target=r_form_targets[0] if r_form_targets else 1.6,
-            r_broken_target=cfg.restraints.r_broken,
-            k_form=cfg.restraints.k_form, k_broken=cfg.restraints.k_broken,
-            max_steps=cfg.prescreen.steps,
-            k_keep=cfg.prescreen.keep,
-        )
-        keep_trial_indices = [ordered[k] for k in pre.kept]
-        skipped_trial_indices = [ordered[s] for s in pre.skipped]
-        prescreen_meta = {
-            "enabled": True,
-            "kept": list(keep_trial_indices),
-            "skipped": list(skipped_trial_indices),
-            "mmff_failed": pre.mmff_failed,
-            "wall_clock_seconds": pre.wall_clock_seconds,
-        }
-    else:
-        keep_trial_indices = []
-
-    # Phase 3: UMA relax for the kept trials only.
+    # Phase 7: UMA full relax for every blocking-survivor (no prescreen).
     trials: list[TrialResult] = []
-    for i in keep_trial_indices:
-        atoms_init, rot_deg = embedded_by_idx[i]
-        log.info("trial %d (rotation_deg=%.1f)", i, rot_deg)
+    for i, t in enumerate(placement.trials):
+        atoms_init = build_atoms_from_positions(mol_h_r, t.positions)
+        log.info("trial %d (direction=%s)",
+                 i, np.array2string(t.direction, precision=3))
         restraints = build_restraints(
             atoms_init,
             formed=formed_pairs,
@@ -294,7 +257,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001
             log.warning("trial %d relax failed: %s", i, exc)
             trials.append(TrialResult(
-                trial_idx=i, rotation_deg=rot_deg, frames=[], energies=[],
+                trial_idx=i, direction=t.direction, frames=[], energies=[],
                 reached_product=False, peak_energy=float("inf"), n_steps=0,
             ))
             continue
@@ -308,38 +271,48 @@ def _cmd_run(args: argparse.Namespace) -> int:
         )
         peak = max(energies) if energies else float("inf")
         trials.append(TrialResult(
-            trial_idx=i, rotation_deg=rot_deg,
+            trial_idx=i, direction=t.direction,
             frames=frames, energies=energies,
             reached_product=ok, peak_energy=float(peak),
             n_steps=len(frames),
         ))
 
-    # Merge embed-failure stubs back so meta.json.trials covers every rotation.
-    if failed_embed_stubs:
-        trials.extend(failed_embed_stubs)
-        trials.sort(key=lambda t: t.trial_idx)
-
     if not any(t.frames for t in trials):
         log.error("All trials failed. See meta.json for details.")
         return _write_outputs_and_exit(
             args, trials, t_start, neb_refined=False, rc=1,
-            cfg=cfg, r_form_targets=r_form_targets, prescreen_meta=prescreen_meta,
+            cfg=cfg, r_form_targets=r_form_targets, placement=placement,
         )
 
     best = score_trials(trials)
     log.info(
-        "selected trial %d (rotation_deg=%.1f, reached=%s, peak=%.4f)",
-        best.trial_idx, best.rotation_deg, best.reached_product, best.peak_energy,
+        "selected trial %d (direction=%s, reached=%s, peak=%.4f)",
+        best.trial_idx, np.array2string(best.direction, precision=3),
+        best.reached_product, best.peak_energy,
     )
 
     final_frames = best.frames
     neb_refined = False
     if args.neb_refine and len(final_frames) >= 2:
         log.info("running NEB refinement (%d images)", args.neb_images)
-        product_raw = embed_mol_to_atoms(
-            p_mol, calculator=calc, seed=2,
-            bond_changes=bond_changes_product, rotation_perturbation=None,
+        from ase.optimize import BFGS
+        mol_h_p, frag_indices_p, p_positions = embed_fragments_to_positions(
+            p_mol, seed=2,
         )
+        try:
+            placement_p = valid_placements(
+                mol_h_p, frag_indices_p, p_positions, bond_changes_product,
+                n_candidates=8, seed=2,
+            )
+        except (NotImplementedError, RuntimeError, ValueError) as exc:
+            log.error("NEB product placement failed: %s", exc)
+            return 1
+        product_raw = build_atoms_from_positions(
+            mol_h_p, placement_p.trials[0].positions,
+        )
+        if calc is not None:
+            product_raw.calc = calc
+            BFGS(product_raw, logfile=None).run(fmax=0.01, steps=300)
         rH = heavy_to_hydrogen_groups(r_h)
         pH = heavy_to_hydrogen_groups(p_h)
         product = align_product_to_reactant(
@@ -365,7 +338,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     rc = _write_outputs_and_exit(
         args, trials, t_start, neb_refined=neb_refined, rc=0,
-        cfg=cfg, r_form_targets=r_form_targets, prescreen_meta=prescreen_meta,
+        cfg=cfg, r_form_targets=r_form_targets, placement=placement,
     )
     if rc != 0:
         return rc
@@ -379,12 +352,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _angle_from_identity_deg(R: np.ndarray) -> float:
-    """Return rotation angle of R in degrees (0 for identity)."""
-    cos_t = float(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0))
-    return float(np.degrees(np.arccos(cos_t)))
-
-
 def _write_outputs_and_exit(
     args: argparse.Namespace,
     trials: list[TrialResult],
@@ -394,7 +361,7 @@ def _write_outputs_and_exit(
     rc: int,
     cfg: ReactionConfig | None = None,
     r_form_targets: list[float] | None = None,
-    prescreen_meta: dict | None = None,
+    placement: PlacementResult | None = None,
 ) -> int:
     best: TrialResult | None = None
     if rc == 0 and trials:
@@ -404,11 +371,21 @@ def _write_outputs_and_exit(
             best = None
     selected = best.trial_idx if best is not None else -1
     converged = best.reached_product if best is not None else False
+    placement_meta = (
+        {
+            "n_candidates": placement.n_candidates,
+            "n_blocked": placement.n_blocked,
+            "n_valid": len(placement.trials),
+        }
+        if placement is not None
+        else {"n_candidates": 0, "n_blocked": 0, "n_valid": 0}
+    )
     meta: dict = {
         "backend": args.backend,
         "description": cfg.description if cfg is not None else None,
         "converged": converged,
         "selected_trial": selected,
+        "placement": placement_meta,
         "trials": [
             {
                 "trial": t.trial_idx,
@@ -416,11 +393,10 @@ def _write_outputs_and_exit(
                 "peak_energy": float(t.peak_energy)
                     if math.isfinite(t.peak_energy) else None,
                 "n_steps": t.n_steps,
-                "rotation_deg": float(t.rotation_deg),
+                "direction": [float(x) for x in t.direction],
             }
             for t in trials
         ],
-        "prescreen": prescreen_meta,
         "wall_clock_seconds": float(time.monotonic() - t_start),
         "neb_refined": neb_refined,
         "effective_params": (
@@ -430,6 +406,7 @@ def _write_outputs_and_exit(
                 "r_broken": cfg.restraints.r_broken,
                 "max_relax_steps": cfg.restraints.max_relax_steps,
                 "r_form_targets": list(r_form_targets) if r_form_targets is not None else [],
+                "n_candidates": cfg.sampling.n_candidates,
             }
             if cfg is not None else None
         ),
