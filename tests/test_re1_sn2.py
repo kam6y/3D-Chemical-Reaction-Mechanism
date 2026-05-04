@@ -1,4 +1,4 @@
-"""End-to-end SN2 test using UMA. Marked slow, requires HF auth + GPU."""
+"""SN2 end-to-end with CI-NEB. Slow, requires UMA."""
 import json
 from pathlib import Path
 
@@ -7,6 +7,7 @@ import pytest
 from ase.io import read
 
 from reactx.cli import main
+
 
 _SN2_FAST = """\
 description = "SN2 fast"
@@ -19,11 +20,18 @@ r_broken = 4.0
 max_relax_steps = 50
 [sampling]
 n_candidates = 8
+[neb]
+top_k = 2
+n_images = 5
+max_steps = 30
+[parallel]
+screening_workers = 2
+neb_workers = 2
 """
 
 
 @pytest.mark.slow
-def test_re1_sn2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
+def test_re1_sn2_end_to_end_with_cineb(tmp_path: Path, tmp_rxn_with_toml):
     rxn = tmp_rxn_with_toml("sn2", toml_body=_SN2_FAST)
     out = tmp_path / "sn2"
     rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
@@ -36,11 +44,20 @@ def test_re1_sn2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert pl["n_candidates"] >= 1
     assert pl["n_valid"] >= 1
     assert pl["n_blocked"] == pl["n_candidates"] - pl["n_valid"]
-    assert len(meta["trials"]) == pl["n_valid"]
-    assert any(t["reached_product"] for t in meta["trials"])
+    assert len(meta["screening_trials"]) == pl["n_valid"]
+    assert any(t["reached_product"] for t in meta["screening_trials"])
+    assert len(meta["top_k_indices"]) >= 1
+    assert len(meta["neb_results"]) >= 1
+    assert all("peak_energy" in r for r in meta["neb_results"])
+    assert meta["selected_trial"] in [r["trial_idx"] for r in meta["neb_results"]]
+    assert "wall_clock_breakdown" in meta
+    assert meta["effective_params"]["screening_model"]
+    assert meta["effective_params"]["neb_model"]
 
     frames = read(str(out / "trajectory.xyz"), index=":")
-    assert len(frames) >= 3
+    # Phase 8 trajectory.xyz is the NEB images of the selected trial:
+    # length == cfg.neb.n_images + 2 * cfg.neb.pad_frames (here 5 + 0).
+    assert len(frames) == 5
 
     syms = frames[0].get_chemical_symbols()
     c_idx = syms.index("C")

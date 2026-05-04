@@ -1,4 +1,4 @@
-"""End-to-end proton transfer test (HCl + NH3 -> Cl- + NH4+)."""
+"""End-to-end proton transfer test (HCl + NH3 -> Cl- + NH4+) with CI-NEB."""
 import json
 from pathlib import Path
 
@@ -6,6 +6,7 @@ import pytest
 from ase.io import read
 
 from reactx.cli import main
+
 
 _PT_FAST = """\
 description = "Proton transfer fast"
@@ -19,6 +20,13 @@ max_relax_steps = 100
 r_form = 1.05
 [sampling]
 n_candidates = 8
+[neb]
+top_k = 2
+n_images = 5
+max_steps = 30
+[parallel]
+screening_workers = 2
+neb_workers = 2
 """
 
 
@@ -36,10 +44,15 @@ def test_re1_proton_transfer_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert pl["n_candidates"] >= 1
     assert pl["n_valid"] >= 1
     assert pl["n_blocked"] == pl["n_candidates"] - pl["n_valid"]
-    assert len(meta["trials"]) == pl["n_valid"]
-    assert any(t["reached_product"] for t in meta["trials"])
+    assert len(meta["screening_trials"]) == pl["n_valid"]
+    assert any(t["reached_product"] for t in meta["screening_trials"])
+    assert len(meta["top_k_indices"]) >= 1
+    assert len(meta["neb_results"]) >= 1
+    assert meta["selected_trial"] in [r["trial_idx"] for r in meta["neb_results"]]
 
     frames = read(str(out / "trajectory.xyz"), index=":")
+    assert len(frames) == 5
+
     syms = frames[0].get_chemical_symbols()
     cl_idx = syms.index("Cl")
     n_idx = syms.index("N")

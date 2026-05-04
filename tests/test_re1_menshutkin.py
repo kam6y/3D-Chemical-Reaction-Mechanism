@@ -1,9 +1,9 @@
-"""End-to-end Menshutkin test (NH3 + CH3Cl -> CH3NH3+ + Cl-).
+"""End-to-end Menshutkin test (NH3 + CH3Cl -> CH3NH3+ + Cl-) with CI-NEB.
 
-Slow: requires UMA + GPU (~3 min). Validates the menshutkin TOML config:
-- reached_product=True for at least one trial
-- C-N forms (final ≤ 1.7 Å)
-- C-Cl breaks (final ≥ 3.5 Å)
+Slow: requires UMA + GPU. Validates the menshutkin TOML config:
+- reached_product=True for at least one screening trial
+- C-N forms (final <= 1.7 A)
+- C-Cl breaks (final >= 3.5 A)
 """
 import json
 from pathlib import Path
@@ -24,6 +24,13 @@ r_broken = 5.0
 max_relax_steps = 200
 [sampling]
 n_candidates = 8
+[neb]
+top_k = 2
+n_images = 5
+max_steps = 30
+[parallel]
+screening_workers = 2
+neb_workers = 2
 """
 
 
@@ -45,12 +52,16 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert pl["n_candidates"] >= 1
     assert pl["n_valid"] >= 1
     assert pl["n_blocked"] == pl["n_candidates"] - pl["n_valid"]
-    assert len(meta["trials"]) == pl["n_valid"]
-    assert any(t["reached_product"] for t in meta["trials"]), (
-        f"No trial reached product. trials={meta['trials']}"
+    assert len(meta["screening_trials"]) == pl["n_valid"]
+    assert any(t["reached_product"] for t in meta["screening_trials"]), (
+        f"No trial reached product. screening_trials={meta['screening_trials']}"
     )
+    assert len(meta["top_k_indices"]) >= 1
+    assert len(meta["neb_results"]) >= 1
+    assert meta["selected_trial"] in [r["trial_idx"] for r in meta["neb_results"]]
 
     frames = read(str(out / "trajectory.xyz"), index=":")
+    assert len(frames) == 5
     syms = frames[0].get_chemical_symbols()
     n_idx = syms.index("N")
     c_idx = syms.index("C")
@@ -62,8 +73,8 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     d_ccl_last = frames[-1].get_distance(c_idx, cl_idx)
 
     assert d_nc_last < 1.7, (
-        f"N-C should form: {d_nc_first:.2f} -> {d_nc_last:.2f} (target ≤ 1.7)"
+        f"N-C should form: {d_nc_first:.2f} -> {d_nc_last:.2f} (target <= 1.7)"
     )
     assert d_ccl_last >= 3.5, (
-        f"C-Cl should break: {d_ccl_first:.2f} -> {d_ccl_last:.2f} (target ≥ 3.5)"
+        f"C-Cl should break: {d_ccl_first:.2f} -> {d_ccl_last:.2f} (target >= 3.5)"
     )

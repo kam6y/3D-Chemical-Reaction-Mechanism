@@ -1,4 +1,4 @@
-"""End-to-end E2 elimination test using UMA. Marked slow."""
+"""End-to-end E2 elimination test using UMA with CI-NEB. Marked slow."""
 import json
 from pathlib import Path
 
@@ -6,6 +6,7 @@ import pytest
 from ase.io import read
 
 from reactx.cli import main
+
 
 _E2_FAST = """\
 description = "E2 fast"
@@ -18,6 +19,13 @@ r_broken = 4.0
 max_relax_steps = 100
 [sampling]
 n_candidates = 8
+[neb]
+top_k = 2
+n_images = 5
+max_steps = 30
+[parallel]
+screening_workers = 2
+neb_workers = 2
 """
 
 
@@ -30,15 +38,18 @@ def test_re3_e2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["selected_trial"] >= 0, f"no trial selected: {meta}"
-    assert any(t["reached_product"] for t in meta["trials"]), (
-        f"no E2 trial reached product: {meta['trials']}"
+    assert any(t["reached_product"] for t in meta["screening_trials"]), (
+        f"no E2 trial reached product: {meta['screening_trials']}"
     )
     assert isinstance(meta["effective_params"]["r_form_targets"], list)
     assert len(meta["effective_params"]["r_form_targets"]) == 1
     assert meta["description"] == "E2 fast"
+    assert len(meta["top_k_indices"]) >= 1
+    assert len(meta["neb_results"]) >= 1
+    assert meta["selected_trial"] in [r["trial_idx"] for r in meta["neb_results"]]
 
     frames = read(str(out / "trajectory.xyz"), index=":")
-    assert len(frames) >= 3
+    assert len(frames) == 5
 
     syms = frames[0].get_chemical_symbols()
     cl_idx = syms.index("Cl")
@@ -61,5 +72,5 @@ def test_re3_e2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     d_oh_first = frames[0].get_distance(o_idx, h_beta)
     d_oh_last = frames[-1].get_distance(o_idx, h_beta)
     assert d_oh_last < d_oh_first - 1.0, (
-        f"O-H_β should shrink: {d_oh_first:.2f} -> {d_oh_last:.2f}"
+        f"O-H_beta should shrink: {d_oh_first:.2f} -> {d_oh_last:.2f}"
     )
