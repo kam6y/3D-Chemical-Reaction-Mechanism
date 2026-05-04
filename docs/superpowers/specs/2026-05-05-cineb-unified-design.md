@@ -84,8 +84,9 @@ Phase 8 で:
 | Screening 段階 | 無 (全 survivor を本評価) | 人工力 relax で top-K=4 に絞り |
 | 並列化 | 無 (sequential) | screening + NEB を process pool で並列 |
 | ML モデル | 単一 (`uma-m-1p1` default) | screening / NEB の 2 系統指定可、default は両方 `uma-s-1p2` |
-| `--neb-refine` フラグ | 任意のオプション | **削除**。CI-NEB 常時実行が default。CI-NEB を skip したい場合は `--no-neb` で artificial-force 経路を維持 (テスト用ホットパス) |
+| `--neb-refine` フラグ | 任意のオプション | **削除**。CI-NEB 常時実行が default、skip パスは無し |
 | `--neb-images` フラグ | 任意 | **削除**。`[neb] n_images` を TOML 化 |
+| `--model` フラグ | 任意 (model 名指定) | **削除**。モデル指定は `[model]` TOML セクション一本化 |
 | `align_product_to_reactant` | 1+1 反応の P endpoint アラインに使用 | **不要・削除** (P endpoint は人工力 trajectory の最終フレーム由来でアトム順序が同じ) |
 
 ### 3.3 ファイル構成
@@ -110,9 +111,9 @@ Phase 8 で:
 
 - `--neb-refine` — 削除 (CI-NEB が default になる)
 - `--neb-images` — 削除 (`[neb] n_images` で TOML 化)
+- `--model` — 削除 (`[model]` TOML セクション一本化)
 
-新規 CLI フラグ:
-- `--no-neb` — Stage 2 を skip し、Stage 1 best trial をそのまま `trajectory.xyz` に書き出す。テスト用 / デバッグ用。`meta.json.neb_used = false`。
+新規 CLI フラグ: 無し。Stage 1 / Stage 2 の挙動はすべて TOML から駆動する。テスト時に NEB を回したくない場合は per-test に `[neb] top_k = 1` + 専用 fixture を使う、または `pytest.mark.slow` で UMA backend 統合テストに集約する。
 
 ### 3.5 削除される TOML キー
 
@@ -381,12 +382,6 @@ def _cmd_run(args):
     )
 
     # Top-K 絞り
-    if args.no_neb:
-        # NEB skip path: best 1 件をそのまま採用
-        best = top_k_trials(screen_results, 1)[0]
-        write_outputs(best.frames, best.energies, ...)
-        return 0
-
     top_k = top_k_trials(screen_results, cfg.neb.top_k)
 
     # Stage 2: NEB (parallel)
@@ -414,10 +409,9 @@ def _cmd_run(args):
 ```
 
 CLI フラグの追加 / 削除:
-- 削除: `--neb-refine`, `--neb-images`
-- 追加: `--no-neb` (Stage 2 を skip)
-- 残置: `--backend`, `--seed`, `--relax-fmax`, `--traj-stride`, `--render`, `--blender-exe`
-- `--model` は残置するが、指定時は **screening と NEB の両方** に上書き適用 (TOML を override する単純動作。screening / NEB 個別の override は TOML でやってくれ、で押し通す)
+- 削除: `--neb-refine`, `--neb-images`, `--model`
+- 残置: `--backend` (uma/lj 切替), `--seed`, `--relax-fmax`, `--traj-stride`, `--render`, `--blender-exe`
+- モデル指定 (UMA model name) は `[model]` TOML セクション一本化。CLI では指定不可。
 
 ## 5. データフロー (SN2 を例に)
 
@@ -489,9 +483,9 @@ CLI フラグの追加 / 削除:
 ### 7.2 変更テストファイル
 
 **`tests/test_cli.py`** (Phase 8 schema へ migration):
-- `meta.json.neb_used` などの新フィールド assert
-- `--neb-refine` / `--neb-images` を使っているテストは削除
-- `--no-neb` の挙動 (NEB skip → trajectory.xyz は screening 由来) を追加
+- `meta.json.neb_results` などの新フィールド assert
+- `--neb-refine` / `--neb-images` / `--model` を使っているテストは削除
+- CLI テストは LJ backend で動作確認できる範囲は LJ で、UMA 必須の経路は `pytest.mark.slow` に集約
 
 **`tests/test_config.py`** (新セクションの validation):
 - `test_config_default_neb_section` — `[neb]` 省略時の default 値
@@ -508,7 +502,6 @@ CLI フラグの追加 / 削除:
 
 **`tests/test_re1_*.py` / `tests/test_re3_*.py` / `tests/test_re4_*.py`** (slow integration tests):
 - 全反応で trajectory.xyz が **NEB の image 数 (default 7)** であることを assert (Phase 7 では人工力 frames 数だった)
-- 全反応で `meta.json.neb_used == True` 確認
 - 全反応で `meta.json.neb_results` (新フィールド) が K 件存在
 - E2 / SN1 dissoc / SN1 recomb も今回から CI-NEB が走る → 各反応の `meta.json.selected_neb_peak_energy` に finite 値
 - SN1 dissoc は `n_candidates=1` のまま、Stage 2 は NEB 1 job のみ実行
@@ -523,7 +516,6 @@ CLI フラグの追加 / 削除:
 ### 7.4 Slow integration tests (`pytest -m slow`)
 
 全 6 反応について Phase 8 schema で再 pass を確認。各反応で:
-- `meta.json.neb_used == True`
 - `len(trajectory.xyz frames) == cfg.neb.n_images + 2 * cfg.neb.pad_frames`
 - `meta.json.neb_results` が `cfg.neb.top_k` 件 (clamping 発生時は `<= top_k`)
 - `selected_trial` が `meta.json.neb_results` 内のいずれかと一致
@@ -586,7 +578,6 @@ neb_workers = 3
      "peak_energy": ..., "n_steps": ..., "error": null}
   ],
   "top_k_indices": [3, 7, 11, 0],        // screening_trials のうち NEB に流したもの (peak 順)
-  "neb_used": true,
   "neb_results": [                        // top_k_indices と同順
     {
       "trial_idx": 3,
@@ -620,9 +611,9 @@ neb_workers = 3
 主要変更:
 - `trials` → `screening_trials` (内容は ScreeningTrialResult に対応)
 - `top_k_indices` 追加
-- `neb_used` (bool) と `neb_results` (list) 追加
+- `neb_results` (list) 追加
 - `wall_clock_breakdown` 追加
-- `neb_refined` 削除 (`neb_used` が後継、`--no-neb` で false)
+- `neb_refined` 削除 (CI-NEB は常時実行されるのでフラグ自体不要)
 - `effective_params` に model / neb / parallel フィールドを増やす
 
 ## 10. README 更新
@@ -674,7 +665,7 @@ CI-NEB 経由で peak_energy が **真の TS エネルギー近似** に切り�
 4. `reactx/endpoints.py` 新規 + `tests/test_endpoints.py`
 5. `reactx/screening.py` 新規 (Stage 1 並列実行) + `tests/test_screening.py`
 6. `reactx/neb.py` 拡張 (`run_neb_for_trial` / `run_neb_top_k`) + `tests/test_neb_top_k.py`
-7. `reactx/cli.py` 改変 (orchestration 全書き換え、`--neb-refine` 削除、`--no-neb` 追加、meta.json schema 更新)
+7. `reactx/cli.py` 改変 (orchestration 全書き換え、`--neb-refine` / `--neb-images` / `--model` 削除、meta.json schema 更新)
 8. `reactx/align.py` 削除 + `tests/test_align.py` 削除 (CI-NEB が trajectory 由来 endpoint を使う設計のため不要)
 9. `tests/test_neb_refine_sn2.py` / `tests/test_cli_neb_refine_guard.py` 削除
 10. `examples/*.rxn.toml` 全 6 件に `[neb] top_k = N` を必要に応じて追記 (sn1_dissoc は 1)
