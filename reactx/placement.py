@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from ase import Atoms
@@ -148,10 +149,15 @@ class PlacementTrial:
     - `positions` shape is `(N, 3)` matching `mol_h.GetNumAtoms()`. Substrate
       atoms are unchanged from input; the placed fragment(s) have been
       translated so `incoming_anchor` lands at `anchor_pos + direction * d_min`.
+    - `orientation` records cycloaddition trial flavor:
+      "single" for single-anchor (Phase 7) or unimolecular passthrough,
+      "endo" / "exo" for cycloaddition with asymmetric incoming fragment,
+      "achiral" for cycloaddition where endo/exo collapsed by RMSD.
     """
     direction: np.ndarray
     d_min: float
     positions: np.ndarray
+    orientation: Literal["single", "endo", "exo", "achiral"] = "single"
 
 
 @dataclass(frozen=True)
@@ -167,11 +173,17 @@ class PlacementResult:
     Invariants (unimolecular passthrough):
     - `n_candidates == 1`, `n_blocked == 0`, `len(trials) == 1`,
       `blocked_reasons == [None]`.
+
+    `placement_kind` records which dispatch path was taken:
+    - "single_anchor": Phase 7 path (1 bridging formed bond, or unimolecular
+      passthrough).
+    - "multi_anchor": Phase 8 path (2 bridging formed bonds, cycloaddition).
     """
     trials: list[PlacementTrial]
     n_candidates: int
     n_blocked: int
     blocked_reasons: list[str | None]
+    placement_kind: Literal["single_anchor", "multi_anchor"] = "single_anchor"
 
 
 def _identify_substrate(
@@ -278,10 +290,12 @@ def valid_placements(
                 direction=np.array([0.0, 0.0, 1.0]),
                 d_min=0.0,
                 positions=positions.copy(),
+                orientation="single",
             )],
             n_candidates=1,
             n_blocked=0,
             blocked_reasons=[None],
+            placement_kind="single_anchor",
         )
 
     # Bimolecular: refuse metathesis up front.
@@ -340,6 +354,7 @@ def valid_placements(
         new_positions[list(fragment)] += target - incoming_anchor_pos
         survivors.append(PlacementTrial(
             direction=d, d_min=d_min, positions=new_positions,
+            orientation="single",
         ))
         blocked_reasons.append(None)
 
@@ -362,4 +377,5 @@ def valid_placements(
         n_candidates=n_candidates,
         n_blocked=n_blocked_total,
         blocked_reasons=blocked_reasons,
+        placement_kind="single_anchor",
     )

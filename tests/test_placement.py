@@ -323,3 +323,95 @@ def test_build_atoms_from_positions_preserves_symbols_and_charges():
     # OH- → formal charge sum -1
     assert atoms.info["charge"] == -1
     np.testing.assert_array_equal(atoms.positions, positions)
+
+
+def test_placement_trial_default_orientation_is_single():
+    import numpy as np
+
+    from reactx.placement import PlacementTrial
+    t = PlacementTrial(
+        direction=np.array([0.0, 0.0, 1.0]),
+        d_min=0.0,
+        positions=np.zeros((3, 3)),
+    )
+    assert t.orientation == "single"
+
+
+def test_placement_trial_orientation_can_be_set_to_endo_exo_achiral():
+    import numpy as np
+
+    from reactx.placement import PlacementTrial
+    for label in ("single", "endo", "exo", "achiral"):
+        t = PlacementTrial(
+            direction=np.array([0.0, 0.0, 1.0]),
+            d_min=0.0,
+            positions=np.zeros((3, 3)),
+            orientation=label,
+        )
+        assert t.orientation == label
+
+
+def test_placement_result_placement_kind_default_single_anchor():
+    from reactx.placement import PlacementResult
+    r = PlacementResult(
+        trials=[],
+        n_candidates=0,
+        n_blocked=0,
+        blocked_reasons=[],
+    )
+    assert r.placement_kind == "single_anchor"
+
+
+def test_placement_result_kind_multi_anchor_accepted():
+    from reactx.placement import PlacementResult
+    r = PlacementResult(
+        trials=[],
+        n_candidates=0,
+        n_blocked=0,
+        blocked_reasons=[],
+        placement_kind="multi_anchor",
+    )
+    assert r.placement_kind == "multi_anchor"
+
+
+def test_valid_placements_unimolecular_returns_single_anchor_kind():
+    """unimolecular passthrough は placement_kind='single_anchor'、orientation='single'。"""
+    import numpy as np
+    from rdkit import Chem
+
+    from reactx.bond_changes import BondChanges
+    from reactx.placement import valid_placements
+
+    mol = Chem.MolFromSmiles("C")
+    mol = Chem.AddHs(mol)
+    positions = np.array([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+    ], dtype=float)
+    frag_indices = ((0, 1, 2, 3, 4),)
+    # Use intramolecular formed bond — unimolecular passthrough doesn't require bridging
+    bond_changes = BondChanges(formed=((0, 1),), broken=())
+
+    result = valid_placements(mol, frag_indices, positions, bond_changes, n_candidates=1)
+    assert result.placement_kind == "single_anchor"
+    assert len(result.trials) == 1
+    assert result.trials[0].orientation == "single"
+
+
+def test_valid_placements_existing_sn2_path_returns_single_anchor_kind():
+    """既存 SN2 path (bridges == 1, bimolecular) も placement_kind='single_anchor' を返す。"""
+    from rdkit import Chem
+
+    from reactx.bond_changes import BondChanges
+    from reactx.embed3d import embed_fragments_to_positions
+    from reactx.placement import valid_placements
+
+    mol = Chem.MolFromSmiles("[O-].CCl")
+    mol_h, frag_indices, positions = embed_fragments_to_positions(mol, seed=0)
+    bond_changes = BondChanges(formed=((0, 1),), broken=((1, 2),))
+    result = valid_placements(mol_h, frag_indices, positions, bond_changes, n_candidates=8, seed=0)
+    assert result.placement_kind == "single_anchor"
+    assert all(t.orientation == "single" for t in result.trials)
