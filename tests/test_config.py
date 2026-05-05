@@ -360,3 +360,48 @@ max_relax_steps = 100
 """)
     cfg = load_config(rxn)
     assert cfg.sampling.n_candidates == 64
+
+
+def test_load_k_form_as_list_of_two(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "DA"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0, 1.5]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    assert cfg.restraints.k_form == (1.0, 1.5)
+
+
+def test_k_form_list_length_must_match_formed(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "bad"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    with pytest.raises(ValueError, match="k_form.*list length"):
+        load_config(rxn)
+
+
+def test_k_form_list_negative_value_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "bad"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0, -0.1]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    with pytest.raises(ValueError, match="k_form.*must be >= 0"):
+        load_config(rxn)
