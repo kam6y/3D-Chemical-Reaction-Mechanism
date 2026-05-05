@@ -20,7 +20,7 @@ from reactx.artificial_force import lookup_r_form
 @dataclass(frozen=True)
 class RestraintConfig:
     k_form: float | tuple[float, ...]
-    k_broken: float
+    k_broken: float | tuple[float, ...]
     r_broken: float
     max_relax_steps: int
     r_form: float | tuple[float, ...] | None = None
@@ -87,7 +87,12 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
             f"{source}: at least one of 'formed' or 'broken' must be non-empty"
         )
 
-    restraints = _build_restraints(raw["restraints"], formed_count=len(formed), source=source)
+    restraints = _build_restraints(
+        raw["restraints"],
+        formed_count=len(formed),
+        broken_count=len(broken),
+        source=source,
+    )
     sampling = _build_sampling(raw.get("sampling", {}), source=source)
 
     return ReactionConfig(
@@ -138,11 +143,11 @@ def _to_pair_tuple(
     return tuple(pairs)
 
 
-def _build_restraints(raw: dict, *, formed_count: int, source: str) -> RestraintConfig:
+def _build_restraints(raw: dict, *, formed_count: int, broken_count: int, source: str) -> RestraintConfig:
     _check_keys(raw, _RESTRAINTS_KEYS, _RESTRAINTS_REQUIRED,
                 scope="restraints", source=source)
     k_form = _normalize_k_form(raw["k_form"], formed_count=formed_count, source=source)
-    k_broken = _as_float(raw["k_broken"], "restraints.k_broken", source, non_negative=True)
+    k_broken = _normalize_k_broken(raw["k_broken"], broken_count=broken_count, source=source)
     r_broken = _as_float(raw["r_broken"], "restraints.r_broken", source, positive=True)
     max_steps = _as_int(raw["max_relax_steps"], "restraints.max_relax_steps", source, positive=True)
     r_form_raw = raw.get("r_form")
@@ -181,6 +186,36 @@ def _normalize_k_form(
             out.append(v)
         return tuple(out)
     raise ValueError(f"{source}: 'restraints.k_form' must be number or list")
+
+
+def _normalize_k_broken(
+    raw: object, *, broken_count: int, source: str,
+) -> float | tuple[float, ...]:
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        v = float(raw)
+        if v < 0.0:
+            raise ValueError(f"{source}: 'restraints.k_broken' must be >= 0")
+        return v
+    if isinstance(raw, list):
+        if len(raw) != broken_count:
+            raise ValueError(
+                f"{source}: 'restraints.k_broken' list length {len(raw)} "
+                f"must match len(broken)={broken_count}"
+            )
+        out: list[float] = []
+        for i, x in enumerate(raw):
+            if not isinstance(x, (int, float)) or isinstance(x, bool):
+                raise ValueError(
+                    f"{source}: 'restraints.k_broken[{i}]' must be a number"
+                )
+            v = float(x)
+            if v < 0.0:
+                raise ValueError(
+                    f"{source}: 'restraints.k_broken[{i}]' must be >= 0"
+                )
+            out.append(v)
+        return tuple(out)
+    raise ValueError(f"{source}: 'restraints.k_broken' must be number or list")
 
 
 def _normalize_r_form(
