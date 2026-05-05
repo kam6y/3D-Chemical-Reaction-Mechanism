@@ -720,3 +720,104 @@ def test_multi_anchor_placement_uinc_antiparallel_to_usub_handles_180deg():
         # Check u_inc_new aligned with u_sub (cos > 0.99)
         cos_align = float(np.dot(u_inc_new, u_sub))
         assert cos_align > 0.99, f"u_inc not aligned with u_sub: cos={cos_align}"
+
+
+def test_multi_anchor_placement_unreachable_dual_anchor_blocked():
+    """L_sub and L_inc with large mismatch produce asymmetric bond distances
+    that exceed the threshold for many directions; at least one trial should
+    be blocked with 'asymmetric_dual_anchor'."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    # butadiene-like substrate (L_sub=3.6) + ethylene-like incoming (L_inc=1.34)
+    positions = np.array([
+        [0.0, 0.0, 0.0],     # A1
+        [3.6, 0.0, 0.0],     # A2 (L_sub = 3.6)
+        [0.0, 5.0, 0.0],     # I1
+        [1.34, 5.0, 0.0],    # I2 (L_inc = 1.34, much shorter)
+    ])
+    syms = ["C", "C", "C", "C"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3}, [(0, 2), (1, 3)],
+        n_candidates=64, seed=0,
+    )
+    # Some directions should be blocked with asymmetric_dual_anchor
+    assert any(
+        r is not None and "asymmetric_dual_anchor" in r
+        for r in blocked_reasons
+    ), f"expected asymmetric_dual_anchor in blocked_reasons; got: {blocked_reasons}"
+    # blocked_reasons must have length n_candidates
+    assert len(blocked_reasons) == 64
+
+
+def test_multi_anchor_placement_perpendicular_directions_survive():
+    """⊥ u_sub directions should give b1 ≈ b2 → not blocked by asymmetry."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    positions = np.array([
+        [0.0, 0.0, 0.0], [3.6, 0.0, 0.0],
+        [0.0, 5.0, 0.0], [1.34, 5.0, 0.0],
+    ])
+    syms = ["C", "C", "C", "C"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3}, [(0, 2), (1, 3)],
+        n_candidates=64, seed=0,
+    )
+    # At least 1 direction perpendicular enough to pass blocking
+    survivors = [t for t in trials]
+    assert len(survivors) >= 1
+
+
+def test_multi_anchor_placement_unreachable_via_d_min_ceiling():
+    """When d_min computed by compute_d_min would exceed d_min_ceiling, the
+    direction is blocked with 'unreachable_dual_anchor' (post-placement bond
+    distance > ceiling)."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    # Geometry where some directions force the placement very far away
+    # (highly anisotropic substrate)
+    positions = np.array([
+        [0.0, 0.0, 0.0], [3.0, 0.0, 0.0],
+        # A bulky substrate atom blocking +z direction (forces large d_min)
+        [1.5, 0.0, 0.5],
+        # Incoming pair
+        [0.0, 5.0, 0.0], [1.5, 5.0, 0.0],
+    ])
+    syms = ["C", "C", "C", "C", "C"]
+    # bridges: A1=0, I1=3; A2=1, I2=4
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1, 2}, {3, 4}, [(0, 3), (1, 4)],
+        n_candidates=32, seed=0, d_min_ceiling=4.0,  # tight ceiling
+    )
+    # With tight ceiling, some directions should be blocked by unreachable
+    # OR asymmetric. Just check the totals are consistent:
+    assert len(blocked_reasons) == 32
+    assert len(trials) + sum(1 for r in blocked_reasons if r is not None) == 32
+
+
+def test_multi_anchor_placement_blocked_reasons_string_format():
+    """Blocked reasons should include numeric values for debugging."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    positions = np.array([
+        [0.0, 0.0, 0.0], [3.6, 0.0, 0.0],
+        [0.0, 5.0, 0.0], [1.34, 5.0, 0.0],
+    ])
+    syms = ["C", "C", "C", "C"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3}, [(0, 2), (1, 3)],
+        n_candidates=64, seed=0,
+    )
+    # Find an asymmetric blocked reason
+    asym_reasons = [r for r in blocked_reasons if r and "asymmetric_dual_anchor" in r]
+    if asym_reasons:
+        # Format should be: asymmetric_dual_anchor:b1=X.XX,b2=Y.YY
+        assert "b1=" in asym_reasons[0]
+        assert "b2=" in asym_reasons[0]

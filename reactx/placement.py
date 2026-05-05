@@ -404,6 +404,18 @@ def _multi_anchor_placement(
                 angle=R_angle,
             )
 
+        # Reachability check (Task 4.4):
+        b1 = float(np.linalg.norm(new_positions[I1] - new_positions[A1]))
+        b2 = float(np.linalg.norm(new_positions[I2] - new_positions[A2]))
+
+        if max(b1, b2) > d_min_ceiling:
+            blocked_reasons.append(f"unreachable_dual_anchor:b1={b1:.2f},b2={b2:.2f}")
+            continue
+        if abs(b1 - b2) / max(b1, b2) > DUAL_ANCHOR_ASYMMETRY_THRESHOLD:
+            blocked_reasons.append(f"asymmetric_dual_anchor:b1={b1:.2f},b2={b2:.2f}")
+            continue
+
+        # direction survived blocking (Task 4.5 will add endo/exo expansion here)
         survivors.append(PlacementTrial(
             direction=d, d_min=float(d_min),
             positions=new_positions,
