@@ -503,85 +503,32 @@ def _multi_anchor_placement(
     return survivors, blocked_reasons
 
 
-def valid_placements(
-    mol_h: Chem.Mol,
-    frag_indices: tuple[tuple[int, ...], ...],
+def _single_anchor_placement(
     positions: np.ndarray,
-    bond_changes: BondChanges,
+    syms: list[str],
+    substrate: tuple[int, ...],
+    fragment_set: set[int],
+    bridge: tuple[int, int],   # (substrate_anchor, incoming_anchor) — normalized
     *,
-    n_candidates: int = 64,
-    seed: int = 0,
-    gap: float = 0.5,
-    d_min_ceiling: float = 8.0,
+    n_candidates: int,
+    seed: int,
+    gap: float,
+    d_min_ceiling: float,
 ) -> PlacementResult:
-    """Sphere-sample directions, filter by angular shadow + d_min ceiling, place.
+    """Phase 7 single-anchor path: extracted from valid_placements for dispatch."""
+    anchor, incoming_anchor = bridge
 
-    Unimolecular (1 fragment): returns single passthrough trial (direction=+z, d_min=0).
-    Bimolecular: identifies substrate (largest fragment) and one non-substrate fragment;
-    samples n_candidates directions; for each, evaluates blocking and applies translation.
-
-    Raises:
-        NotImplementedError: when broken bond bridges fragments (metathesis), or when
-            a non-substrate fragment is connected to the substrate by ≥2 formed bonds
-            (cycloaddition).
-        RuntimeError: when 0 candidates survive blocking.
-        ValueError: when a non-substrate fragment has no bridging formed bond.
-    """
-    # Unimolecular: passthrough.
-    if len(frag_indices) == 1:
-        return PlacementResult(
-            trials=[PlacementTrial(
-                direction=np.array([0.0, 0.0, 1.0]),
-                d_min=0.0,
-                positions=positions.copy(),
-                orientation="single",
-            )],
-            n_candidates=1,
-            n_blocked=0,
-            blocked_reasons=[None],
-            placement_kind="single_anchor",
-        )
-
-    # Bimolecular: refuse metathesis up front.
-    if _broken_bridges_fragments(bond_changes.broken, frag_indices):
-        raise NotImplementedError(
-            "multi-substrate metathesis (broken bonds spanning fragments) "
-            "is out of scope for Phase 7"
-        )
-
-    substrate = _identify_substrate(frag_indices)
-    substrate_set = set(substrate)
-    non_substrate = [f for f in frag_indices if f is not substrate]
-
-    # Phase 7 supports a single non-substrate fragment per call.
-    if len(non_substrate) > 1:
-        raise NotImplementedError(
-            f"termolecular placement ({len(non_substrate)} non-substrate "
-            f"fragments) is out of scope for Phase 7; only one non-substrate "
-            f"fragment is supported"
-        )
-
-    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
     vdw_all = np.array([vdw_radius(s) for s in syms], dtype=float)
 
     out_positions = positions.copy()
     directions = sample_sphere_directions(n_candidates, seed=seed)
 
-    fragment = non_substrate[0]
-    fragment_set = set(fragment)
-    bridges = _find_bridging_formed(bond_changes.formed, substrate_set, fragment_set)
-    if len(bridges) == 2:
-        raise NotImplementedError(
-            "multi-anchor placement (bridges==2) is wired in Task 4.3"
-        )
-    # bridges == 1 (single-anchor path)
-    anchor, incoming_anchor = bridges[0]   # already normalized: substrate first, fragment second
-
+    fragment = sorted(fragment_set)
     substrate_atoms = [i for i in substrate if i != anchor]
     sub_pos = out_positions[substrate_atoms]
     sub_vdw = vdw_all[substrate_atoms]
-    inc_pos = out_positions[list(fragment)]
-    inc_vdw = vdw_all[list(fragment)]
+    inc_pos = out_positions[fragment]
+    inc_vdw = vdw_all[fragment]
 
     anchor_pos = out_positions[anchor]
     incoming_anchor_pos = out_positions[incoming_anchor]
@@ -599,7 +546,7 @@ def valid_placements(
             continue
         target = anchor_pos + d * d_min
         new_positions = out_positions.copy()
-        new_positions[list(fragment)] += target - incoming_anchor_pos
+        new_positions[fragment] += target - incoming_anchor_pos
         survivors.append(PlacementTrial(
             direction=d, d_min=d_min, positions=new_positions,
             orientation="single",
@@ -627,3 +574,106 @@ def valid_placements(
         blocked_reasons=blocked_reasons,
         placement_kind="single_anchor",
     )
+
+
+def valid_placements(
+    mol_h: Chem.Mol,
+    frag_indices: tuple[tuple[int, ...], ...],
+    positions: np.ndarray,
+    bond_changes: BondChanges,
+    *,
+    n_candidates: int = 64,
+    seed: int = 0,
+    gap: float = 0.5,
+    d_min_ceiling: float = 8.0,
+) -> PlacementResult:
+    """Sphere-sample directions, filter by blocking, place fragment(s).
+
+    Dispatch:
+    - 1 fragment (unimolecular) → passthrough trial.
+    - bridges == 1 → single-anchor (Phase 7) via _single_anchor_placement.
+    - bridges == 2 → multi-anchor (Phase 8 cycloaddition) via _multi_anchor_placement.
+    - bridges >= 3 → NotImplementedError (general cycloaddition is Phase 9+).
+
+    Raises:
+        NotImplementedError: when broken bond bridges fragments (metathesis), when
+            more than one non-substrate fragment is supplied (termolecular), or when
+            a non-substrate fragment is connected to the substrate by ≥3 formed bonds.
+        RuntimeError: when 0 candidates survive blocking.
+        ValueError: when a non-substrate fragment has no bridging formed bond.
+    """
+    # Unimolecular passthrough
+    if len(frag_indices) == 1:
+        return PlacementResult(
+            trials=[PlacementTrial(
+                direction=np.array([0.0, 0.0, 1.0]),
+                d_min=0.0,
+                positions=positions.copy(),
+                orientation="single",
+            )],
+            n_candidates=1,
+            n_blocked=0,
+            blocked_reasons=[None],
+            placement_kind="single_anchor",
+        )
+
+    # Refuse metathesis
+    if _broken_bridges_fragments(bond_changes.broken, frag_indices):
+        raise NotImplementedError(
+            "multi-substrate metathesis (broken bonds spanning fragments) "
+            "is out of scope"
+        )
+
+    substrate = _identify_substrate(frag_indices)
+    substrate_set = set(substrate)
+    non_substrate = [f for f in frag_indices if f is not substrate]
+
+    if len(non_substrate) > 1:
+        raise NotImplementedError(
+            f"termolecular placement ({len(non_substrate)} non-substrate "
+            f"fragments) is out of scope"
+        )
+
+    fragment = non_substrate[0]
+    fragment_set = set(fragment)
+    bridges = _find_bridging_formed(bond_changes.formed, substrate_set, fragment_set)
+
+    syms = [a.GetSymbol() for a in mol_h.GetAtoms()]
+
+    if len(bridges) == 1:
+        return _single_anchor_placement(
+            positions, syms, substrate, fragment_set, bridges[0],
+            n_candidates=n_candidates, seed=seed, gap=gap,
+            d_min_ceiling=d_min_ceiling,
+        )
+    elif len(bridges) == 2:
+        survivors, blocked_reasons = _multi_anchor_placement(
+            positions, syms, substrate_set, fragment_set, bridges,
+            n_candidates=n_candidates, seed=seed, gap=gap,
+            d_min_ceiling=d_min_ceiling,
+        )
+        n_blocked_total = sum(1 for r in blocked_reasons if r is not None)
+        if not survivors:
+            raise RuntimeError(
+                f"anchor pair (A1={bridges[0][0]}, A2={bridges[1][0]}) has no valid "
+                f"placement direction (all {n_candidates} candidates blocked); "
+                f"check substrate geometry / r_form / d_min_ceiling"
+            )
+        if len(survivors) < max(1, n_candidates // 8):
+            log.warning(
+                "only %d/%d directions survived blocking for multi-anchor "
+                "placement at anchors %d, %d; consider larger n_candidates "
+                "or check geometry",
+                len(survivors), n_candidates, bridges[0][0], bridges[1][0],
+            )
+        return PlacementResult(
+            trials=survivors,
+            n_candidates=n_candidates,
+            n_blocked=n_blocked_total,
+            blocked_reasons=blocked_reasons,
+            placement_kind="multi_anchor",
+        )
+    else:
+        # _find_bridging_formed already raises NotImplementedError for bridges>=3,
+        # so this branch is unreachable. Defensive raise for mypy / readers.
+        raise AssertionError(f"unreachable: len(bridges) = {len(bridges)}")

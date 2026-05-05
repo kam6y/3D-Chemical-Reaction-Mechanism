@@ -562,26 +562,6 @@ def test_find_bridging_formed_zero_bridges_raises_value_error():
         )
 
 
-def test_valid_placements_two_bridges_raises_temporary_not_implemented():
-    """Until Task 4.3 wires multi-anchor, valid_placements should raise NotImplementedError on bridges==2."""
-    import pytest
-    from rdkit import Chem
-
-    from reactx.bond_changes import BondChanges
-    from reactx.embed3d import embed_fragments_to_positions
-    from reactx.placement import valid_placements
-
-    smiles = "C=CC=C.C=C"
-    mol = Chem.MolFromSmiles(smiles)
-    mol_h, frag_indices, positions = embed_fragments_to_positions(mol, seed=0)
-    bond_changes = BondChanges(formed=((0, 4), (3, 5)), broken=())
-    with pytest.raises(NotImplementedError, match="(multi-anchor|bridges==2|Task 4.3)"):
-        valid_placements(
-            mol_h, frag_indices, positions, bond_changes,
-            n_candidates=4, seed=0,
-        )
-
-
 def test_multi_anchor_placement_basic_translation_kabsch():
     """Synthetic 6-atom geometry: 4-atom substrate + 2-atom incoming.
     Verify _multi_anchor_placement returns surviving trials with correct
@@ -1000,3 +980,86 @@ def test_multi_anchor_n_trials_relationship_to_blocked_reasons():
     assert len(trials) <= 2 * n_directions_survived
     # blocked_reasons still has length n_candidates
     assert len(blocked_reasons) == 8
+
+
+def test_valid_placements_dispatches_to_multi_anchor_for_two_bridges():
+    """bridges == 2 → placement_kind='multi_anchor', orientations from {endo,exo,achiral}."""
+    from rdkit import Chem
+
+    from reactx.bond_changes import BondChanges
+    from reactx.embed3d import embed_fragments_to_positions
+    from reactx.placement import valid_placements
+
+    # butadiene + ethylene (the canonical DA case, ethylene is symmetric → achiral)
+    mol = Chem.MolFromSmiles("C=CC=C.C=C")
+    mol_h, frag_indices, positions = embed_fragments_to_positions(mol, seed=0)
+    # atom 0,3 are diene ends; atoms 4, 5 are ethylene
+    bond_changes = BondChanges(formed=((0, 4), (3, 5)), broken=())
+    result = valid_placements(
+        mol_h, frag_indices, positions, bond_changes,
+        n_candidates=16, seed=0,
+    )
+    assert result.placement_kind == "multi_anchor"
+    assert len(result.trials) >= 1
+    for t in result.trials:
+        assert t.orientation in ("endo", "exo", "achiral")
+        assert t.orientation != "single"
+
+
+def test_valid_placements_existing_sn2_path_kind_single_anchor():
+    """SN2 (bridges == 1) → placement_kind='single_anchor', orientation='single'. Regression."""
+    from rdkit import Chem
+
+    from reactx.bond_changes import BondChanges
+    from reactx.embed3d import embed_fragments_to_positions
+    from reactx.placement import valid_placements
+
+    mol = Chem.MolFromSmiles("[O-].CCl")
+    mol_h, frag_indices, positions = embed_fragments_to_positions(mol, seed=0)
+    bond_changes = BondChanges(formed=((0, 1),), broken=((1, 2),))
+    result = valid_placements(mol_h, frag_indices, positions, bond_changes, n_candidates=8, seed=0)
+    assert result.placement_kind == "single_anchor"
+    assert all(t.orientation == "single" for t in result.trials)
+
+
+def test_valid_placements_two_bridges_no_longer_raises_not_implemented():
+    """The Task 4.2 placeholder NotImplementedError is GONE."""
+    from rdkit import Chem
+
+    from reactx.bond_changes import BondChanges
+    from reactx.embed3d import embed_fragments_to_positions
+    from reactx.placement import valid_placements
+
+    mol = Chem.MolFromSmiles("C=CC=C.C=C")
+    mol_h, frag_indices, positions = embed_fragments_to_positions(mol, seed=0)
+    bond_changes = BondChanges(formed=((0, 4), (3, 5)), broken=())
+    # Should NOT raise
+    result = valid_placements(
+        mol_h, frag_indices, positions, bond_changes,
+        n_candidates=4, seed=0,
+    )
+    assert result is not None
+
+
+def test_valid_placements_three_bridges_raises_not_implemented():
+    """bridges >= 3 still raises (general cycloaddition is Phase 9+)."""
+    import pytest
+    from rdkit import Chem
+
+    from reactx.bond_changes import BondChanges
+    from reactx.embed3d import embed_fragments_to_positions
+    from reactx.placement import valid_placements
+
+    # 3-bridge case: contrived. Use cyclopentadiene + nitrogen-aromatic with 3 close C-C contacts
+    # Easier: just construct manually with synthetic atom indices.
+    # Use butadiene + propene-like with 3 mock formed bonds.
+    mol = Chem.MolFromSmiles("C=CC=C.C=CC")
+    mol_h, frag_indices, positions = embed_fragments_to_positions(mol, seed=0)
+    # 3 formed bonds between diene fragment (atoms 0-3) and other fragment (atoms 4-6)
+    # All three bridge the two fragments
+    bond_changes = BondChanges(formed=((0, 4), (1, 5), (3, 6)), broken=())
+    with pytest.raises(NotImplementedError, match="N>=3"):
+        valid_placements(
+            mol_h, frag_indices, positions, bond_changes,
+            n_candidates=4, seed=0,
+        )
