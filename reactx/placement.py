@@ -237,27 +237,33 @@ def _find_bridging_formed(
     formed: tuple[tuple[int, int], ...],
     substrate: set[int],
     fragment: set[int],
-) -> tuple[int, int]:
-    """Return the unique formed bond bridging substrate ↔ fragment.
+) -> list[tuple[int, int]]:
+    """Return all formed bonds bridging substrate ↔ fragment, normalized so
+    the substrate-side atom is first.
 
-    Multiple → NotImplementedError (cycloaddition is Phase 8+).
-    None → ValueError.
+    bridges == 0  → ValueError
+    bridges == 1 or 2 → list of normalized tuples
+    bridges >= 3 → NotImplementedError (general cycloaddition is Phase 9+)
     """
     bridges = [
         (a, b) for a, b in formed
         if (a in substrate and b in fragment) or (b in substrate and a in fragment)
     ]
-    if len(bridges) > 1:
-        raise NotImplementedError(
-            f"multi-anchor placement (cycloaddition) is out of scope for Phase 7; "
-            f"got {len(bridges)} formed bonds bridging this fragment"
-        )
     if not bridges:
         raise ValueError(
             f"fragment has no formed bond bridging to substrate; "
             f"check input atom mapping (formed={list(formed)})"
         )
-    return bridges[0]
+    if len(bridges) >= 3:
+        raise NotImplementedError(
+            f"multi-anchor placement with N>=3 bridges is out of scope for Phase 8; "
+            f"got {len(bridges)} formed bonds bridging this fragment"
+        )
+    # 正規化: substrate 側 atom が前
+    return [
+        (a, b) if a in substrate else (b, a)
+        for (a, b) in bridges
+    ]
 
 
 def build_atoms_from_positions(
@@ -363,9 +369,13 @@ def valid_placements(
 
     fragment = non_substrate[0]
     fragment_set = set(fragment)
-    bridge = _find_bridging_formed(bond_changes.formed, substrate_set, fragment_set)
-    anchor = bridge[0] if bridge[0] in substrate_set else bridge[1]
-    incoming_anchor = bridge[1] if bridge[0] == anchor else bridge[0]
+    bridges = _find_bridging_formed(bond_changes.formed, substrate_set, fragment_set)
+    if len(bridges) == 2:
+        raise NotImplementedError(
+            "multi-anchor placement (bridges==2) is wired in Task 4.3"
+        )
+    # bridges == 1 (single-anchor path)
+    anchor, incoming_anchor = bridges[0]   # already normalized: substrate first, fragment second
 
     substrate_atoms = [i for i in substrate if i != anchor]
     sub_pos = out_positions[substrate_atoms]

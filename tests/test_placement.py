@@ -199,16 +199,8 @@ def test_find_bridging_formed_returns_unique():
     formed = ((0, 5),)
     sub = {0, 1, 2, 3, 4}
     frag = {5, 6}
-    bridge = _find_bridging_formed(formed, sub, frag)
-    assert bridge == (0, 5)
-
-
-def test_find_bridging_formed_multiple_raises_not_implemented():
-    formed = ((0, 5), (1, 6))  # 同じ pair を 2 本接続
-    sub = {0, 1, 2, 3, 4}
-    frag = {5, 6}
-    with pytest.raises(NotImplementedError, match="multi-anchor"):
-        _find_bridging_formed(formed, sub, frag)
+    bridges = _find_bridging_formed(formed, sub, frag)
+    assert bridges == [(0, 5)]
 
 
 def test_find_bridging_formed_no_bridge_raises_value():
@@ -512,3 +504,79 @@ def test_rotate_atoms_does_not_mutate_input():
         angle=np.pi / 2,
     )
     np.testing.assert_array_equal(positions, original)
+
+
+def test_find_bridging_formed_returns_list_for_one_bridge():
+    from reactx.placement import _find_bridging_formed
+    bridges = _find_bridging_formed(
+        formed=((0, 5),),
+        substrate={0, 1, 2, 3},
+        fragment={5, 6},
+    )
+    assert bridges == [(0, 5)]
+
+
+def test_find_bridging_formed_returns_list_for_two_bridges():
+    from reactx.placement import _find_bridging_formed
+    bridges = _find_bridging_formed(
+        formed=((0, 5), (3, 6)),
+        substrate={0, 1, 2, 3},
+        fragment={5, 6},
+    )
+    assert bridges == [(0, 5), (3, 6)]
+
+
+def test_find_bridging_formed_normalizes_substrate_side_first():
+    """When formed is given as (fragment_atom, substrate_atom), normalize order."""
+    from reactx.placement import _find_bridging_formed
+    bridges = _find_bridging_formed(
+        formed=((5, 0), (6, 3)),  # fragment first
+        substrate={0, 1, 2, 3},
+        fragment={5, 6},
+    )
+    # After normalization: substrate atom is first
+    assert bridges == [(0, 5), (3, 6)]
+
+
+def test_find_bridging_formed_three_bridges_raises_not_implemented():
+    import pytest
+
+    from reactx.placement import _find_bridging_formed
+    with pytest.raises(NotImplementedError, match="N>=3 bridges"):
+        _find_bridging_formed(
+            formed=((0, 5), (3, 6), (1, 7)),
+            substrate={0, 1, 2, 3},
+            fragment={5, 6, 7},
+        )
+
+
+def test_find_bridging_formed_zero_bridges_raises_value_error():
+    import pytest
+
+    from reactx.placement import _find_bridging_formed
+    with pytest.raises(ValueError, match="no formed bond bridging"):
+        _find_bridging_formed(
+            formed=((0, 1),),
+            substrate={0, 1, 2, 3},
+            fragment={5, 6},
+        )
+
+
+def test_valid_placements_two_bridges_raises_temporary_not_implemented():
+    """Until Task 4.3 wires multi-anchor, valid_placements should raise NotImplementedError on bridges==2."""
+    import pytest
+    from rdkit import Chem
+
+    from reactx.bond_changes import BondChanges
+    from reactx.embed3d import embed_fragments_to_positions
+    from reactx.placement import valid_placements
+
+    smiles = "C=CC=C.C=C"
+    mol = Chem.MolFromSmiles(smiles)
+    mol_h, frag_indices, positions = embed_fragments_to_positions(mol, seed=0)
+    bond_changes = BondChanges(formed=((0, 4), (3, 5)), broken=())
+    with pytest.raises(NotImplementedError, match="(multi-anchor|bridges==2|Task 4.3)"):
+        valid_placements(
+            mol_h, frag_indices, positions, bond_changes,
+            n_candidates=4, seed=0,
+        )
