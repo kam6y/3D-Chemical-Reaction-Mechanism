@@ -722,7 +722,7 @@ def test_multi_anchor_placement_uinc_antiparallel_to_usub_handles_180deg():
         assert cos_align > 0.99, f"u_inc not aligned with u_sub: cos={cos_align}"
 
 
-def test_multi_anchor_placement_unreachable_dual_anchor_blocked():
+def test_multi_anchor_placement_asymmetric_dual_anchor_blocked():
     """L_sub and L_inc with large mismatch produce asymmetric bond distances
     that exceed the threshold for many directions; at least one trial should
     be blocked with 'asymmetric_dual_anchor'."""
@@ -771,7 +771,7 @@ def test_multi_anchor_placement_perpendicular_directions_survive():
     assert len(survivors) >= 1
 
 
-def test_multi_anchor_placement_unreachable_via_d_min_ceiling():
+def test_multi_anchor_placement_unreachable_dual_anchor_blocked():
     """When d_min computed by compute_d_min would exceed d_min_ceiling, the
     direction is blocked with 'unreachable_dual_anchor' (post-placement bond
     distance > ceiling)."""
@@ -798,6 +798,12 @@ def test_multi_anchor_placement_unreachable_via_d_min_ceiling():
     # OR asymmetric. Just check the totals are consistent:
     assert len(blocked_reasons) == 32
     assert len(trials) + sum(1 for r in blocked_reasons if r is not None) == 32
+    # Explicit assertion: at least one direction must be blocked by the
+    # unreachable_dual_anchor path (post-placement bond distance > ceiling).
+    assert any(
+        r is not None and "unreachable_dual_anchor" in r
+        for r in blocked_reasons
+    ), f"expected unreachable_dual_anchor in blocked_reasons; got: {blocked_reasons}"
 
 
 def test_multi_anchor_placement_blocked_reasons_string_format():
