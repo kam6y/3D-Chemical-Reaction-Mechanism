@@ -136,6 +136,53 @@ def evaluate_direction(
     return False, d_min, None
 
 
+def _permutation_aware_rmsd(
+    pos_a: np.ndarray,            # (K, 3) fragment atoms in pose A
+    pos_b: np.ndarray,            # (K, 3) fragment atoms in pose B
+    syms: list[str],              # length K, element symbols
+) -> float:
+    """RMSD between pose A and pose B over atom indices, but each atom in A
+    matches the nearest unmatched atom in B of the same element.
+
+    Used for achiral collapse: if 180° rotation maps the fragment to a
+    permutation of itself (e.g., ethylene's C2 symmetry permutes H atoms),
+    this RMSD will be ~0 even though index-wise RMSD is large.
+
+    Greedy matching by element: for each atom in A in order, match to the
+    nearest unmatched atom in B of the same element. For chemistry-grade
+    symmetry detection (small fragments) this is accurate enough.
+    """
+    if len(pos_a) != len(pos_b) or len(pos_a) != len(syms):
+        raise ValueError(
+            f"shape mismatch: pos_a={pos_a.shape}, pos_b={pos_b.shape}, "
+            f"len(syms)={len(syms)}"
+        )
+    K = len(pos_a)
+    if K == 0:
+        return 0.0
+    used_b: set[int] = set()
+    sq_sum = 0.0
+    for i in range(K):
+        sym_i = syms[i]
+        # Find nearest unmatched atom in B with same element
+        best_j = -1
+        best_d2 = float("inf")
+        for j in range(K):
+            if j in used_b or syms[j] != sym_i:
+                continue
+            d2 = float(np.sum((pos_a[i] - pos_b[j]) ** 2))
+            if d2 < best_d2:
+                best_d2 = d2
+                best_j = j
+        if best_j < 0:
+            # No matching element atom available — fall back to index-wise
+            best_d2 = float(np.sum((pos_a[i] - pos_b[i]) ** 2))
+        else:
+            used_b.add(best_j)
+        sq_sum += best_d2
+    return float(np.sqrt(sq_sum / K))
+
+
 def _rotate_atoms(
     positions: np.ndarray,
     *,
@@ -202,13 +249,19 @@ class PlacementTrial:
 class PlacementResult:
     """Aggregated outcome of `valid_placements` on a single bond_changes.
 
-    Invariants (bimolecular case):
+    Invariants (single_anchor):
     - `len(trials) + n_blocked == n_candidates`
     - `len(blocked_reasons) == n_candidates`; element is None for survivors,
       a string like "angle_shadow:atom_index=K" or "d_min_ceiling:value=V"
       for blocked candidates.
 
-    Invariants (unimolecular passthrough):
+    Invariants (multi_anchor):
+    - `len(blocked_reasons) == n_candidates`
+    - `len(trials) ∈ [n_candidates - n_blocked, 2 * (n_candidates - n_blocked)]`
+    - exactly one None per surviving direction; trial-to-direction is 1-or-2
+      (1 for achiral collapse, 2 for endo + exo on asymmetric fragments).
+
+    Invariants (unimolecular passthrough, single_anchor):
     - `n_candidates == 1`, `n_blocked == 0`, `len(trials) == 1`,
       `blocked_reasons == [None]`.
 
@@ -424,10 +477,11 @@ def _multi_anchor_placement(
             center=M_sub + d * d_min,
             angle=np.pi,
         )
-        # Symmetry detection via RMSD on fragment atoms
+        # Symmetry detection via permutation-aware RMSD on fragment atoms
         endo_frag = endo_pos[fragment_list]
         exo_frag = exo_pos[fragment_list]
-        rmsd = float(np.sqrt(np.mean(np.sum((endo_frag - exo_frag) ** 2, axis=1))))
+        fragment_syms = [syms[i] for i in fragment_list]
+        rmsd = _permutation_aware_rmsd(endo_frag, exo_frag, fragment_syms)
         if rmsd < 0.01:
             # symmetric fragment → 1 achiral trial
             survivors.append(PlacementTrial(

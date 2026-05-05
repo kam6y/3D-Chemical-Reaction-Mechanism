@@ -857,29 +857,101 @@ def test_multi_anchor_endo_exo_distinct_for_asymmetric_fragment():
 
 
 def test_multi_anchor_achiral_collapse_for_symmetric_fragment():
-    """対称な incoming fragment (I1-I2 軸まわりに C2 対称) では achiral 1 trial に縮約。"""
+    """ethylene-like incoming with C2 symmetry: 180° rotation around u_sub
+    permutes H atoms, so permutation-aware RMSD ~0 → achiral."""
     import numpy as np
 
     from reactx.placement import _multi_anchor_placement
 
-    # 4 incoming atoms: I1, I2, plus 2 H atoms placed symmetrically around the I1-I2 axis
-    # The H atoms are positioned such that 180° rotation around u_sub (= +x after Kabsch)
-    # leaves the fragment essentially unchanged.
+    # ethylene-like incoming: 2 C + 4 H, planar at z=5, with H atoms placed
+    # symmetrically around the C=C axis.
+    # After Kabsch (u_inc → u_sub = +x), the C=C axis is along +x.
+    # 180° rotation around +x maps (x, y, z) -> (x, -y, -z), so any H at
+    # (x_h, y_h, z_h) is mapped to (x_h, -y_h, -z_h). For a real ethylene-like
+    # H₂C=CH₂, the H's are at (x_C ± dx, ±dy, 0) — same x as their parent C
+    # but offset in y.
+    #
+    # Initial geometry: C-C along y at y=5, z=0 (will be rotated to +x by Kabsch)
     positions = np.array([
-        [0.0, 0.0, 0.0], [3.0, 0.0, 0.0],     # A1, A2
-        [0.0, 5.0, 0.0], [1.5, 5.0, 0.0],     # I1, I2 (along x at y=5, z=0)
-        # 2 H atoms in z=0 plane (so 180° rotation around the alignment axis maps them to each other)
-        [-0.5, 5.0, 0.0],   # neighbor of I1
-        [2.0, 5.0, 0.0],    # neighbor of I2
+        [0.0, 0.0, 0.0], [3.0, 0.0, 0.0],   # A1, A2 (substrate, u_sub = +x)
+        [0.0, 5.0, 0.0], [1.5, 5.0, 0.0],   # I1, I2 (incoming, u_inc = +x already)
+        # 4 H atoms placed symmetrically around the I1-I2 axis (z=0):
+        # H atoms in (x, y_offset, 0) and (x, -y_offset, 0) pairs but along z.
+        # Actually we want C2 around the I1-I2 axis (= +x).
+        # 180° around +x maps (x, y, z) -> (x, -y, -z).
+        # So if we have an H at (x_h, dy, dz), its C2-image is (x_h, -dy, -dz).
+        # To pass the symmetry test, the fragment must contain BOTH (x_h, dy, dz)
+        # AND (x_h, -dy, -dz). Place them so they ARE C2 images:
+        [-0.3, 5.3, 0.4],   # H near I1, +y +z side
+        [-0.3, 4.7, -0.4],  # H near I1, -y -z side (C2 image of above)
+        [1.8, 5.3, 0.4],    # H near I2, +y +z side
+        [1.8, 4.7, -0.4],   # H near I2, -y -z side (C2 image)
+    ])
+    syms = ["C", "C", "C", "C", "H", "H", "H", "H"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3, 4, 5, 6, 7}, [(0, 2), (1, 3)],
+        n_candidates=8, seed=0,
+    )
+    # All trials should be achiral (C2-symmetric ethylene-like fragment)
+    for t in trials:
+        assert t.orientation == "achiral", (
+            f"expected achiral for ethylene-like fragment, got {t.orientation}"
+        )
+
+
+def test_multi_anchor_achiral_collapse_for_axial_atoms():
+    """Trivial case: when all fragment atoms lie on the rotation axis,
+    RMSD is exactly 0 regardless of element matching."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    positions = np.array([
+        [0.0, 0.0, 0.0], [3.0, 0.0, 0.0],
+        [0.0, 5.0, 0.0], [1.5, 5.0, 0.0],
+        [-0.5, 5.0, 0.0], [2.0, 5.0, 0.0],   # all on z=0, on axis
     ])
     syms = ["C", "C", "C", "C", "H", "H"]
     trials, blocked_reasons = _multi_anchor_placement(
         positions, syms, {0, 1}, {2, 3, 4, 5}, [(0, 2), (1, 3)],
         n_candidates=8, seed=0,
     )
-    # All trials should be achiral (collapsed)
     for t in trials:
-        assert t.orientation == "achiral", f"expected achiral, got {t.orientation}"
+        assert t.orientation == "achiral"
+
+
+def test_permutation_aware_rmsd_index_wise_match():
+    import numpy as np
+
+    from reactx.placement import _permutation_aware_rmsd
+    # When poses are identical, RMSD = 0
+    pos_a = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    syms = ["C", "C"]
+    assert _permutation_aware_rmsd(pos_a, pos_a, syms) == 0.0
+
+
+def test_permutation_aware_rmsd_swap_same_element():
+    import numpy as np
+
+    from reactx.placement import _permutation_aware_rmsd
+    # 2 H atoms swapped: index-wise RMSD large, permutation-aware RMSD = 0
+    pos_a = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    pos_b = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])  # swapped
+    syms = ["H", "H"]
+    assert _permutation_aware_rmsd(pos_a, pos_b, syms) == 0.0
+
+
+def test_permutation_aware_rmsd_different_elements_no_match():
+    import numpy as np
+
+    from reactx.placement import _permutation_aware_rmsd
+    # H and C swapped — different elements, no match available, falls back to index-wise
+    pos_a = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    pos_b = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    syms = ["H", "C"]
+    rmsd = _permutation_aware_rmsd(pos_a, pos_b, syms)
+    # Index-wise comparison: |0-1| at each → RMSD = sqrt(mean(1, 1)) = 1.0
+    assert abs(rmsd - 1.0) < 1e-9
 
 
 def test_multi_anchor_orientation_field_set_correctly():
