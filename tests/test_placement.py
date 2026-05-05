@@ -621,6 +621,33 @@ def test_multi_anchor_placement_basic_translation_kabsch():
         assert t.orientation == "endo"
         assert t.positions.shape == positions.shape
 
+    # Numerical post-conditions of multi-anchor placement.
+    M_sub = (positions[0] + positions[3]) / 2.0
+    v_sub = positions[3] - positions[0]
+    u_sub = v_sub / np.linalg.norm(v_sub)
+    L_inc_orig = float(np.linalg.norm(positions[5] - positions[4]))
+
+    for t in trials:
+        I1_new = t.positions[4]
+        I2_new = t.positions[5]
+        M_inc_new = (I1_new + I2_new) / 2.0
+
+        # (1) Translation correctness: M_inc lands at M_sub + d * d_min
+        target = M_sub + t.direction * t.d_min
+        np.testing.assert_allclose(M_inc_new, target, atol=1e-9)
+
+        # (2) Alignment correctness: u_inc_new == u_sub
+        v_inc_new = I2_new - I1_new
+        L_inc_new = float(np.linalg.norm(v_inc_new))
+        u_inc_new = v_inc_new / L_inc_new
+        np.testing.assert_allclose(u_inc_new, u_sub, atol=1e-9)
+
+        # (3) Rigid-body preservation: incoming bond length unchanged
+        np.testing.assert_allclose(L_inc_new, L_inc_orig, atol=1e-9)
+
+        # (4) Substrate atoms unchanged
+        np.testing.assert_allclose(t.positions[:4], positions[:4], atol=1e-12)
+
 
 def test_multi_anchor_placement_coincident_anchors_raises():
     """When I1 == I2 (coincident incoming anchors), raise ValueError."""
@@ -684,3 +711,12 @@ def test_multi_anchor_placement_uinc_antiparallel_to_usub_handles_180deg():
     )
     # Should not crash and produce 4 trials
     assert len(trials) == 4
+
+    # Antiparallel case: after rotation, u_inc must be aligned (not antiparallel) to u_sub
+    u_sub = (positions[1] - positions[0]) / np.linalg.norm(positions[1] - positions[0])
+    for t in trials:
+        v_inc_new = t.positions[3] - t.positions[2]
+        u_inc_new = v_inc_new / np.linalg.norm(v_inc_new)
+        # Check u_inc_new aligned with u_sub (cos > 0.99)
+        cos_align = float(np.dot(u_inc_new, u_sub))
+        assert cos_align > 0.99, f"u_inc not aligned with u_sub: cos={cos_align}"
