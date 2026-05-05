@@ -107,11 +107,11 @@ reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
    → unimolecular auto-clamp で `meta.json.trials` が 1 件、`trajectory.xyz` で C–Br 距離 ≥ 4.5 Å
 6. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --backend uma --render`
    → bimolecular で 64 候補、blocking 後の生存全件を UMA で full relax、Cl⁻ が tBu⁺ の平面方向から接近 → C–Cl 結合形成を視認
-8. `reactx run examples/diels_alder_simple.rxn -o out/da/ --backend uma --render`
+7. `reactx run examples/diels_alder_simple.rxn -o out/da/ --backend uma --render`
    → meta.json で `placement_kind == "multi_anchor"`, `orientation` に "achiral" (ethylene C2 対称で縮約) が出ることを確認、最終フレームで C1-C5 ≤ 1.8 Å、C4-C6 ≤ 1.8 Å を視認
-9. `reactx run examples/diels_alder_endo.rxn -o out/da_endo/ --backend uma --render`
+8. `reactx run examples/diels_alder_endo.rxn -o out/da_endo/ --backend uma --render`
    → meta.json で endo, exo 両 trial が出力、selected_trial の orientation を確認 (UMA の挙動次第で endo/exo どちらか) + 6-membered ring + bicyclic 構造の形成を視認
-10. `pytest -m slow` で Phase 8 含む 8 反応 (DA × 2 を含む) すべての統合テストが pass
+9. `pytest -m slow` で Phase 8 含む 8 反応 (DA × 2 を含む) すべての統合テストが pass
 
 ## レンダリング: 原子球サイズと結合棒
 
@@ -154,6 +154,8 @@ RTX 5070 Ti + UMA-m-1p1 で実測 (`n_candidates=64`、Blender 4.5 LTS で `--re
 | Diels-Alder endo (`examples/diels_alder_endo.rxn`) | 578 s | 28 | 15 / 28 | `n_candidates=16` × 2 endo/exo (12-atom CP+MA は trial 1 件あたり ~30 s)、selected orientation = "exo" (peak energy 最小)、C-C σ bond ≈ 1.56 Å |
 
 UMA model load (~25–30 s) が固定コスト。Phase 7 では MMFF prescreen を廃止したため、blocking で生存した候補の数 (`n_valid`) が wall-clock を直接決める。`n_candidates=64` で各反応の anchor 周辺ステリックにより 20–42 程度が生存し、それぞれ UMA で full relax する。混雑した anchor で生存が少ないとログ警告が出る (`only K/N candidates survived blocking ...`)。生存ゼロは `RuntimeError` で停止する。
+
+Diels-Alder endo は CP + MA の 12 原子で trial 1 件あたり ~30 s かかるため、`n_candidates=16` (32 trials = 16 endo + 16 exo) で wall-clock を抑制している。symmetric な butadiene + ethylene は default `n_candidates=64` で 62 valid (achiral 縮約適用)。
 
 全球面サンプリングでは個々の trial が「正確な backside」から数十度ずれることが多いため、Phase 6 の cone サンプル時代より restraint をやや強めにする必要がある。特に Menshutkin のように gas-phase で product が contact ion pair より高エネルギーになる反応では、`k_form` を 4.0 程度まで強くしないと UMA の repulsive 領域を押し切れず N-C bond が形成されない。
 

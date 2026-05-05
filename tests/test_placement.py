@@ -590,7 +590,7 @@ def test_multi_anchor_placement_basic_translation_kabsch():
         n_candidates=8, seed=0,
     )
 
-    # No blocking yet → all candidates should produce a trial
+    # Geometry chosen so no direction is blocked → all 8 candidates produce a trial.
     assert len(trials) == 8
     assert len(blocked_reasons) == 8
     # All blocked_reasons should be None (no blocking in this task)
@@ -1023,7 +1023,7 @@ def test_valid_placements_existing_sn2_path_kind_single_anchor():
 
 
 def test_valid_placements_two_bridges_no_longer_raises_not_implemented():
-    """The Task 4.2 placeholder NotImplementedError is GONE."""
+    """The earlier-stage placeholder NotImplementedError for bridges == 2 has been replaced by real multi-anchor dispatch."""
     from rdkit import Chem
 
     from reactx.bond_changes import BondChanges

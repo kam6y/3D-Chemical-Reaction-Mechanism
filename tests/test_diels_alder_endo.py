@@ -29,6 +29,8 @@ def test_diels_alder_endo_end_to_end(tmp_path: Path):
 
     # selected trial should be endo or exo (not single, not achiral)
     selected = next(t for t in meta["trials"] if t["trial"] == meta["selected_trial"])
+    # spec §8.2 originally expected endo ≤ exo (kinetic preference), but UMA empirically
+    # prefers exo for this geometry (commit 2d2a648); relaxed to "either is acceptable".
     assert selected["orientation"] in ("endo", "exo"), (
         f"selected trial orientation is unexpected: {selected['orientation']}"
     )

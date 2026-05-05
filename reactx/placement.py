@@ -356,7 +356,7 @@ def _broken_bridges_fragments(
     return any(atom_to_frag.get(a) != atom_to_frag.get(b) for a, b in broken)
 
 
-DUAL_ANCHOR_ASYMMETRY_THRESHOLD = 0.40   # see spec §5.4 (used in Task 4.4)
+DUAL_ANCHOR_ASYMMETRY_THRESHOLD = 0.40   # see spec §5.4
 
 
 def _multi_anchor_placement(
@@ -371,17 +371,24 @@ def _multi_anchor_placement(
     gap: float = 0.5,
     d_min_ceiling: float = 8.0,
 ) -> tuple[list[PlacementTrial], list[str | None]]:
-    """Cycloaddition (bridges == 2) 用の rigid-body multi-anchor 配置 (skeleton).
+    """Cycloaddition (bridges == 2) 用の rigid-body multi-anchor 配置.
 
-    Phase 8 step 12/N (Task 4.3): translation + 2-point Kabsch alignment.
-    Reachability blocking (Task 4.4) and endo/exo expansion (Task 4.5) are
-    added incrementally in subsequent tasks.
+    Per spec §5: for each Fibonacci-sampled direction d, translate the incoming
+    fragment so M_inc lands at M_sub + d * d_min, apply a 2-point Kabsch rotation
+    aligning u_inc with u_sub, and apply reachability blocking (rejects directions
+    where the realized bond distances |I1-A1| / |I2-A2| are too long or too
+    asymmetric). Each surviving direction is then expanded into endo and exo
+    trials by 180° rotation around u_sub; symmetric incoming fragments collapse
+    to a single 'achiral' trial via permutation-aware RMSD comparison.
 
     Returns:
         (survivors, blocked_reasons) where:
-        - survivors: list of PlacementTrial for surviving directions.
-        - blocked_reasons: list of length n_candidates with None for survivors
-          and a string for blocked directions. (No blocking yet — all None.)
+        - survivors: list of PlacementTrial for surviving directions; len can
+          exceed n_candidates - n_blocked because asymmetric incoming fragments
+          yield 2 trials (endo + exo) per direction.
+        - blocked_reasons: list of length n_candidates; None for surviving
+          directions, a string ('asymmetric_dual_anchor:...' or
+          'unreachable_dual_anchor:...') for blocked.
     """
     A1, I1 = bridges[0]
     A2, I2 = bridges[1]
@@ -457,7 +464,7 @@ def _multi_anchor_placement(
                 angle=R_angle,
             )
 
-        # Reachability check (Task 4.4):
+        # Reachability check (spec §5.4):
         b1 = float(np.linalg.norm(new_positions[I1] - new_positions[A1]))
         b2 = float(np.linalg.norm(new_positions[I2] - new_positions[A2]))
 
@@ -468,7 +475,7 @@ def _multi_anchor_placement(
             blocked_reasons.append(f"asymmetric_dual_anchor:b1={b1:.2f},b2={b2:.2f}")
             continue
 
-        # direction survived blocking; expand into endo/exo trials (Task 4.5)
+        # direction survived blocking; expand into endo/exo trials (spec §5.3)
         endo_pos = new_positions
         exo_pos = _rotate_atoms(
             new_positions,
