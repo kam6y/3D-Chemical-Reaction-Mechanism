@@ -450,3 +450,33 @@ max_relax_steps = 200
 """)
     cfg = load_config(rxn)
     assert cfg.restraints.k_broken == 0.0
+
+
+def test_load_r_broken_as_list_for_e2(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "E2 per-bond r_broken"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+[restraints]
+k_form = 1.0
+k_broken = 1.0
+r_broken = [3.0, 5.0]
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    assert cfg.restraints.r_broken == (3.0, 5.0)
+
+
+def test_r_broken_list_must_be_positive(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "bad"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+[restraints]
+k_form = 1.0
+k_broken = 1.0
+r_broken = [3.0, 0.0]
+max_relax_steps = 200
+""")
+    with pytest.raises(ValueError, match="r_broken.*must be > 0"):
+        load_config(rxn)

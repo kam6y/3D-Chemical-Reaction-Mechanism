@@ -21,7 +21,7 @@ from reactx.artificial_force import lookup_r_form
 class RestraintConfig:
     k_form: float | tuple[float, ...]
     k_broken: float | tuple[float, ...]
-    r_broken: float
+    r_broken: float | tuple[float, ...]
     max_relax_steps: int
     r_form: float | tuple[float, ...] | None = None
 
@@ -148,7 +148,7 @@ def _build_restraints(raw: dict, *, formed_count: int, broken_count: int, source
                 scope="restraints", source=source)
     k_form = _normalize_k_form(raw["k_form"], formed_count=formed_count, source=source)
     k_broken = _normalize_k_broken(raw["k_broken"], broken_count=broken_count, source=source)
-    r_broken = _as_float(raw["r_broken"], "restraints.r_broken", source, positive=True)
+    r_broken = _normalize_r_broken(raw["r_broken"], broken_count=broken_count, source=source)
     max_steps = _as_int(raw["max_relax_steps"], "restraints.max_relax_steps", source, positive=True)
     r_form_raw = raw.get("r_form")
     r_form = _normalize_r_form(r_form_raw, formed_count=formed_count, source=source)
@@ -216,6 +216,36 @@ def _normalize_k_broken(
             out.append(v)
         return tuple(out)
     raise ValueError(f"{source}: 'restraints.k_broken' must be number or list")
+
+
+def _normalize_r_broken(
+    raw: object, *, broken_count: int, source: str,
+) -> float | tuple[float, ...]:
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        v = float(raw)
+        if v <= 0.0:
+            raise ValueError(f"{source}: 'restraints.r_broken' must be > 0")
+        return v
+    if isinstance(raw, list):
+        if len(raw) != broken_count:
+            raise ValueError(
+                f"{source}: 'restraints.r_broken' list length {len(raw)} "
+                f"must match len(broken)={broken_count}"
+            )
+        out: list[float] = []
+        for i, x in enumerate(raw):
+            if not isinstance(x, (int, float)) or isinstance(x, bool):
+                raise ValueError(
+                    f"{source}: 'restraints.r_broken[{i}]' must be a number"
+                )
+            v = float(x)
+            if v <= 0.0:
+                raise ValueError(
+                    f"{source}: 'restraints.r_broken[{i}]' must be > 0"
+                )
+            out.append(v)
+        return tuple(out)
+    raise ValueError(f"{source}: 'restraints.r_broken' must be number or list")
 
 
 def _normalize_r_form(
