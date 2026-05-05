@@ -10,7 +10,7 @@ def test_cli_unimolecular_clamps_top_k_to_screening_count(tmp_path, tmp_rxn_with
         'formed = []\n'
         'broken = [[1, 5]]\n'
         '[restraints]\nk_form=0\nk_broken=0.5\nr_broken=4.0\nmax_relax_steps=3\n'
-        '[neb]\ntop_k=4\nn_images=3\nmax_steps=2\n'
+        '[neb]\ntop_k=4\nn_images=3\nmax_steps=2\npad_frames=0\ninterp_factor=1\n'
         '[parallel]\nscreening_workers=1\nneb_workers=1\n'
     )
     out = tmp_path / "sn1d"

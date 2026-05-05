@@ -165,7 +165,7 @@ def test_cli_phase8_meta_json_schema(tmp_path: Path, tmp_rxn_with_toml):
         'broken = [[1, 2]]\n'
         '[restraints]\nk_form=0.1\nk_broken=0.1\nr_broken=4.0\nmax_relax_steps=3\n'
         '[sampling]\nn_candidates=2\n'
-        '[neb]\ntop_k=1\nn_images=3\nmax_steps=2\n'
+        '[neb]\ntop_k=1\nn_images=3\nmax_steps=2\npad_frames=0\ninterp_factor=1\n'
         '[parallel]\nscreening_workers=1\nneb_workers=1\n'
     )
     out = tmp_path / "sn2"

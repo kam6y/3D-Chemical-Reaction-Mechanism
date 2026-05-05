@@ -41,9 +41,10 @@ class ModelConfig:
 class NebConfig:
     top_k: int = 4
     n_images: int = 7
-    fmax: float = 0.05
+    fmax: float = 0.1
     max_steps: int = 200
-    pad_frames: int = 0
+    pad_frames: int = 3
+    interp_factor: int = 4
 
 
 @dataclass(frozen=True)
@@ -72,7 +73,7 @@ _RESTRAINTS_KEYS = {"k_form", "k_broken", "r_broken", "max_relax_steps", "r_form
 _RESTRAINTS_REQUIRED = {"k_form", "k_broken", "r_broken", "max_relax_steps"}
 _SAMPLING_KEYS = {"n_candidates"}
 _MODEL_KEYS = {"screening_model", "neb_model"}
-_NEB_KEYS = {"top_k", "n_images", "fmax", "max_steps", "pad_frames"}
+_NEB_KEYS = {"top_k", "n_images", "fmax", "max_steps", "pad_frames", "interp_factor"}
 _PARALLEL_KEYS = {"screening_workers", "neb_workers"}
 _TOP_LEVEL_REQUIRED = {"description", "formed", "broken", "restraints"}
 
@@ -242,16 +243,20 @@ def _build_neb(raw: dict, *, source: str) -> NebConfig:
     n_images = _as_int(raw.get("n_images", 7), "neb.n_images", source, positive=True)
     if n_images < 3:
         raise ValueError(f"{source}: 'neb.n_images' must be >= 3 (got {n_images})")
-    fmax = _as_float(raw.get("fmax", 0.05), "neb.fmax", source, positive=True)
+    fmax = _as_float(raw.get("fmax", 0.1), "neb.fmax", source, positive=True)
     max_steps = _as_int(raw.get("max_steps", 200), "neb.max_steps", source, positive=True)
-    pad_frames_raw = raw.get("pad_frames", 0)
+    pad_frames_raw = raw.get("pad_frames", 3)
     if not isinstance(pad_frames_raw, int) or isinstance(pad_frames_raw, bool):
         raise ValueError(f"{source}: 'neb.pad_frames' must be an int")
     if pad_frames_raw < 0:
         raise ValueError(f"{source}: 'neb.pad_frames' must be >= 0 (got {pad_frames_raw})")
+    interp_factor = _as_int(
+        raw.get("interp_factor", 4), "neb.interp_factor", source, positive=True,
+    )
     return NebConfig(
         top_k=top_k, n_images=n_images, fmax=fmax,
         max_steps=max_steps, pad_frames=int(pad_frames_raw),
+        interp_factor=interp_factor,
     )
 
 

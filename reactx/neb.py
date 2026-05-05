@@ -10,6 +10,7 @@ from ase.calculators.calculator import Calculator
 from ase.io import write
 from ase.optimize import FIRE
 
+from reactx.endpoints import relax_endpoint
 from reactx.parallel import (
     get_cached_calculator,
     init_lj_worker,
@@ -40,6 +41,31 @@ def _safe_call(fn, label: str, fallback):
         return fallback
 
 
+def _densify(images: list[Atoms], interp_factor: int) -> list[Atoms]:
+    """Linearly interpolate positions between consecutive NEB images.
+
+    interp_factor=1 returns the input unchanged. interp_factor=N inserts (N-1)
+    interpolated frames between each adjacent pair, giving (n-1)*N + 1 frames
+    total. Atom symbols / charges / spin / info dict are inherited from the
+    leading image of each gap; only positions are interpolated.
+    """
+    if interp_factor < 1:
+        raise ValueError(f"interp_factor must be >= 1, got {interp_factor}")
+    if interp_factor == 1 or len(images) < 2:
+        return [img.copy() for img in images]
+    out: list[Atoms] = []
+    for i in range(len(images) - 1):
+        a = images[i]
+        b = images[i + 1]
+        for k in range(interp_factor):
+            t = k / interp_factor
+            mix = a.copy()
+            mix.set_positions((1.0 - t) * a.positions + t * b.positions)
+            out.append(mix)
+    out.append(images[-1].copy())
+    return out
+
+
 def _run_phase(label: str, neb, *, fmax: float, steps: int) -> bool:
     """Run FIRE on a NEB band; return True if converged. Logs and swallows
     runtime errors so a failed phase does not abort the pipeline."""
@@ -56,12 +82,13 @@ def run_neb(
     product: Atoms,
     *,
     calculator: Calculator,
-    n_images: int = 15,
+    n_images: int = 7,
     output_xyz: str | Path,
-    fmax: float = 0.05,
+    fmax: float = 0.1,
     max_steps: int = 200,
     climb: bool = True,
-    pad_frames: int = 0,
+    pad_frames: int = 3,
+    interp_factor: int = 4,
 ) -> dict:
     """Run IDPP interpolation + (CI-)NEB, write trajectory XYZ, return metadata.
 
@@ -116,9 +143,16 @@ def run_neb(
         [float("nan")] * n_images,
     )
 
-    # Reference-sharing the endpoint Atoms in the padded list is safe: extxyz
-    # writer only reads positions/symbols, never mutates.
-    padded = [images[0]] * pad_frames + list(images) + [images[-1]] * pad_frames
+    # Densify NEB output by linearly interpolating positions between adjacent
+    # NEB images for smoother animation. NEB images carry the chemistry; the
+    # interpolation just adds visual frames in between (positions only, no
+    # energy reevaluation). interp_factor=4 means 3 extra frames per gap, so
+    # 7 images -> 7 + 6*3 = 25 dense frames before padding.
+    dense = _densify(images, interp_factor)
+    padded = [dense[0]] * pad_frames + dense + [dense[-1]] * pad_frames
+    # Strip calculators so extxyz output does not carry stale references.
+    for atoms in padded:
+        atoms.calc = None
     write(str(output_xyz), padded, format="extxyz")
 
     return {
@@ -140,6 +174,7 @@ class _NebJob:
     fmax: float
     max_steps: int
     pad_frames: int
+    interp_factor: int
     output_xyz: Path
     backend: str
     neb_model: str
@@ -154,22 +189,27 @@ def run_neb_for_trial(
     fmax: float,
     max_steps: int,
     pad_frames: int,
+    interp_factor: int,
     output_xyz: Path,
 ) -> dict:
     """Run 2-phase NEB on screening endpoints for one trial.
 
-    Endpoints come directly from the screening trajectory's first/last frames.
-    No prior un-restrained relax: BFGS without restraints can walk back across
-    the saddle (e.g. SN1 dissoc heterolytic state may be lower-energy under
-    UMA omol than the bonded reactant), collapsing R and P to the same minimum.
+    Endpoints are locally relaxed before NEB so they sit on the bare UMA PES
+    (the screening's frames are constrained-relax outputs and the placement
+    R is just a geometric placement). The local relax uses FIRE with a tight
+    maxstep limit so it cannot walk back across the reactive saddle into the
+    other valley.
 
     Returns a dict {converged, n_images, image_energies, peak_energy,
     final_fmax, xyz_path}. xyz_path is the basename only.
     """
+    R = relax_endpoint(reactant_atoms, calc)
+    P = relax_endpoint(product_atoms, calc)
     info = run_neb(
-        reactant=reactant_atoms, product=product_atoms, calculator=calc,
+        reactant=R, product=P, calculator=calc,
         n_images=n_images, output_xyz=output_xyz,
         fmax=fmax, max_steps=max_steps, pad_frames=pad_frames,
+        interp_factor=interp_factor,
     )
     image_energies = info.get("image_energies") or []
     finite = [e for e in image_energies if e == e]
@@ -196,7 +236,8 @@ def _run_one_neb(job: _NebJob) -> dict:
     result = run_neb_for_trial(
         job.reactant_atoms, job.product_atoms, calc=calc,
         n_images=job.n_images, fmax=job.fmax, max_steps=job.max_steps,
-        pad_frames=job.pad_frames, output_xyz=job.output_xyz,
+        pad_frames=job.pad_frames, interp_factor=job.interp_factor,
+        output_xyz=job.output_xyz,
     )
     result["trial_idx"] = job.trial_idx
     return result
@@ -212,6 +253,7 @@ def run_neb_top_k(
     fmax: float,
     max_steps: int,
     pad_frames: int,
+    interp_factor: int,
     output_dir: Path,
 ) -> list[dict]:
     """Run NEB on each top-K screening result, parallel via Pool when workers>=2.
@@ -233,7 +275,8 @@ def run_neb_top_k(
             reactant_atoms=r.frames[0],
             product_atoms=r.frames[-1],
             n_images=n_images, fmax=fmax, max_steps=max_steps,
-            pad_frames=pad_frames, output_xyz=out_xyz,
+            pad_frames=pad_frames, interp_factor=interp_factor,
+            output_xyz=out_xyz,
             backend=backend, neb_model=neb_model,
         ))
     if not jobs:

@@ -22,6 +22,8 @@ n_candidates = 1
 top_k = 1
 n_images = 5
 max_steps = 30
+pad_frames = 0
+interp_factor = 1
 [parallel]
 screening_workers = 1
 neb_workers = 1

@@ -209,6 +209,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             fmax=cfg.neb.fmax,
             max_steps=cfg.neb.max_steps,
             pad_frames=cfg.neb.pad_frames,
+            interp_factor=cfg.neb.interp_factor,
             output_dir=args.output,
         )
     except Exception as exc:  # noqa: BLE001

@@ -386,9 +386,9 @@ def test_config_default_neb_section(tmp_path: Path):
     cfg = load_config(rxn)
     assert cfg.neb.top_k == 4
     assert cfg.neb.n_images == 7
-    assert cfg.neb.fmax == 0.05
+    assert cfg.neb.fmax == 0.1
     assert cfg.neb.max_steps == 200
-    assert cfg.neb.pad_frames == 0
+    assert cfg.neb.pad_frames == 3
 
 
 def test_config_default_parallel_section(tmp_path: Path):

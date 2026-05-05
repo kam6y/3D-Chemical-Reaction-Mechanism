@@ -19,6 +19,7 @@ def test_run_neb_top_k_sn2_workers_1(tmp_path: Path, screening_result_factory):
         fmax=0.1,
         max_steps=20,
         pad_frames=0,
+        interp_factor=1,
         output_dir=tmp_path,
     )
     assert len(out) == 1
