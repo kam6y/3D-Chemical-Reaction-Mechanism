@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from reactx.cli import _write_outputs_and_exit, build_parser
+from reactx.cli import _write_outputs_and_exit, build_parser, main
 from reactx.config import (
     ReactionConfig,
     RestraintConfig,
@@ -167,3 +167,29 @@ def test_meta_json_when_cfg_missing_writes_null_effective(tmp_path: Path):
     assert meta["description"] is None
     assert meta["effective_params"] is None
     assert meta["placement"] == {"n_candidates": 0, "n_blocked": 0, "n_valid": 0}
+
+
+def test_meta_includes_per_bond_lists_when_toml_uses_lists(tmp_path, tmp_rxn_with_toml):
+    """TOML で list 指定したら meta.json も list を保持する。"""
+    body = """\
+description = "sn2 with list k_form"
+formed = [[1, 3]]
+broken = [[1, 2]]
+[restraints]
+k_form = [0.5]
+k_broken = 1.0
+r_broken = 4.0
+max_relax_steps = 5
+[sampling]
+n_candidates = 2
+"""
+    rxn = tmp_rxn_with_toml("sn2", toml_body=body)
+    out = tmp_path / "out"
+    main(["run", str(rxn), "-o", str(out), "--backend", "lj"])
+    meta_path = out / "meta.json"
+    assert meta_path.exists()
+    meta = json.loads(meta_path.read_text())
+    ep = meta["effective_params"]
+    assert ep["k_form"] == [0.5]   # list passes through
+    assert ep["k_broken"] == 1.0   # scalar stays scalar
+    assert ep["r_broken"] == 4.0   # scalar stays scalar

@@ -16,7 +16,14 @@ from reactx.align import align_product_to_reactant
 from reactx.artificial_force import build_restraints
 from reactx.bond_changes import BondChanges
 from reactx.calculators import make_calculator
-from reactx.config import ReactionConfig, load_config, resolve_r_form_targets
+from reactx.config import (
+    ReactionConfig,
+    load_config,
+    resolve_k_broken_targets,
+    resolve_k_form_targets,
+    resolve_r_broken_targets,
+    resolve_r_form_targets,
+)
 from reactx.embed3d import embed_fragments_to_positions
 from reactx.neb import run_neb
 from reactx.path_relax import relax_with_restraints
@@ -184,12 +191,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
     broken_pairs = list(bond_changes.broken)
     syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
     r_form_targets = resolve_r_form_targets(cfg, syms_r, formed_pairs)
+    k_form_targets = resolve_k_form_targets(cfg, formed_pairs)
+    k_broken_targets = resolve_k_broken_targets(cfg, broken_pairs)
+    r_broken_targets = resolve_r_broken_targets(cfg, broken_pairs)
     log.info(
-        "description=%s effective: k_form=%.2f k_broken=%.2f r_broken=%.2f "
+        "description=%s effective: k_form=%s k_broken=%s r_broken=%s "
         "max_relax_steps=%d r_form_targets=%s",
         cfg.description,
-        cfg.restraints.k_form, cfg.restraints.k_broken,
-        cfg.restraints.r_broken, cfg.restraints.max_relax_steps,
+        k_form_targets, k_broken_targets, r_broken_targets,
+        cfg.restraints.max_relax_steps,
         [f"{x:.3f}" for x in r_form_targets] if r_form_targets else "[]",
     )
 
@@ -242,10 +252,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             atoms_init,
             formed=formed_pairs,
             broken=broken_pairs,
-            r_form=r_form_targets[0] if r_form_targets else None,
-            r_broken=cfg.restraints.r_broken,
-            k_form=cfg.restraints.k_form,
-            k_broken=cfg.restraints.k_broken,
+            r_form=r_form_targets if r_form_targets else None,
+            r_broken=r_broken_targets,
+            k_form=k_form_targets,
+            k_broken=k_broken_targets,
         )
         try:
             frames, energies = relax_with_restraints(
@@ -262,12 +272,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
             ))
             continue
 
+        r_broken_for_check = (
+            r_broken_targets[0] if r_broken_targets
+            else (cfg.restraints.r_broken if isinstance(cfg.restraints.r_broken, float) else 4.0)
+        )
         ok = reached_product(
             frames[-1],
             formed=formed_pairs,
             broken=broken_pairs,
             r_form_targets=r_form_targets,
-            r_broken_target=cfg.restraints.r_broken,
+            r_broken_target=r_broken_for_check,
         )
         peak = max(energies) if energies else float("inf")
         trials.append(TrialResult(
@@ -407,9 +421,15 @@ def _write_outputs_and_exit(
         "neb_refined": neb_refined,
         "effective_params": (
             {
-                "k_form": cfg.restraints.k_form,
-                "k_broken": cfg.restraints.k_broken,
-                "r_broken": cfg.restraints.r_broken,
+                "k_form": cfg.restraints.k_form
+                    if isinstance(cfg.restraints.k_form, float)
+                    else list(cfg.restraints.k_form),
+                "k_broken": cfg.restraints.k_broken
+                    if isinstance(cfg.restraints.k_broken, float)
+                    else list(cfg.restraints.k_broken),
+                "r_broken": cfg.restraints.r_broken
+                    if isinstance(cfg.restraints.r_broken, float)
+                    else list(cfg.restraints.r_broken),
                 "max_relax_steps": cfg.restraints.max_relax_steps,
                 "r_form_targets": list(r_form_targets) if r_form_targets is not None else [],
                 "n_candidates": cfg.sampling.n_candidates,
