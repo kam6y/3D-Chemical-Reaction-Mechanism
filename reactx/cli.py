@@ -90,6 +90,10 @@ def _sanitize_for_json(obj):
     return obj
 
 
+def _scalar_or_list(v: float | tuple[float, ...]) -> float | list[float]:
+    return v if isinstance(v, float) else list(v)
+
+
 def _check_hf_auth() -> int:
     try:
         from huggingface_hub import HfApi
@@ -252,7 +256,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             atoms_init,
             formed=formed_pairs,
             broken=broken_pairs,
-            r_form=r_form_targets if r_form_targets else None,
+            r_form=r_form_targets,
             r_broken=r_broken_targets,
             k_form=k_form_targets,
             k_broken=k_broken_targets,
@@ -272,16 +276,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
             ))
             continue
 
-        r_broken_for_check = (
-            r_broken_targets[0] if r_broken_targets
-            else (cfg.restraints.r_broken if isinstance(cfg.restraints.r_broken, float) else 4.0)
-        )
         ok = reached_product(
             frames[-1],
             formed=formed_pairs,
             broken=broken_pairs,
             r_form_targets=r_form_targets,
-            r_broken_target=r_broken_for_check,
+            r_broken_target=r_broken_targets,
         )
         peak = max(energies) if energies else float("inf")
         trials.append(TrialResult(
@@ -421,15 +421,9 @@ def _write_outputs_and_exit(
         "neb_refined": neb_refined,
         "effective_params": (
             {
-                "k_form": cfg.restraints.k_form
-                    if isinstance(cfg.restraints.k_form, float)
-                    else list(cfg.restraints.k_form),
-                "k_broken": cfg.restraints.k_broken
-                    if isinstance(cfg.restraints.k_broken, float)
-                    else list(cfg.restraints.k_broken),
-                "r_broken": cfg.restraints.r_broken
-                    if isinstance(cfg.restraints.r_broken, float)
-                    else list(cfg.restraints.r_broken),
+                "k_form": _scalar_or_list(cfg.restraints.k_form),
+                "k_broken": _scalar_or_list(cfg.restraints.k_broken),
+                "r_broken": _scalar_or_list(cfg.restraints.r_broken),
                 "max_relax_steps": cfg.restraints.max_relax_steps,
                 "r_form_targets": list(r_form_targets) if r_form_targets is not None else [],
                 "n_candidates": cfg.sampling.n_candidates,

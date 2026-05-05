@@ -144,3 +144,72 @@ def test_trial_result_direction_field_replaces_rotation_deg():
     assert t.direction.shape == (3,)
     np.testing.assert_array_equal(t.direction, [1.0, 0.0, 0.0])
     assert not hasattr(t, "rotation_deg")
+
+
+def test_reached_product_per_bond_r_broken_list():
+    from ase import Atoms
+
+    from reactx.scoring import reached_product
+
+    atoms = Atoms(
+        "CHCH",
+        positions=[
+            [0, 0, 0],     # C0
+            [0, 0, 5],     # H1 (5 Å from C0)
+            [10, 0, 0],    # C2
+            [10, 0, 3],    # H3 (3 Å from C2)
+        ],
+    )
+    # broken=[(0,1), (2,3)]:
+    #   |C0-H1|=5, |C2-H3|=3
+    # r_broken_target=[3.0, 5.0] (per-bond):
+    #   bond 0: 5 >= 3-0.5=2.5 OK
+    #   bond 1: 3 >= 5-0.5=4.5 NG -> False
+    assert not reached_product(
+        atoms,
+        formed=[],
+        broken=[(0, 1), (2, 3)],
+        r_form_targets=[],
+        r_broken_target=[3.0, 5.0],
+    )
+    # r_broken_target=[3.0, 2.0]:
+    #   bond 0: 5 >= 2.5 OK
+    #   bond 1: 3 >= 1.5 OK -> True
+    assert reached_product(
+        atoms,
+        formed=[],
+        broken=[(0, 1), (2, 3)],
+        r_form_targets=[],
+        r_broken_target=[3.0, 2.0],
+    )
+
+
+def test_reached_product_scalar_r_broken_still_works():
+    """Backward path: scalar r_broken_target broadcasts to all broken bonds."""
+    from ase import Atoms
+
+    from reactx.scoring import reached_product
+
+    atoms = Atoms(
+        "CHCH",
+        positions=[[0, 0, 0], [0, 0, 5], [10, 0, 0], [10, 0, 5]],
+    )
+    assert reached_product(
+        atoms, formed=[], broken=[(0, 1), (2, 3)],
+        r_form_targets=[], r_broken_target=4.0,
+    )
+    # Both bonds at 5 A, with r_broken=4.0-0.5=3.5 -> both pass
+
+
+def test_reached_product_r_broken_list_length_mismatch_raises():
+    import pytest
+    from ase import Atoms
+
+    from reactx.scoring import reached_product
+
+    atoms = Atoms("CC", positions=[[0, 0, 0], [5, 0, 0]])
+    with pytest.raises(ValueError, match="broken"):
+        reached_product(
+            atoms, formed=[], broken=[(0, 1)],
+            r_form_targets=[], r_broken_target=[1.0, 2.0],
+        )
