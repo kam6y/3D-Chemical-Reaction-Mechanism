@@ -80,8 +80,8 @@ max_relax_steps = 100
 | e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 1.0 | 1.0 | 4.0 | 200 | 元素表 | 64 |
 | sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | 0.0 | 2.0 | 6.0 | 200 | — | **1** |
 | sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (C-Cl 1.78) | 64 |
-| diels_alder_simple.rxn | DA: butadiene + ethylene | `[[1,5],[4,6]]` | `[]` | `[1.0, 1.0]` | 0.0 | 4.0 | 200 | 元素表 | 64 |
-| diels_alder_endo.rxn | DA endo: CP + MA | `[[1,5],[4,6]]` | `[]` | `[1.5, 1.5]` | 0.0 | 4.0 | 250 | 元素表 | 64 |
+| diels_alder_simple.rxn | DA: butadiene + ethylene | `[[1,5],[4,6]]` | `[]` | `[3.0, 3.0]` | 0.0 | 4.0 | 200 | 元素表 | 64 |
+| diels_alder_endo.rxn | DA endo: CP + MA | `[[1,5],[4,6]]` | `[]` | `[3.0, 3.0]` | 0.0 | 4.0 | 250 | 元素表 | **16** |
 
 `r_form` は省略時に Cordero (2008) 共有結合半径表で per-bond ルックアップ、scalar で全 formed 同値、list で per-bond 指定。`[sampling]` は省略可能で `n_candidates=64` がデフォルト。各反応とも反応点 (anchor) を中心とした全球面 (4π sr) Fibonacci サンプリングで初期方向を生成し、ステリック blocking (角度シャドウ + d_min ceiling) を通過した方向すべてを UMA で full relax する。`n_candidates` を `[sampling]` で調整可能 (例: ステリックに混雑した anchor で生存数が少ない場合は大きく)。
 
@@ -150,8 +150,8 @@ RTX 5070 Ti + UMA-m-1p1 で実測 (`n_candidates=64`、Blender 4.5 LTS で `--re
 | E2 (`examples/e2.rxn`) | 740 s | 42 | 42 / 42 | 1 formed + 2 broken、全方向が product 到達 |
 | SN1 dissoc (`examples/sn1_dissoc.rxn`) | 25 s | 1 | 1 / 1 | unimolecular auto-clamp で n_candidates=1、UMA model load 後ほぼ即終了 |
 | SN1 recomb (`examples/sn1_recomb.rxn`) | 339 s | 27 | 16 / 27 | bimolecular、Cl⁻ が tBu⁺ の sp²-平面方向から接近 |
-| Diels-Alder simple (`examples/diels_alder_simple.rxn`) | (TBD 測定後) | (TBD) | (TBD) | 64 候補、achiral 縮約適用、2 σ bond 同時形成 |
-| Diels-Alder endo (`examples/diels_alder_endo.rxn`) | (TBD 測定後) | (TBD) | (TBD) | 64 候補 × 2 endo/exo、selected orientation を出力 |
+| Diels-Alder simple (`examples/diels_alder_simple.rxn`) | 1291 s | 62 | 59 / 62 | 64 候補、ethylene C2 対称で achiral 縮約適用、`k_form=[3.0,3.0]` で C-C σ bond ≈ 1.59 Å |
+| Diels-Alder endo (`examples/diels_alder_endo.rxn`) | 578 s | 28 | 15 / 28 | `n_candidates=16` × 2 endo/exo (12-atom CP+MA は trial 1 件あたり ~30 s)、selected orientation = "exo" (peak energy 最小)、C-C σ bond ≈ 1.56 Å |
 
 UMA model load (~25–30 s) が固定コスト。Phase 7 では MMFF prescreen を廃止したため、blocking で生存した候補の数 (`n_valid`) が wall-clock を直接決める。`n_candidates=64` で各反応の anchor 周辺ステリックにより 20–42 程度が生存し、それぞれ UMA で full relax する。混雑した anchor で生存が少ないとログ警告が出る (`only K/N candidates survived blocking ...`)。生存ゼロは `RuntimeError` で停止する。
 
