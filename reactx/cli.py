@@ -396,9 +396,10 @@ def _write_outputs_and_exit(
             "n_candidates": placement.n_candidates,
             "n_blocked": placement.n_blocked,
             "n_valid": len(placement.trials),
+            "placement_kind": placement.placement_kind,
         }
         if placement is not None
-        else {"n_candidates": 0, "n_blocked": 0, "n_valid": 0}
+        else {"n_candidates": 0, "n_blocked": 0, "n_valid": 0, "placement_kind": None}
     )
     meta: dict = {
         "backend": args.backend,
@@ -414,6 +415,11 @@ def _write_outputs_and_exit(
                     if math.isfinite(t.peak_energy) else None,
                 "n_steps": t.n_steps,
                 "direction": [float(x) for x in t.direction],
+                "orientation": (
+                    placement.trials[t.trial_idx].orientation
+                    if placement is not None and t.trial_idx < len(placement.trials)
+                    else "single"
+                ),
             }
             for t in trials
         ],
