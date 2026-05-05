@@ -146,138 +146,79 @@ def _to_pair_tuple(
 def _build_restraints(raw: dict, *, formed_count: int, broken_count: int, source: str) -> RestraintConfig:
     _check_keys(raw, _RESTRAINTS_KEYS, _RESTRAINTS_REQUIRED,
                 scope="restraints", source=source)
-    k_form = _normalize_k_form(raw["k_form"], formed_count=formed_count, source=source)
-    k_broken = _normalize_k_broken(raw["k_broken"], broken_count=broken_count, source=source)
-    r_broken = _normalize_r_broken(raw["r_broken"], broken_count=broken_count, source=source)
+    k_form = _normalize_scalar_or_list(
+        raw["k_form"], n_bonds=formed_count,
+        key="restraints.k_form", bonds_label="formed",
+        source=source, strict=False,
+    )
+    k_broken = _normalize_scalar_or_list(
+        raw["k_broken"], n_bonds=broken_count,
+        key="restraints.k_broken", bonds_label="broken",
+        source=source, strict=False,
+    )
+    r_broken = _normalize_scalar_or_list(
+        raw["r_broken"], n_bonds=broken_count,
+        key="restraints.r_broken", bonds_label="broken",
+        source=source, strict=True,
+    )
     max_steps = _as_int(raw["max_relax_steps"], "restraints.max_relax_steps", source, positive=True)
-    r_form_raw = raw.get("r_form")
-    r_form = _normalize_r_form(r_form_raw, formed_count=formed_count, source=source)
+    r_form = _normalize_scalar_or_list(
+        raw.get("r_form"), n_bonds=formed_count,
+        key="restraints.r_form", bonds_label="formed",
+        source=source, strict=True, allow_none=True,
+    )
     return RestraintConfig(
         k_form=k_form, k_broken=k_broken, r_broken=r_broken,
         max_relax_steps=max_steps, r_form=r_form,
     )
 
 
-def _normalize_k_form(
-    raw: object, *, formed_count: int, source: str,
-) -> float | tuple[float, ...]:
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        v = float(raw)
-        if v < 0.0:
-            raise ValueError(f"{source}: 'restraints.k_form' must be >= 0")
-        return v
-    if isinstance(raw, list):
-        if len(raw) != formed_count:
-            raise ValueError(
-                f"{source}: 'restraints.k_form' list length {len(raw)} "
-                f"must match len(formed)={formed_count}"
-            )
-        out: list[float] = []
-        for i, x in enumerate(raw):
-            if not isinstance(x, (int, float)) or isinstance(x, bool):
-                raise ValueError(
-                    f"{source}: 'restraints.k_form[{i}]' must be a number"
-                )
-            v = float(x)
-            if v < 0.0:
-                raise ValueError(
-                    f"{source}: 'restraints.k_form[{i}]' must be >= 0"
-                )
-            out.append(v)
-        return tuple(out)
-    raise ValueError(f"{source}: 'restraints.k_form' must be number or list")
-
-
-def _normalize_k_broken(
-    raw: object, *, broken_count: int, source: str,
-) -> float | tuple[float, ...]:
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        v = float(raw)
-        if v < 0.0:
-            raise ValueError(f"{source}: 'restraints.k_broken' must be >= 0")
-        return v
-    if isinstance(raw, list):
-        if len(raw) != broken_count:
-            raise ValueError(
-                f"{source}: 'restraints.k_broken' list length {len(raw)} "
-                f"must match len(broken)={broken_count}"
-            )
-        out: list[float] = []
-        for i, x in enumerate(raw):
-            if not isinstance(x, (int, float)) or isinstance(x, bool):
-                raise ValueError(
-                    f"{source}: 'restraints.k_broken[{i}]' must be a number"
-                )
-            v = float(x)
-            if v < 0.0:
-                raise ValueError(
-                    f"{source}: 'restraints.k_broken[{i}]' must be >= 0"
-                )
-            out.append(v)
-        return tuple(out)
-    raise ValueError(f"{source}: 'restraints.k_broken' must be number or list")
-
-
-def _normalize_r_broken(
-    raw: object, *, broken_count: int, source: str,
-) -> float | tuple[float, ...]:
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        v = float(raw)
-        if v <= 0.0:
-            raise ValueError(f"{source}: 'restraints.r_broken' must be > 0")
-        return v
-    if isinstance(raw, list):
-        if len(raw) != broken_count:
-            raise ValueError(
-                f"{source}: 'restraints.r_broken' list length {len(raw)} "
-                f"must match len(broken)={broken_count}"
-            )
-        out: list[float] = []
-        for i, x in enumerate(raw):
-            if not isinstance(x, (int, float)) or isinstance(x, bool):
-                raise ValueError(
-                    f"{source}: 'restraints.r_broken[{i}]' must be a number"
-                )
-            v = float(x)
-            if v <= 0.0:
-                raise ValueError(
-                    f"{source}: 'restraints.r_broken[{i}]' must be > 0"
-                )
-            out.append(v)
-        return tuple(out)
-    raise ValueError(f"{source}: 'restraints.r_broken' must be number or list")
-
-
-def _normalize_r_form(
-    raw: object, *, formed_count: int, source: str,
+def _normalize_scalar_or_list(
+    raw: object,
+    *,
+    n_bonds: int,
+    key: str,
+    bonds_label: str,
+    source: str,
+    strict: bool,
+    allow_none: bool = False,
 ) -> float | tuple[float, ...] | None:
+    """Validate a TOML restraint field that accepts either a scalar or a per-bond list.
+
+    `strict=True`  -> require value > 0 (for r_form / r_broken).
+    `strict=False` -> require value >= 0 (for k_form / k_broken).
+    `allow_none=True` -> accept None (for r_form fallback to element table).
+    """
+    bound_msg = "must be > 0" if strict else "must be >= 0"
+
+    def _violates(v: float) -> bool:
+        return v <= 0.0 if strict else v < 0.0
+
     if raw is None:
-        return None
+        if allow_none:
+            return None
+        raise ValueError(f"{source}: '{key}' must be number or list")
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
         v = float(raw)
-        if v <= 0.0:
-            raise ValueError(f"{source}: 'restraints.r_form' must be positive")
+        if _violates(v):
+            raise ValueError(f"{source}: '{key}' {bound_msg}")
         return v
     if isinstance(raw, list):
-        if len(raw) != formed_count:
+        if len(raw) != n_bonds:
             raise ValueError(
-                f"{source}: 'restraints.r_form' list length {len(raw)} "
-                f"must match len(formed)={formed_count}"
+                f"{source}: '{key}' list length {len(raw)} "
+                f"must match len({bonds_label})={n_bonds}"
             )
         out: list[float] = []
         for i, x in enumerate(raw):
             if not isinstance(x, (int, float)) or isinstance(x, bool):
-                raise ValueError(
-                    f"{source}: 'restraints.r_form[{i}]' must be a number"
-                )
+                raise ValueError(f"{source}: '{key}[{i}]' must be a number")
             v = float(x)
-            if v <= 0.0:
-                raise ValueError(
-                    f"{source}: 'restraints.r_form[{i}]' must be positive"
-                )
+            if _violates(v):
+                raise ValueError(f"{source}: '{key}[{i}]' {bound_msg}")
             out.append(v)
         return tuple(out)
-    raise ValueError(f"{source}: 'restraints.r_form' must be number, list, or absent")
+    raise ValueError(f"{source}: '{key}' must be number or list")
 
 
 def _build_sampling(raw: dict, *, source: str) -> SamplingConfig:
@@ -329,3 +270,44 @@ def resolve_r_form_targets(
     if isinstance(r, float):
         return [r] * len(formed_idx_pairs)
     return list(r)
+
+
+def _resolve_per_bond(
+    value: float | tuple[float, ...] | None,
+    n_bonds: int,
+) -> list[float]:
+    """Broadcast scalar to length n_bonds; pass tuple through as list.
+
+    Returns empty list when n_bonds == 0 regardless of value.
+    """
+    if n_bonds == 0:
+        return []
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, (int, float)):
+        return [float(value)] * n_bonds
+    raise TypeError(f"value must be float or tuple, got {type(value).__name__}")
+
+
+def resolve_k_form_targets(
+    cfg: ReactionConfig,
+    formed_idx_pairs: Sequence[tuple[int, int]],
+) -> list[float]:
+    """Expand cfg.restraints.k_form into per-formed-bond k values."""
+    return _resolve_per_bond(cfg.restraints.k_form, len(formed_idx_pairs))
+
+
+def resolve_k_broken_targets(
+    cfg: ReactionConfig,
+    broken_idx_pairs: Sequence[tuple[int, int]],
+) -> list[float]:
+    """Expand cfg.restraints.k_broken into per-broken-bond k values."""
+    return _resolve_per_bond(cfg.restraints.k_broken, len(broken_idx_pairs))
+
+
+def resolve_r_broken_targets(
+    cfg: ReactionConfig,
+    broken_idx_pairs: Sequence[tuple[int, int]],
+) -> list[float]:
+    """Expand cfg.restraints.r_broken into per-broken-bond r target values."""
+    return _resolve_per_bond(cfg.restraints.r_broken, len(broken_idx_pairs))
