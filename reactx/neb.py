@@ -10,7 +10,7 @@ from ase.calculators.calculator import Calculator
 from ase.io import write
 from ase.optimize import FIRE
 
-from reactx.endpoints import relax_endpoint
+from reactx.endpoints import relax_product_endpoint, relax_reactant_endpoint
 from reactx.parallel import (
     get_cached_calculator,
     init_lj_worker,
@@ -170,6 +170,10 @@ class _NebJob:
     trial_idx: int
     reactant_atoms: Atoms
     product_atoms: Atoms
+    formed: list[tuple[int, int]]
+    broken: list[tuple[int, int]]
+    r_form_targets: list[float]
+    r_broken: float
     n_images: int
     fmax: float
     max_steps: int
@@ -185,6 +189,10 @@ def run_neb_for_trial(
     product_atoms: Atoms,
     *,
     calc: Calculator,
+    formed: list[tuple[int, int]],
+    broken: list[tuple[int, int]],
+    r_form_targets: list[float],
+    r_broken: float,
     n_images: int,
     fmax: float,
     max_steps: int,
@@ -194,17 +202,21 @@ def run_neb_for_trial(
 ) -> dict:
     """Run 2-phase NEB on screening endpoints for one trial.
 
-    Endpoints are locally relaxed before NEB so they sit on the bare UMA PES
-    (the screening's frames are constrained-relax outputs and the placement
-    R is just a geometric placement). The local relax uses FIRE with a tight
-    maxstep limit so it cannot walk back across the reactive saddle into the
-    other valley.
+    Endpoints are locally relaxed with bond-identity-preserving springs so
+    they sit on the UMA PES near R / P respectively without crossing the
+    saddle. See reactx.endpoints for the rationale.
 
     Returns a dict {converged, n_images, image_energies, peak_energy,
     final_fmax, xyz_path}. xyz_path is the basename only.
     """
-    R = relax_endpoint(reactant_atoms, calc)
-    P = relax_endpoint(product_atoms, calc)
+    R = relax_reactant_endpoint(
+        reactant_atoms, calc, formed=formed, broken=broken,
+    )
+    P = relax_product_endpoint(
+        product_atoms, calc,
+        formed=formed, broken=broken,
+        r_form_targets=r_form_targets, r_broken=r_broken,
+    )
     info = run_neb(
         reactant=R, product=P, calculator=calc,
         n_images=n_images, output_xyz=output_xyz,
@@ -235,6 +247,8 @@ def _run_one_neb(job: _NebJob) -> dict:
         )
     result = run_neb_for_trial(
         job.reactant_atoms, job.product_atoms, calc=calc,
+        formed=job.formed, broken=job.broken,
+        r_form_targets=job.r_form_targets, r_broken=job.r_broken,
         n_images=job.n_images, fmax=job.fmax, max_steps=job.max_steps,
         pad_frames=job.pad_frames, interp_factor=job.interp_factor,
         output_xyz=job.output_xyz,
@@ -249,6 +263,10 @@ def run_neb_top_k(
     backend: str,
     neb_model: str,
     workers: int,
+    formed: list[tuple[int, int]],
+    broken: list[tuple[int, int]],
+    r_form_targets: list[float],
+    r_broken: float,
     n_images: int,
     fmax: float,
     max_steps: int,
@@ -274,6 +292,8 @@ def run_neb_top_k(
             trial_idx=r.trial_idx,
             reactant_atoms=r.frames[0],
             product_atoms=r.frames[-1],
+            formed=list(formed), broken=list(broken),
+            r_form_targets=list(r_form_targets), r_broken=r_broken,
             n_images=n_images, fmax=fmax, max_steps=max_steps,
             pad_frames=pad_frames, interp_factor=interp_factor,
             output_xyz=out_xyz,

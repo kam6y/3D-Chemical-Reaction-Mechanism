@@ -10,11 +10,16 @@ import pytest
 def test_run_neb_top_k_sn2_workers_1(tmp_path: Path, screening_result_factory):
     from reactx.neb import run_neb_top_k
     top_k = screening_result_factory("sn2", n_results=1)
+    # SN2 bond pattern (only for the constrained endpoint relax in NEB)
     out = run_neb_top_k(
         top_k,
         backend="uma",
         neb_model="uma-s-1p2",
         workers=1,
+        formed=[(0, 6)],
+        broken=[(0, 1)],
+        r_form_targets=[1.43],
+        r_broken=4.0,
         n_images=5,
         fmax=0.1,
         max_steps=20,
