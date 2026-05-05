@@ -415,3 +415,100 @@ def test_valid_placements_existing_sn2_path_returns_single_anchor_kind():
     result = valid_placements(mol_h, frag_indices, positions, bond_changes, n_candidates=8, seed=0)
     assert result.placement_kind == "single_anchor"
     assert all(t.orientation == "single" for t in result.trials)
+
+
+def test_rotate_atoms_around_z_axis_90deg():
+    import numpy as np
+
+    from reactx.placement import _rotate_atoms
+    positions = np.array([
+        [1.0, 0.0, 0.0],   # to be rotated
+        [0.0, 0.0, 0.0],   # at center
+        [5.0, 5.0, 5.0],   # NOT in indices
+    ])
+    indices = (0, 1)
+    new_pos = _rotate_atoms(
+        positions, indices=indices,
+        axis=np.array([0.0, 0.0, 1.0]),
+        center=np.array([0.0, 0.0, 0.0]),
+        angle=np.pi / 2,
+    )
+    np.testing.assert_allclose(new_pos[0], [0.0, 1.0, 0.0], atol=1e-9)
+    np.testing.assert_allclose(new_pos[1], [0.0, 0.0, 0.0], atol=1e-9)
+    # idx 2 not in indices: unchanged
+    np.testing.assert_allclose(new_pos[2], [5.0, 5.0, 5.0])
+
+
+def test_rotate_atoms_180deg_inverts_perpendicular_component():
+    import numpy as np
+
+    from reactx.placement import _rotate_atoms
+    positions = np.array([[1.0, 0.0, 0.0]])
+    new_pos = _rotate_atoms(
+        positions, indices=(0,),
+        axis=np.array([0.0, 0.0, 1.0]),
+        center=np.zeros(3),
+        angle=np.pi,
+    )
+    np.testing.assert_allclose(new_pos[0], [-1.0, 0.0, 0.0], atol=1e-9)
+
+
+def test_rotate_atoms_zero_angle_identity():
+    import numpy as np
+
+    from reactx.placement import _rotate_atoms
+    positions = np.random.default_rng(0).standard_normal((4, 3))
+    new_pos = _rotate_atoms(
+        positions, indices=(0, 1, 2, 3),
+        axis=np.array([1.0, 0.0, 0.0]),
+        center=np.zeros(3),
+        angle=0.0,
+    )
+    np.testing.assert_allclose(new_pos, positions, atol=1e-9)
+
+
+def test_rotate_atoms_off_axis_center():
+    """center != origin の場合の検証。"""
+    import numpy as np
+
+    from reactx.placement import _rotate_atoms
+    # rotate point (2, 0, 0) around z-axis at center (1, 0, 0) by 90°
+    # → original offset from center = (1, 0, 0) → rotated = (0, 1, 0) → final = (1, 1, 0)
+    positions = np.array([[2.0, 0.0, 0.0]])
+    new_pos = _rotate_atoms(
+        positions, indices=(0,),
+        axis=np.array([0.0, 0.0, 1.0]),
+        center=np.array([1.0, 0.0, 0.0]),
+        angle=np.pi / 2,
+    )
+    np.testing.assert_allclose(new_pos[0], [1.0, 1.0, 0.0], atol=1e-9)
+
+
+def test_rotate_atoms_zero_axis_raises():
+    """zero-length axis should raise ValueError."""
+    import numpy as np
+    import pytest
+
+    from reactx.placement import _rotate_atoms
+    with pytest.raises(ValueError, match="zero length"):
+        _rotate_atoms(
+            np.zeros((1, 3)), indices=(0,),
+            axis=np.zeros(3),
+            center=np.zeros(3),
+            angle=np.pi / 4,
+        )
+
+
+def test_rotate_atoms_does_not_mutate_input():
+    import numpy as np
+
+    from reactx.placement import _rotate_atoms
+    positions = np.array([[1.0, 0.0, 0.0]])
+    original = positions.copy()
+    _rotate_atoms(
+        positions, indices=(0,),
+        axis=np.array([0.0, 0.0, 1.0]),
+        center=np.zeros(3),
+        angle=np.pi / 2,
+    )
+    np.testing.assert_array_equal(positions, original)

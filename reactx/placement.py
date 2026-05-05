@@ -136,6 +136,44 @@ def evaluate_direction(
     return False, d_min, None
 
 
+def _rotate_atoms(
+    positions: np.ndarray,
+    *,
+    indices: tuple[int, ...],
+    axis: np.ndarray,
+    center: np.ndarray,
+    angle: float,
+) -> np.ndarray:
+    """Rotate selected atoms around `axis` (passing through `center`) by `angle` rad.
+
+    Uses Rodrigues' rotation formula. Returns a new positions array; input is
+    not modified. `axis` is normalized internally; `angle == 0` returns a copy
+    of `positions` unchanged.
+
+    Raises:
+        ValueError: when `axis` has zero length.
+    """
+    new_pos = positions.copy()
+    if angle == 0.0:
+        return new_pos
+    n = float(np.linalg.norm(axis))
+    if n < 1e-12:
+        raise ValueError("rotation axis has zero length")
+    k = axis / n
+    cos_a = float(np.cos(angle))
+    sin_a = float(np.sin(angle))
+    for i in indices:
+        v = positions[i] - center
+        # Rodrigues: v_rot = v cos + (k×v) sin + k (k·v) (1 - cos)
+        v_rot = (
+            v * cos_a
+            + np.cross(k, v) * sin_a
+            + k * float(np.dot(k, v)) * (1.0 - cos_a)
+        )
+        new_pos[i] = center + v_rot
+    return new_pos
+
+
 @dataclass(frozen=True)
 class PlacementTrial:
     """A single surviving placement candidate.
