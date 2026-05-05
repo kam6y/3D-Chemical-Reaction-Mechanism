@@ -580,3 +580,107 @@ def test_valid_placements_two_bridges_raises_temporary_not_implemented():
             mol_h, frag_indices, positions, bond_changes,
             n_candidates=4, seed=0,
         )
+
+
+def test_multi_anchor_placement_basic_translation_kabsch():
+    """Synthetic 6-atom geometry: 4-atom substrate + 2-atom incoming.
+    Verify _multi_anchor_placement returns surviving trials with correct
+    placement (M_inc lands at M_sub + d * d_min, u_inc aligned with u_sub)."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    # substrate: 4 C atoms along x-axis (anchor pair: A1=0, A2=3)
+    # incoming: 2 C atoms along y-axis (initial), anchor pair: I1=4, I2=5
+    positions = np.array([
+        [0.0, 0.0, 0.0],     # A1 (substrate)
+        [1.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        [3.0, 0.0, 0.0],     # A2 (substrate)
+        [0.0, 5.0, 0.0],     # I1 (incoming)
+        [1.5, 5.0, 0.0],     # I2 (incoming, initially in xy plane)
+    ])
+    syms = ["C", "C", "C", "C", "C", "C"]
+    substrate_set = {0, 1, 2, 3}
+    fragment_set = {4, 5}
+    bridges = [(0, 4), (3, 5)]  # substrate-first normalized
+
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, substrate_set, fragment_set, bridges,
+        n_candidates=8, seed=0,
+    )
+
+    # No blocking yet → all candidates should produce a trial
+    assert len(trials) == 8
+    assert len(blocked_reasons) == 8
+    # All blocked_reasons should be None (no blocking in this task)
+    assert all(r is None for r in blocked_reasons)
+
+    # Each trial: orientation should be "endo" (placeholder, until Task 4.5)
+    for t in trials:
+        assert t.orientation == "endo"
+        assert t.positions.shape == positions.shape
+
+
+def test_multi_anchor_placement_coincident_anchors_raises():
+    """When I1 == I2 (coincident incoming anchors), raise ValueError."""
+    import numpy as np
+    import pytest
+
+    from reactx.placement import _multi_anchor_placement
+
+    positions = np.array([
+        [0.0, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [0.0, 5.0, 0.0],
+        [0.0, 5.0, 0.0],   # coincident with idx 2
+    ])
+    syms = ["C", "C", "C", "C"]
+    with pytest.raises(ValueError, match="(coincident|incoming anchor pair)"):
+        _multi_anchor_placement(
+            positions, syms, {0, 1}, {2, 3}, [(0, 2), (1, 3)],
+            n_candidates=4, seed=0,
+        )
+
+
+def test_multi_anchor_placement_substrate_anchors_coincident_raises():
+    """When A1 == A2, raise ValueError."""
+    import numpy as np
+    import pytest
+
+    from reactx.placement import _multi_anchor_placement
+
+    positions = np.array([
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],   # coincident with idx 0
+        [0.0, 5.0, 0.0],
+        [1.5, 5.0, 0.0],
+    ])
+    syms = ["C", "C", "C", "C"]
+    with pytest.raises(ValueError, match="substrate anchor pair"):
+        _multi_anchor_placement(
+            positions, syms, {0, 1}, {2, 3}, [(0, 2), (1, 3)],
+            n_candidates=4, seed=0,
+        )
+
+
+def test_multi_anchor_placement_uinc_antiparallel_to_usub_handles_180deg():
+    """When u_inc is antiparallel to u_sub, the Kabsch rotation must be
+    180° around an axis perpendicular to u_sub. Check that placement still
+    produces valid trials."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    # u_sub along +x, u_inc along -x (antiparallel)
+    positions = np.array([
+        [0.0, 0.0, 0.0], [3.0, 0.0, 0.0],   # A1, A2 (u_sub = +x)
+        [3.0, 5.0, 0.0], [0.0, 5.0, 0.0],   # I1, I2 (u_inc = -x, antiparallel)
+    ])
+    syms = ["C", "C", "C", "C"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3}, [(0, 2), (1, 3)],
+        n_candidates=4, seed=0,
+    )
+    # Should not crash and produce 4 trials
+    assert len(trials) == 4

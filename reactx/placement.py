@@ -303,6 +303,117 @@ def _broken_bridges_fragments(
     return any(atom_to_frag.get(a) != atom_to_frag.get(b) for a, b in broken)
 
 
+DUAL_ANCHOR_ASYMMETRY_THRESHOLD = 0.40   # see spec §5.4 (used in Task 4.4)
+
+
+def _multi_anchor_placement(
+    positions: np.ndarray,
+    syms: list[str],
+    substrate_set: set[int],
+    fragment_set: set[int],
+    bridges: list[tuple[int, int]],   # length 2; substrate-side first (normalized)
+    *,
+    n_candidates: int = 64,
+    seed: int = 0,
+    gap: float = 0.5,
+    d_min_ceiling: float = 8.0,
+) -> tuple[list[PlacementTrial], list[str | None]]:
+    """Cycloaddition (bridges == 2) 用の rigid-body multi-anchor 配置 (skeleton).
+
+    Phase 8 step 12/N (Task 4.3): translation + 2-point Kabsch alignment.
+    Reachability blocking (Task 4.4) and endo/exo expansion (Task 4.5) are
+    added incrementally in subsequent tasks.
+
+    Returns:
+        (survivors, blocked_reasons) where:
+        - survivors: list of PlacementTrial for surviving directions.
+        - blocked_reasons: list of length n_candidates with None for survivors
+          and a string for blocked directions. (No blocking yet — all None.)
+    """
+    A1, I1 = bridges[0]
+    A2, I2 = bridges[1]
+
+    M_sub = (positions[A1] + positions[A2]) / 2.0
+    v_sub = positions[A2] - positions[A1]
+    L_sub = float(np.linalg.norm(v_sub))
+    if L_sub < 1e-9:
+        raise ValueError(
+            f"substrate anchor pair (A1={A1}, A2={A2}) are coincident; "
+            f"check input atom mapping"
+        )
+    u_sub = v_sub / L_sub
+
+    M_inc = (positions[I1] + positions[I2]) / 2.0
+    v_inc = positions[I2] - positions[I1]
+    L_inc = float(np.linalg.norm(v_inc))
+    if L_inc < 1e-9:
+        raise ValueError(
+            f"incoming anchor pair (I1={I1}, I2={I2}) are coincident; "
+            f"check formed bond atom-mapping"
+        )
+    u_inc = v_inc / L_inc
+
+    vdw_all = np.array([vdw_radius(s) for s in syms], dtype=float)
+    substrate_atoms = sorted(substrate_set - {A1, A2})
+    fragment_list = sorted(fragment_set)
+    sub_pos = positions[substrate_atoms]
+    sub_vdw = vdw_all[substrate_atoms]
+    inc_pos = positions[fragment_list]
+    inc_vdw = vdw_all[fragment_list]
+
+    directions = sample_sphere_directions(n_candidates, seed=seed)
+    survivors: list[PlacementTrial] = []
+    blocked_reasons: list[str | None] = []
+
+    for d in directions:
+        # Step A: placement distance via existing compute_d_min, anchored at M_sub
+        d_min = compute_d_min(
+            d, M_sub, sub_pos, sub_vdw, inc_pos, inc_vdw, M_inc, gap=gap,
+        )
+
+        # Step B: translate fragment so M_inc lands at M_sub + d * d_min
+        translation = (M_sub + d * d_min) - M_inc
+        new_positions = positions.copy()
+        for idx in fragment_list:
+            new_positions[idx] = positions[idx] + translation
+
+        # Step C: 2-point Kabsch rotation u_inc → u_sub
+        cos_uu = float(np.clip(np.dot(u_inc, u_sub), -1.0, 1.0))
+        if cos_uu > 1.0 - 1e-9:
+            # Already aligned: identity
+            pass
+        else:
+            if cos_uu < -1.0 + 1e-9:
+                # Antiparallel: pick any axis ⊥ u_sub
+                ortho = np.array([1.0, 0.0, 0.0])
+                if abs(np.dot(u_sub, ortho)) > 0.9:
+                    ortho = np.array([0.0, 1.0, 0.0])
+                R_axis = ortho - u_sub * float(np.dot(u_sub, ortho))
+                R_axis /= float(np.linalg.norm(R_axis))
+                R_angle = np.pi
+            else:
+                R_axis = np.cross(u_inc, u_sub)
+                R_axis /= float(np.linalg.norm(R_axis))
+                R_angle = float(np.arccos(cos_uu))
+
+            new_positions = _rotate_atoms(
+                new_positions,
+                indices=tuple(fragment_list),
+                axis=R_axis,
+                center=M_sub + d * d_min,
+                angle=R_angle,
+            )
+
+        survivors.append(PlacementTrial(
+            direction=d, d_min=float(d_min),
+            positions=new_positions,
+            orientation="endo",   # placeholder for Task 4.5 endo/exo expansion
+        ))
+        blocked_reasons.append(None)
+
+    return survivors, blocked_reasons
+
+
 def valid_placements(
     mol_h: Chem.Mol,
     frag_indices: tuple[tuple[int, ...], ...],
