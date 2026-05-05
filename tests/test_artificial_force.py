@@ -98,3 +98,79 @@ def test_build_restraints_scales_linearly_with_bond_count():
         r_form=1.5, r_broken=4.0,
     )
     assert len(cs) == 3  # 2 Hookeans + 1 PullApart
+
+
+def test_build_restraints_with_per_bond_k_form_list():
+    from ase.constraints import Hookean
+    atoms = Atoms("CCCC", positions=[[0, 0, 0], [1.5, 0, 0], [3, 0, 0], [4.5, 0, 0]])
+    cs = build_restraints(
+        atoms,
+        formed=[(0, 2), (1, 3)],
+        broken=[],
+        r_form=[1.5, 1.5],
+        k_form=[2.0, 5.0],
+    )
+    hookean_cs = [c for c in cs if isinstance(c, Hookean)]
+    assert len(hookean_cs) == 2
+    # Hookean k attribute is `spring` in ASE 3.x; fall back to `k` if needed
+    def _hookean_k(c):
+        return getattr(c, "spring", getattr(c, "k", None))
+    ks = sorted(_hookean_k(c) for c in hookean_cs)
+    assert ks == [2.0, 5.0]
+
+
+def test_build_restraints_with_per_bond_k_broken_and_r_broken_lists():
+    atoms = Atoms("CClCH", positions=[[0, 0, 0], [2, 0, 0], [4, 0, 0], [5, 0, 0]])
+    cs = build_restraints(
+        atoms,
+        formed=[],
+        broken=[(0, 1), (2, 3)],
+        k_broken=[2.0, 4.0],
+        r_broken=[3.0, 5.0],
+    )
+    assert len(cs) == 2
+    rts = sorted(c.rt for c in cs)
+    ks = sorted(c.k for c in cs)
+    assert rts == [3.0, 5.0]
+    assert ks == [2.0, 4.0]
+
+
+def test_build_restraints_k_broken_list_length_mismatch_raises():
+    import pytest
+    atoms = Atoms("CClCH", positions=[[0, 0, 0], [2, 0, 0], [4, 0, 0], [5, 0, 0]])
+    with pytest.raises(ValueError, match="k_broken"):
+        build_restraints(
+            atoms,
+            formed=[],
+            broken=[(0, 1), (2, 3)],
+            k_broken=[1.0],
+            r_broken=4.0,
+        )
+
+
+def test_build_restraints_k_form_list_length_mismatch_raises():
+    import pytest
+    atoms = Atoms("CCCC", positions=[[0, 0, 0], [1.5, 0, 0], [3, 0, 0], [4.5, 0, 0]])
+    with pytest.raises(ValueError, match="k_form"):
+        build_restraints(
+            atoms,
+            formed=[(0, 1)],
+            broken=[],
+            r_form=1.5,
+            k_form=[1.0, 2.0],
+        )
+
+
+def test_build_restraints_r_form_list_passes_through():
+    from ase.constraints import Hookean
+    atoms = Atoms("CCCC", positions=[[0, 0, 0], [1.5, 0, 0], [3, 0, 0], [4.5, 0, 0]])
+    cs = build_restraints(
+        atoms,
+        formed=[(0, 2), (1, 3)],
+        broken=[],
+        r_form=[1.5, 1.4],
+        k_form=1.0,
+    )
+    hookean_cs = [c for c in cs if isinstance(c, Hookean)]
+    rts = sorted(getattr(c, "threshold", getattr(c, "rt", None)) for c in hookean_cs)
+    assert rts == [1.4, 1.5]
