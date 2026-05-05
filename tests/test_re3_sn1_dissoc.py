@@ -13,9 +13,9 @@ formed = []
 broken = [[1, 5]]
 [restraints]
 k_form = 0.0
-k_broken = 2.0
+k_broken = 10.0
 r_broken = 6.0
-max_relax_steps = 100
+max_relax_steps = 200
 [sampling]
 n_candidates = 1
 [neb]

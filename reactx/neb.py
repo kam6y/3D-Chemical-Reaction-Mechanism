@@ -10,7 +10,6 @@ from ase.calculators.calculator import Calculator
 from ase.io import write
 from ase.optimize import FIRE
 
-from reactx.endpoints import relax_endpoint
 from reactx.parallel import (
     get_cached_calculator,
     init_lj_worker,
@@ -157,15 +156,18 @@ def run_neb_for_trial(
     pad_frames: int,
     output_xyz: Path,
 ) -> dict:
-    """Run un-restrained endpoint relax + 2-phase NEB for one trial.
+    """Run 2-phase NEB on screening endpoints for one trial.
+
+    Endpoints come directly from the screening trajectory's first/last frames.
+    No prior un-restrained relax: BFGS without restraints can walk back across
+    the saddle (e.g. SN1 dissoc heterolytic state may be lower-energy under
+    UMA omol than the bonded reactant), collapsing R and P to the same minimum.
 
     Returns a dict {converged, n_images, image_energies, peak_energy,
     final_fmax, xyz_path}. xyz_path is the basename only.
     """
-    R = relax_endpoint(reactant_atoms, calc, fmax=0.05, max_steps=50)
-    P = relax_endpoint(product_atoms, calc, fmax=0.05, max_steps=50)
     info = run_neb(
-        reactant=R, product=P, calculator=calc,
+        reactant=reactant_atoms, product=product_atoms, calculator=calc,
         n_images=n_images, output_xyz=output_xyz,
         fmax=fmax, max_steps=max_steps, pad_frames=pad_frames,
     )

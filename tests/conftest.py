@@ -175,9 +175,13 @@ def screening_result_factory(examples_dir, tmp_path):
 
         rxn_path = examples_dir / f"{stem}.rxn"
         cfg = load_config(rxn_path)
+        # n_candidates=1 だと placement がほぼ all-blocked になるので 8 を最低保証。
+        # screen_all_trials は valid_placements の survivor 全件を relax するので、
+        # 呼び出し側が要求した n_results 件を末尾で slice する。
+        placement_n = max(8, n_results)
         cfg = replace(
             cfg,
-            sampling=replace(cfg.sampling, n_candidates=n_results),
+            sampling=replace(cfg.sampling, n_candidates=placement_n),
             parallel=replace(cfg.parallel, screening_workers=1),
         )
         r_mol, _, _ = parse_rxn(rxn_path)
@@ -193,9 +197,10 @@ def screening_result_factory(examples_dir, tmp_path):
             mol_h, frag_indices, positions, bond_changes,
             n_candidates=cfg.sampling.n_candidates, seed=0,
         )
-        return screen_all_trials(
+        results = screen_all_trials(
             placement, mol_h, bond_changes, cfg,
             backend="lj", screening_model="",
             workers=1, relax_fmax=0.5, traj_stride=5, seed=0,
         )
+        return results[:n_results]
     return _factory

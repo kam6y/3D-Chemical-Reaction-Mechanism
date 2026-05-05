@@ -12,10 +12,10 @@ description = "Proton transfer fast"
 formed = [[1, 3]]
 broken = [[1, 2]]
 [restraints]
-k_form = 0.5
-k_broken = 1.0
+k_form = 1.0
+k_broken = 5.0
 r_broken = 4.0
-max_relax_steps = 100
+max_relax_steps = 150
 r_form = 1.05
 [sampling]
 n_candidates = 8
