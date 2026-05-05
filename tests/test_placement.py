@@ -616,9 +616,10 @@ def test_multi_anchor_placement_basic_translation_kabsch():
     # All blocked_reasons should be None (no blocking in this task)
     assert all(r is None for r in blocked_reasons)
 
-    # Each trial: orientation should be "endo" (placeholder, until Task 4.5)
+    # 2-atom incoming with no substituents is C2-symmetric around its bond axis
+    # → endo/exo collapse to a single "achiral" trial per surviving direction
     for t in trials:
-        assert t.orientation == "endo"
+        assert t.orientation == "achiral"
         assert t.positions.shape == positions.shape
 
     # Numerical post-conditions of multi-anchor placement.
@@ -827,3 +828,103 @@ def test_multi_anchor_placement_blocked_reasons_string_format():
         # Format should be: asymmetric_dual_anchor:b1=X.XX,b2=Y.YY
         assert "b1=" in asym_reasons[0]
         assert "b2=" in asym_reasons[0]
+
+
+def test_multi_anchor_endo_exo_distinct_for_asymmetric_fragment():
+    """非対称 fragment では endo と exo が別 trial として残る。"""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    # incoming fragment is asymmetric: extra atom (F) above the I1-I2 axis
+    positions = np.array([
+        [0.0, 0.0, 0.0],     # A1 (substrate)
+        [3.0, 0.0, 0.0],     # A2 (substrate)
+        [0.0, 5.0, 0.0],     # I1 (incoming)
+        [3.0, 5.0, 0.0],     # I2 (incoming)
+        [1.5, 5.0, 1.5],     # F (asymmetric substituent on incoming)
+    ])
+    syms = ["C", "C", "C", "C", "F"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3, 4}, [(0, 2), (1, 3)],
+        n_candidates=8, seed=0,
+    )
+    orientations = {t.orientation for t in trials}
+    assert "endo" in orientations
+    assert "exo" in orientations
+    # No achiral expected (asymmetric fragment)
+    assert "achiral" not in orientations
+
+
+def test_multi_anchor_achiral_collapse_for_symmetric_fragment():
+    """対称な incoming fragment (I1-I2 軸まわりに C2 対称) では achiral 1 trial に縮約。"""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    # 4 incoming atoms: I1, I2, plus 2 H atoms placed symmetrically around the I1-I2 axis
+    # The H atoms are positioned such that 180° rotation around u_sub (= +x after Kabsch)
+    # leaves the fragment essentially unchanged.
+    positions = np.array([
+        [0.0, 0.0, 0.0], [3.0, 0.0, 0.0],     # A1, A2
+        [0.0, 5.0, 0.0], [1.5, 5.0, 0.0],     # I1, I2 (along x at y=5, z=0)
+        # 2 H atoms in z=0 plane (so 180° rotation around the alignment axis maps them to each other)
+        [-0.5, 5.0, 0.0],   # neighbor of I1
+        [2.0, 5.0, 0.0],    # neighbor of I2
+    ])
+    syms = ["C", "C", "C", "C", "H", "H"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3, 4, 5}, [(0, 2), (1, 3)],
+        n_candidates=8, seed=0,
+    )
+    # All trials should be achiral (collapsed)
+    for t in trials:
+        assert t.orientation == "achiral", f"expected achiral, got {t.orientation}"
+
+
+def test_multi_anchor_orientation_field_set_correctly():
+    """For each surviving direction, exactly one orientation label is assigned."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    positions = np.array([
+        [0.0, 0.0, 0.0], [3.0, 0.0, 0.0],
+        [0.0, 5.0, 0.0], [1.5, 5.0, 0.0],
+        [0.5, 5.5, 0.5],   # asymmetric substituent
+    ])
+    syms = ["C", "C", "C", "C", "F"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3, 4}, [(0, 2), (1, 3)],
+        n_candidates=4, seed=0,
+    )
+    valid_orientations = {"single", "endo", "exo", "achiral"}
+    for t in trials:
+        assert t.orientation in valid_orientations
+        # In multi-anchor path, "single" should never appear
+        assert t.orientation != "single"
+
+
+def test_multi_anchor_n_trials_relationship_to_blocked_reasons():
+    """For asymmetric fragment, len(survivors) ≤ 2 * (n_candidates - n_blocked)."""
+    import numpy as np
+
+    from reactx.placement import _multi_anchor_placement
+
+    positions = np.array([
+        [0.0, 0.0, 0.0], [3.0, 0.0, 0.0],
+        [0.0, 5.0, 0.0], [1.5, 5.0, 0.0],
+        [0.5, 5.5, 0.5],
+    ])
+    syms = ["C", "C", "C", "C", "F"]
+    trials, blocked_reasons = _multi_anchor_placement(
+        positions, syms, {0, 1}, {2, 3, 4}, [(0, 2), (1, 3)],
+        n_candidates=8, seed=0,
+    )
+    n_blocked = sum(1 for r in blocked_reasons if r is not None)
+    n_directions_survived = 8 - n_blocked
+    # Each surviving direction contributes either 1 (achiral) or 2 (endo+exo) trials
+    assert len(trials) >= n_directions_survived
+    assert len(trials) <= 2 * n_directions_survived
+    # blocked_reasons still has length n_candidates
+    assert len(blocked_reasons) == 8

@@ -415,12 +415,35 @@ def _multi_anchor_placement(
             blocked_reasons.append(f"asymmetric_dual_anchor:b1={b1:.2f},b2={b2:.2f}")
             continue
 
-        # direction survived blocking (Task 4.5 will add endo/exo expansion here)
-        survivors.append(PlacementTrial(
-            direction=d, d_min=float(d_min),
-            positions=new_positions,
-            orientation="endo",   # placeholder for Task 4.5 endo/exo expansion
-        ))
+        # direction survived blocking; expand into endo/exo trials (Task 4.5)
+        endo_pos = new_positions
+        exo_pos = _rotate_atoms(
+            new_positions,
+            indices=tuple(fragment_list),
+            axis=u_sub,
+            center=M_sub + d * d_min,
+            angle=np.pi,
+        )
+        # Symmetry detection via RMSD on fragment atoms
+        endo_frag = endo_pos[fragment_list]
+        exo_frag = exo_pos[fragment_list]
+        rmsd = float(np.sqrt(np.mean(np.sum((endo_frag - exo_frag) ** 2, axis=1))))
+        if rmsd < 0.01:
+            # symmetric fragment → 1 achiral trial
+            survivors.append(PlacementTrial(
+                direction=d, d_min=float(d_min),
+                positions=endo_pos, orientation="achiral",
+            ))
+        else:
+            # asymmetric → 2 trials (endo + exo)
+            survivors.append(PlacementTrial(
+                direction=d, d_min=float(d_min),
+                positions=endo_pos, orientation="endo",
+            ))
+            survivors.append(PlacementTrial(
+                direction=d, d_min=float(d_min),
+                positions=exo_pos, orientation="exo",
+            ))
         blocked_reasons.append(None)
 
     return survivors, blocked_reasons
