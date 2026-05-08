@@ -302,3 +302,36 @@ def test_build_afir_alpha_list_length_mismatch_raises():
             alpha_formed=[0.5, 1.5, 2.0], alpha_broken=0.0,
             formed_thresholds=[1.5, 1.5], broken_thresholds=[],
         )
+
+
+def test_latch_state_independent_of_post_latch_geometry():
+    """Spec §1, §10.3 critical-1: sticky latch ≠ reached_product.
+
+    Once latched, AFIR force is permanently 0 — but UMA / external forces
+    may push the pair distance back outside the threshold. The cli flow
+    therefore reads `reached_product` from the *final-frame distance*,
+    which can disagree with the latch state.
+
+    This test demonstrates the regression mode by:
+    1. Crossing threshold → latch ON
+    2. Moving back outside threshold → latch stays ON (sticky)
+    3. Asserting that final r > threshold (the geometry signal that
+       reached_product would treat as False)
+    """
+    c = AFIRConstraint(
+        formed=[(0, 1)], broken=[], alpha_formed=[1.0], alpha_broken=[],
+        formed_thresholds=[1.5], broken_thresholds=[],
+    )
+    c.adjust_forces(_atoms_along_x(1.4), np.zeros((2, 3)))
+    assert c.formed_latched == [True]
+
+    atoms_b = _atoms_along_x(2.5)
+    f_b = np.zeros((2, 3))
+    c.adjust_forces(atoms_b, f_b)
+    np.testing.assert_allclose(f_b, 0, atol=1e-12)
+    assert c.formed_latched == [True]
+
+    r_final = float(np.linalg.norm(
+        atoms_b.positions[1] - atoms_b.positions[0]
+    ))
+    assert r_final > 1.5  # geometry says "not reached" while latch says "ever crossed"
