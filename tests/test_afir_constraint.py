@@ -259,3 +259,46 @@ def test_force_matches_finite_difference_of_artificial_potential():
             f_numerical[atom_idx, axis] = -(V(p_plus) - V(p_minus)) / (2 * eps)
 
     np.testing.assert_allclose(f_analytical, f_numerical, atol=1e-6)
+
+
+from reactx.artificial_force import build_afir_constraint
+
+
+def test_build_afir_returns_empty_when_no_pairs():
+    a = Atoms("CC", positions=np.zeros((2, 3)))
+    cs = build_afir_constraint(
+        a, formed=[], broken=[],
+        alpha_formed=0.0, alpha_broken=0.0,
+        formed_thresholds=[], broken_thresholds=[],
+    )
+    assert cs == []
+
+
+def test_build_afir_broadcasts_scalar_alpha_to_list():
+    a = Atoms("CCC", positions=np.zeros((3, 3)))
+    cs = build_afir_constraint(
+        a, formed=[(0, 1), (0, 2)], broken=[],
+        alpha_formed=0.5, alpha_broken=0.0,
+        formed_thresholds=[1.5, 1.5], broken_thresholds=[],
+    )
+    assert cs[0].alpha_formed == [0.5, 0.5]
+
+
+def test_build_afir_passes_through_list_alpha():
+    a = Atoms("CCC", positions=np.zeros((3, 3)))
+    cs = build_afir_constraint(
+        a, formed=[(0, 1), (0, 2)], broken=[],
+        alpha_formed=[0.5, 1.5], alpha_broken=0.0,
+        formed_thresholds=[1.5, 1.5], broken_thresholds=[],
+    )
+    assert cs[0].alpha_formed == [0.5, 1.5]
+
+
+def test_build_afir_alpha_list_length_mismatch_raises():
+    a = Atoms("CCC", positions=np.zeros((3, 3)))
+    with pytest.raises(ValueError, match="alpha_formed list length"):
+        build_afir_constraint(
+            a, formed=[(0, 1), (0, 2)], broken=[],
+            alpha_formed=[0.5, 1.5, 2.0], alpha_broken=0.0,
+            formed_thresholds=[1.5, 1.5], broken_thresholds=[],
+        )

@@ -229,3 +229,33 @@ class AFIRConstraint(FixConstraint):
 
     def get_indices(self):
         return sorted({a for pair in (self.formed + self.broken) for a in pair})
+
+
+def build_afir_constraint(
+    atoms,
+    formed: list[tuple[int, int]],
+    broken: list[tuple[int, int]],
+    *,
+    alpha_formed,
+    alpha_broken,
+    formed_thresholds: list[float],
+    broken_thresholds: list[float],
+) -> list[AFIRConstraint]:
+    if not formed and not broken:
+        return []
+    af = _broadcast_alpha(alpha_formed, len(formed), key="alpha_formed")
+    ab = _broadcast_alpha(alpha_broken, len(broken), key="alpha_broken")
+    return [AFIRConstraint(
+        formed, broken,
+        alpha_formed=af, alpha_broken=ab,
+        formed_thresholds=formed_thresholds,
+        broken_thresholds=broken_thresholds,
+    )]
+
+
+def _broadcast_alpha(value, n: int, *, key: str) -> list[float]:
+    if isinstance(value, (list, tuple)):
+        if len(value) != n:
+            raise ValueError(f"{key} list length {len(value)} != n_pairs {n}")
+        return [float(v) for v in value]
+    return [float(value)] * n
