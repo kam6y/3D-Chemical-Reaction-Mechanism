@@ -12,16 +12,16 @@ import pytest
 from reactx.cli import _write_outputs_and_exit, build_parser, main
 from reactx.config import (
     AFIRSection,
-    ReactionConfigV9,
+    ReactionConfig,
     SamplingConfig,
     ScoringSection,
 )
 from reactx.placement import PlacementResult, PlacementTrial
-from reactx.scoring import TrialResultV9 as TrialResult
+from reactx.scoring import TrialResult
 
 
-def _sample_cfg() -> ReactionConfigV9:
-    return ReactionConfigV9(
+def _sample_cfg() -> ReactionConfig:
+    return ReactionConfig(
         description="sample",
         formed=((1, 2),),
         broken=((1, 3),),

@@ -96,7 +96,7 @@ def atom_map_to_reactant_idx(reactant_mol: Chem.Mol) -> dict[int, int]:
     The mapping is identical for the post-AddHs Mol because Chem.AddHs appends
     new H atoms at indices >= original count, preserving every existing atom's
     index. Use this dict to translate TOML-side atom-map pairs into 0-based
-    indices that BondChanges, embed3d, and build_restraints expect.
+    indices that BondChanges, embed3d, and build_afir_constraint expect.
     """
     return {
         a.GetAtomMapNum(): a.GetIdx()

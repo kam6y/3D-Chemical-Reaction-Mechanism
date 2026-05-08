@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from reactx.config import ConfigError, load_config_v9
+from reactx.config import ConfigError, load_config
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -30,7 +30,7 @@ max_relax_steps = 100
 [scoring]
 r_broken_threshold = 4.0
 """)
-    cfg = load_config_v9(rxn)
+    cfg = load_config(rxn)
     assert cfg.afir.alpha_formed == 0.7
     assert cfg.afir.alpha_broken == 0.5
     assert cfg.afir.max_relax_steps == 100
@@ -52,7 +52,7 @@ max_relax_steps = 200
 [scoring]
 r_broken_threshold = [3.0, 4.0]
 """)
-    cfg = load_config_v9(rxn)
+    cfg = load_config(rxn)
     assert cfg.afir.alpha_broken == (1.0, 1.5)
     assert cfg.scoring.r_broken_threshold == (3.0, 4.0)
 
@@ -67,7 +67,7 @@ broken = []
 alpha_formed = [2.5, 2.5]
 max_relax_steps = 200
 """)
-    cfg = load_config_v9(rxn)
+    cfg = load_config(rxn)
     assert cfg.broken == ()
     assert cfg.afir.alpha_broken == ()
 
@@ -83,7 +83,7 @@ alpha_formed = [2.5, 2.5]
 alpha_broken = 0.0
 max_relax_steps = 200
 """)
-    cfg = load_config_v9(rxn)
+    cfg = load_config(rxn)
     assert cfg.broken == ()
 
 
@@ -100,7 +100,7 @@ max_relax_steps = 200
 [scoring]
 r_broken_threshold = 6.0
 """)
-    cfg = load_config_v9(rxn)
+    cfg = load_config(rxn)
     assert cfg.formed == ()
     assert cfg.afir.alpha_formed == ()
 
@@ -118,7 +118,7 @@ r_broken = 4.0
 max_relax_steps = 100
 """)
     with pytest.raises(ConfigError, match=r"restraints"):
-        load_config_v9(rxn)
+        load_config(rxn)
 
 
 def test_alpha_zero_rejected_for_nonempty_pair(tmp_path: Path):
@@ -136,7 +136,7 @@ max_relax_steps = 100
 r_broken_threshold = 4.0
 """)
     with pytest.raises(ConfigError, match="alpha_formed"):
-        load_config_v9(rxn)
+        load_config(rxn)
 
 
 def test_alpha_negative_rejected(tmp_path: Path):
@@ -150,7 +150,7 @@ alpha_formed = -1.0
 max_relax_steps = 100
 """)
     with pytest.raises(ConfigError):
-        load_config_v9(rxn)
+        load_config(rxn)
 
 
 def test_r_broken_threshold_required_when_broken_nonempty(tmp_path: Path):
@@ -164,7 +164,7 @@ alpha_broken = 1.0
 max_relax_steps = 100
 """)
     with pytest.raises(ConfigError, match="r_broken_threshold"):
-        load_config_v9(rxn)
+        load_config(rxn)
 
 
 def test_nan_alpha_rejected(tmp_path: Path):
@@ -178,7 +178,7 @@ alpha_formed = nan
 max_relax_steps = 100
 """)
     with pytest.raises(ConfigError, match="finite"):
-        load_config_v9(rxn)
+        load_config(rxn)
 
 
 def test_inf_alpha_rejected(tmp_path: Path):
@@ -192,7 +192,7 @@ alpha_formed = inf
 max_relax_steps = 100
 """)
     with pytest.raises(ConfigError, match="finite"):
-        load_config_v9(rxn)
+        load_config(rxn)
 
 
 def test_alpha_length_mismatch_rejected(tmp_path: Path):
@@ -210,7 +210,7 @@ max_relax_steps = 100
 r_broken_threshold = 4.0
 """)
     with pytest.raises(ConfigError, match="alpha_formed"):
-        load_config_v9(rxn)
+        load_config(rxn)
 
 
 def test_r_formed_threshold_list_passthrough(tmp_path: Path):
@@ -226,7 +226,7 @@ max_relax_steps = 100
 [scoring]
 r_formed_threshold = [1.5, 1.8]
 """)
-    cfg = load_config_v9(rxn)
+    cfg = load_config(rxn)
     assert cfg.scoring.r_formed_threshold == (1.5, 1.8)
 
 
@@ -241,7 +241,7 @@ alpha_formed = 1.0
 max_relax_steps = 0
 """)
     with pytest.raises(ConfigError, match="max_relax_steps"):
-        load_config_v9(rxn)
+        load_config(rxn)
 
 
 def test_obsolete_top_level_keys_rejected(tmp_path: Path):
@@ -258,4 +258,4 @@ max_relax_steps = 100
 """
         rxn = _write(tmp_path, body)
         with pytest.raises(ConfigError):
-            load_config_v9(rxn)
+            load_config(rxn)

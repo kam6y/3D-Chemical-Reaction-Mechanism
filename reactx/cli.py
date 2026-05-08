@@ -18,18 +18,10 @@ from reactx.bond_changes import BondChanges
 from reactx.calculators import make_calculator
 from reactx.config import (
     ConfigError,
-)
-from reactx.config import (
-    ReactionConfigV9 as ReactionConfig,
-)
-from reactx.config import (
-    load_config_v9 as load_config,
-)
-from reactx.config import (
-    resolve_alpha_broken_v9 as resolve_alpha_broken,
-)
-from reactx.config import (
-    resolve_alpha_formed_v9 as resolve_alpha_formed,
+    ReactionConfig,
+    load_config,
+    resolve_alpha_broken,
+    resolve_alpha_formed,
 )
 from reactx.embed3d import embed_fragments_to_positions
 from reactx.neb import run_neb
@@ -41,19 +33,13 @@ from reactx.placement import (
 )
 from reactx.rxn_parser import atom_map_to_reactant_idx, heavy_to_hydrogen_groups, parse_rxn
 from reactx.scoring import (
-    TrialResultV9 as TrialResult,
-)
-from reactx.scoring import (
+    TrialResult,
     count_initial_latched,
     product_distance_residual,
+    reached_product,
     resolve_broken_thresholds,
     resolve_formed_thresholds,
-)
-from reactx.scoring import (
-    reached_product_v9 as reached_product,
-)
-from reactx.scoring import (
-    score_trials_v9 as score_trials,
+    score_trials,
 )
 
 log = logging.getLogger("reactx")

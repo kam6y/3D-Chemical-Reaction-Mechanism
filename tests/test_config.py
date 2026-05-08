@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from reactx.config import load_config_v9 as load_config
+from reactx.config import load_config
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
