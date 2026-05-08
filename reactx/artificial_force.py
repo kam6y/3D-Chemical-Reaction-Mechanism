@@ -163,12 +163,22 @@ class AFIRConstraint(FixConstraint):
     def adjust_forces(self, atoms, forces):
         pos = atoms.positions
         for k, (i, j) in enumerate(self.formed):
+            if self.formed_latched[k]:
+                continue
             r, d_hat = self._geom(pos, i, j)
+            if r <= self.formed_thresholds[k]:
+                self.formed_latched[k] = True
+                continue
             f_on_j = -self.alpha_formed[k] * d_hat
             forces[j] += f_on_j
             forces[i] -= f_on_j
         for k, (i, j) in enumerate(self.broken):
+            if self.broken_latched[k]:
+                continue
             r, d_hat = self._geom(pos, i, j)
+            if r >= self.broken_thresholds[k]:
+                self.broken_latched[k] = True
+                continue
             f_on_j = +self.alpha_broken[k] * d_hat
             forces[j] += f_on_j
             forces[i] -= f_on_j
