@@ -4,8 +4,12 @@ Reference: Cordero et al., Dalton Trans. 2008, 2832.
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from ase.atoms import Atoms
+
+log = logging.getLogger(__name__)
 
 CORDERO_2008: dict[str, float] = {
     "H": 0.31, "He": 0.28,
@@ -29,8 +33,23 @@ CORDERO_2008: dict[str, float] = {
 
 
 def cordero_radius(symbol: str, *, default: float = 1.5) -> float:
-    return CORDERO_2008.get(symbol, default)
+    """Cordero (2008) covalent radius (Å) for a chemical element symbol.
+
+    Unknown symbols (Z > 83, lanthanide/actinide gaps, garbled) → log warning
+    and return ``default`` (1.5 Å). Phase 9 uses this for the
+    ``reached_product`` 1.15 × Rsum threshold; a wrong fallback radius
+    affects scoring decisions, so the warning surfaces unexpected inputs.
+    """
+    if symbol not in CORDERO_2008:
+        log.warning(
+            "cordero_radius: unknown element %r outside Z=1..83 range; "
+            "using default=%.2f Å",
+            symbol, default,
+        )
+        return default
+    return CORDERO_2008[symbol]
 
 
 def cordero_radii_for_atoms(atoms: Atoms) -> np.ndarray:
+    """Per-atom Cordero (2008) covalent radii (Å), aligned with ``atoms``."""
     return np.array([cordero_radius(s) for s in atoms.get_chemical_symbols()])

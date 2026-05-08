@@ -1,5 +1,6 @@
+import logging
+
 import numpy as np
-import pytest
 from ase import Atoms
 
 from reactx.covalent_radii import (
@@ -16,9 +17,13 @@ def test_cordero_radius_known_elements():
     assert cordero_radius("Br") == 1.20
 
 
-def test_cordero_radius_unknown_returns_default():
-    assert cordero_radius("Uuq", default=1.5) == 1.5
-    assert cordero_radius("Po") == 1.5
+def test_cordero_radius_unknown_returns_default(caplog):
+    with caplog.at_level(logging.WARNING, logger="reactx.covalent_radii"):
+        assert cordero_radius("Uuq", default=1.5) == 1.5
+        assert cordero_radius("Po") == 1.5
+    # Two warnings emitted (one per unknown symbol)
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 2
 
 
 def test_cordero_table_covers_z1_to_z83():
