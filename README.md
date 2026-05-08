@@ -155,7 +155,7 @@ RTX 5070 Ti + UMA-m-1p1 で実測 (`n_candidates=64`、Blender 4.5 LTS で `--re
 
 UMA model load (~25–30 s) が固定コスト。Phase 7 では MMFF prescreen を廃止したため、blocking で生存した候補の数 (`n_valid`) が wall-clock を直接決める。`n_candidates=64` で各反応の anchor 周辺ステリックにより 20–42 程度が生存し、それぞれ UMA で full relax する。混雑した anchor で生存が少ないとログ警告が出る (`only K/N candidates survived blocking ...`)。生存ゼロは `RuntimeError` で停止する。
 
-Diels-Alder endo は CP + MA の 12 原子で trial 1 件あたり ~30 s かかるため、`n_candidates=16` (32 trials = 16 endo + 16 exo) で wall-clock を抑制している。symmetric な butadiene + ethylene は default `n_candidates=64` で 62 valid (achiral 縮約適用)。
+Diels-Alder endo は CP + MA の 12 原子で trial 1 件あたり ~30 s かかるため、`n_candidates=16` (上限 32 trials = 16 endo + 16 exo; 実測 `n_valid=28` は blocking で 2 direction 脱落 → 14 direction × 2 orientation) で wall-clock を抑制している。symmetric な butadiene + ethylene は default `n_candidates=64` で 62 valid (achiral 縮約適用)。なお spec §5.7 で推定した DA-simple 生存数 8–12 を実測 (62) が大きく上回るのは、40% 非対称閾値 (`DUAL_ANCHOR_ASYMMETRY_THRESHOLD`) が permissive で大部分の direction が reachability blocking を通過するため。閾値の再 calibration は将来 phase で検討する。
 
 全球面サンプリングでは個々の trial が「正確な backside」から数十度ずれることが多いため、Phase 6 の cone サンプル時代より restraint をやや強めにする必要がある。特に Menshutkin のように gas-phase で product が contact ion pair より高エネルギーになる反応では、`k_form` を 4.0 程度まで強くしないと UMA の repulsive 領域を押し切れず N-C bond が形成されない。
 
