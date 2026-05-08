@@ -131,3 +131,91 @@ def test_per_pair_latch_independence():
     np.testing.assert_allclose(f[1], 0, atol=1e-12)
     assert not np.allclose(f[2], 0)
     assert not np.allclose(f[3], 0)
+
+
+def test_negative_alpha_rejected():
+    with pytest.raises(ValueError, match="non-negative"):
+        AFIRConstraint(
+            formed=[(0, 1)], broken=[], alpha_formed=[-0.1], alpha_broken=[],
+            formed_thresholds=[1.5], broken_thresholds=[],
+        )
+
+
+def test_zero_alpha_rejected_for_nonempty_formed_pair():
+    """spec §10.3 critical-2: α=0 on non-empty pair would never latch."""
+    with pytest.raises(ValueError, match="positive"):
+        AFIRConstraint(
+            formed=[(0, 1)], broken=[], alpha_formed=[0.0], alpha_broken=[],
+            formed_thresholds=[1.5], broken_thresholds=[],
+        )
+
+
+def test_zero_alpha_rejected_for_nonempty_broken_pair():
+    with pytest.raises(ValueError, match="positive"):
+        AFIRConstraint(
+            formed=[], broken=[(0, 1)], alpha_formed=[], alpha_broken=[0.0],
+            formed_thresholds=[], broken_thresholds=[3.0],
+        )
+
+
+def test_empty_pair_set_no_alpha_constraint():
+    c = AFIRConstraint(
+        formed=[], broken=[], alpha_formed=[], alpha_broken=[],
+        formed_thresholds=[], broken_thresholds=[],
+    )
+    assert c.formed_latched == []
+    assert c.broken_latched == []
+
+
+def test_zero_or_negative_threshold_rejected():
+    with pytest.raises(ValueError, match="positive"):
+        AFIRConstraint(
+            formed=[(0, 1)], broken=[], alpha_formed=[1.0], alpha_broken=[],
+            formed_thresholds=[0.0], broken_thresholds=[],
+        )
+
+
+def test_alpha_length_mismatch_rejected():
+    with pytest.raises(ValueError, match="alpha_formed length"):
+        AFIRConstraint(
+            formed=[(0, 1)], broken=[], alpha_formed=[1.0, 2.0], alpha_broken=[],
+            formed_thresholds=[1.5], broken_thresholds=[],
+        )
+
+
+def test_threshold_length_mismatch_rejected():
+    with pytest.raises(ValueError, match="formed_thresholds length"):
+        AFIRConstraint(
+            formed=[(0, 1)], broken=[], alpha_formed=[1.0], alpha_broken=[],
+            formed_thresholds=[1.5, 2.0], broken_thresholds=[],
+        )
+
+
+def test_coincident_atoms_fail_fast():
+    a = Atoms("CC", positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    c = AFIRConstraint(
+        formed=[(0, 1)], broken=[], alpha_formed=[1.0], alpha_broken=[],
+        formed_thresholds=[1.5], broken_thresholds=[],
+    )
+    with pytest.raises(ValueError, match="coincide"):
+        c.adjust_forces(a, np.zeros((2, 3)))
+
+
+def test_all_latched_helper():
+    c = AFIRConstraint(
+        formed=[(0, 1)], broken=[(0, 1)], alpha_formed=[1.0], alpha_broken=[1.0],
+        formed_thresholds=[1.5], broken_thresholds=[3.0],
+    )
+    assert c.all_latched() is False
+    c.formed_latched[0] = True
+    assert c.all_latched() is False
+    c.broken_latched[0] = True
+    assert c.all_latched() is True
+
+
+def test_all_latched_empty_constraint():
+    c = AFIRConstraint(
+        formed=[], broken=[], alpha_formed=[], alpha_broken=[],
+        formed_thresholds=[], broken_thresholds=[],
+    )
+    assert c.all_latched() is True
