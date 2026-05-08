@@ -219,3 +219,43 @@ def test_all_latched_empty_constraint():
         formed_thresholds=[], broken_thresholds=[],
     )
     assert c.all_latched() is True
+
+
+def test_force_matches_finite_difference_of_artificial_potential():
+    rng = np.random.default_rng(42)
+    pos = rng.uniform(-2.0, 2.0, size=(4, 3))
+    pos[1] = pos[0] + np.array([3.0, 0.0, 0.0])
+    pos[3] = pos[2] + np.array([0.5, 0.0, 0.0])
+    atoms = Atoms("CCCC", positions=pos)
+
+    formed = [(0, 1)]
+    broken = [(2, 3)]
+    alpha_f = [1.5]
+    alpha_b = [2.0]
+
+    def fresh() -> AFIRConstraint:
+        return AFIRConstraint(
+            formed=formed, broken=broken,
+            alpha_formed=alpha_f, alpha_broken=alpha_b,
+            formed_thresholds=[1.5], broken_thresholds=[3.0],
+        )
+
+    f_analytical = np.zeros((4, 3))
+    fresh().adjust_forces(atoms, f_analytical)
+
+    def V(p):
+        r01 = float(np.linalg.norm(p[1] - p[0]))
+        r23 = float(np.linalg.norm(p[3] - p[2]))
+        return alpha_f[0] * r01 + (-alpha_b[0]) * r23
+
+    eps = 1e-5
+    f_numerical = np.zeros_like(f_analytical)
+    for atom_idx in range(4):
+        for axis in range(3):
+            p_plus = atoms.positions.copy()
+            p_minus = atoms.positions.copy()
+            p_plus[atom_idx, axis] += eps
+            p_minus[atom_idx, axis] -= eps
+            f_numerical[atom_idx, axis] = -(V(p_plus) - V(p_minus)) / (2 * eps)
+
+    np.testing.assert_allclose(f_analytical, f_numerical, atol=1e-6)
