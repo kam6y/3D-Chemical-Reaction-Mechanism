@@ -1,12 +1,18 @@
-# reactx Phase 9 — Per-pair AFIR with Sticky Latch + 1-stage Relax (v3)
+# reactx Phase 9 — Per-pair AFIR with Sticky Latch + 1-stage Relax (v3.1)
 
-- Status: Draft (post v2 codex review revision; awaiting user spec review)
+- Status: Approved (v3 + critical-5 patch v3.1 from second codex review)
 - Date: 2026-05-08
 - Owner: @kam6y
 - Branch: `phase-9` (from `develop` after Phase 8 merge)
 - 前提仕様: `docs/superpowers/specs/2026-05-04-generic-placement-design.md`、`docs/superpowers/specs/2026-05-05-phase-8-cycloaddition-design.md`
 - 後方互換性: **完全に放棄する**。`.rxn.toml` schema・内部 API すべて breaking change を許容。既存 8 example は再 tune する。
-- 改訂履歴: §10 (v1 = multi-pair ω-collective、v2 = per-pair + two-stage、**v3 = per-pair + sticky latch + 1-stage**)。
+- 改訂履歴: §10 (v1 = multi-pair ω-collective、v2 = per-pair + two-stage、v3 = per-pair + sticky latch + 1-stage、**v3.1 = critical-5 patches**)。
+- v3 → v3.1 で対応した critical 5 点 (詳細 §10.3):
+  1. `final reached_product` を唯一の成功判定と定義し、latch state は debug 情報に降格 (§4.5, §4.6, §6.4)
+  2. 非空 pair に `α=0` を validation で禁止 (§4.4)
+  3. `formed=[]` の `alpha_formed` 取扱を `broken=[]` と対称に明記 (§4.4)
+  4. 初期 frame で threshold を満たす pair の即 latch を `initial_latched_count` で可視化 (§4.6)
+  5. ASE constraint copy 問題は `relax_with_restraints` の戻り値に latch state を含める設計に統一 (§4.2)
 
 ## 1. 目的
 
@@ -17,7 +23,8 @@ Phase Re1 〜 Phase 8 (再) で使ってきた経験的力場 (`Hookean attracti
 - 各反応の力場ハイパラを `alpha_formed` / `alpha_broken` の **per-pair list (or scalar broadcast)** 一本に統一。
 - per-pair 力 `F = α · d̂` (一定 magnitude、距離不変) を **sticky latch** で gate する: 各 pair が自分の threshold (`r_formed_threshold[k]` または `r_broken_threshold[k]`) を初めて越えた時点で latch ON、以降そのペアの AFIR force は 0 (sticky = 一度 ON なら relax 終了まで OFF にならない)。
 - 全 pair が latch ON になれば AFIR 力は完全消失し、自然に unbiased な FIRE relax 状態へ移行する。Stage A/B のような 2 段構造は **不要**。relax_with_restraints (1-stage) のまま、constraint を AFIR に差し替えるだけ。
-- threshold は **AFIR と scoring で共有**: `[scoring].r_formed_threshold` / `[scoring].r_broken_threshold` の値を AFIRConstraint と `reached_product` の両方が読む。これにより「scoring が True と判定する条件」=「AFIR が latch ON になる条件」となり、矛盾なく一致する。
+- threshold は **AFIR と scoring で共有**: `[scoring].r_formed_threshold` / `[scoring].r_broken_threshold` の値を AFIRConstraint と `reached_product` の両方が読む。
+- **重要 (v3.1)**: `latch ON` と `reached_product=True` は **論理的に等価ではない**。latch は「relax 中に過去に一度 threshold を越えた」、`reached_product` は「最終 frame で threshold を満たす」。AFIR force が 0 になった後も UMA force が pair を threshold の外に押し戻す可能性があり、その場合 `latch_count == n_pairs` でも `reached_product=False` になる。**`reached_product` (= 最終 frame 判定) を唯一の成功判定** とし、latch state (`formed_latch_count`, `broken_latch_count`, `initial_latched_count`) は **debug 情報** として meta.json に記録するに留める (slow test の主 assertion は `reached_product`、latch は副次的観測)。
 
 phase-8 ブランチで挫折した「CI-NEB 汎用化 + screening + 並列化」の 3 点同時変更は本フェーズには含めない。force model + scoring 閾値の刷新のみ。
 
@@ -306,9 +313,9 @@ def _broadcast(value: float | list[float], n: int, *, key: str) -> list[float]:
 - `formed_latched` / `broken_latched` は **AFIRConstraint instance の lifetime に紐付く** (1 trial の relax セッション中で sticky)。次の trial では新規 instance を生成するためリセットされる。
 - threshold は scoring と完全に **共有**: AFIR が latch ON する条件 = scoring の `reached_product` が True と判定する条件。同じ値を使うため矛盾なし。
 
-### 4.2 `reactx/path_relax.py` — `relax_with_restraints` (構造維持)
+### 4.2 `reactx/path_relax.py` — `relax_with_restraints` (構造維持 + latch state 戻り値)
 
-v2 では `relax_two_stage` への書き換えを提案したが、v3 では latch 機構が AFIR 力の self-extinguishing を実現するため Stage 構造は不要。Phase Re1 以来の `relax_with_restraints` をそのまま使う。
+v2 では `relax_two_stage` への書き換えを提案したが、v3 では latch 機構が AFIR 力の self-extinguishing を実現するため Stage 構造は不要。Phase Re1 以来の `relax_with_restraints` をそのまま使うが、**戻り値に latch state を追加** する (ASE が constraint instance を copy する可能性があり、呼び出し元の `afir_cs[0]` から latch state が読めない場合があるため、relax 内部で `atoms.constraints[0]` から確実に読み取って返す)。
 
 ```python
 def relax_with_restraints(
@@ -319,13 +326,39 @@ def relax_with_restraints(
     max_steps: int = 100,
     fmax: float = 0.1,
     traj_stride: int = 5,
-) -> tuple[list[Atoms], list[float]]:
-    ...   # 既存実装そのまま
+) -> tuple[list[Atoms], list[float], dict]:
+    """
+    Run FIRE under given restraints; return (frames, energies, final_constraint_state).
+
+    `final_constraint_state` is a dict with keys 'formed_latched' and
+    'broken_latched' (each a list[bool]) when the restraints contain an
+    AFIRConstraint, or an empty dict otherwise. The state is read from
+    `atoms.constraints[0]` after the optimizer terminates, ensuring the
+    caller sees the actual latch state inside ASE's working copy of the
+    constraint regardless of whether ASE made an internal copy.
+    """
+    atoms = atoms.copy()
+    atoms.calc = calc
+    if restraints:
+        atoms.set_constraint(restraints)
+    ...   # 既存の FIRE / snapshot ロジックはそのまま
+    # 終了後:
+    final_state: dict = {}
+    if atoms.constraints:
+        c = atoms.constraints[0]
+        if hasattr(c, "formed_latched"):    # duck-type check for AFIRConstraint
+            final_state = {
+                "formed_latched": list(c.formed_latched),
+                "broken_latched": list(c.broken_latched),
+            }
+    return frames, energies, final_state
 ```
 
-実装上の変更点:
+実装上のポイント:
 - AFIRConstraint も ASE FixConstraint なので、`atoms.set_constraint(restraints)` がそのまま動作 (新規対応コードなし)。
-- 全 pair 用 latch ON で AFIR force=0 になり、UMA force のみで relax が継続。`fmax=0.1` を満たすと FIRE が converged で停止する。`max_steps` 上限は安全弁。
+- 全 pair latch ON で AFIR force=0 になり、UMA force のみで relax が継続。`fmax=0.1` を満たすと FIRE が converged で停止する。`max_steps` 上限は安全弁。
+- 戻り値 3 番目の `final_constraint_state` は `cli.py` で latch_count 計算と `meta.json` 出力に使う。
+- `_snapshot()` (frame 保存ヘルパ) は **constraint も外す**: `a = atoms.copy(); a.calc = None; a.constraints = []` (latch state や custom constraint serialization が trajectory.xyz に混入するのを防ぐ)。既存実装は `calc = None` のみで constraint には触れていないため、これも本 phase で修正対象。
 
 ### 4.3 `reactx/covalent_radii.py` — Cordero 表の切り出し
 
@@ -433,18 +466,21 @@ class ReactionConfig:
 ```
 
 バリデーション:
-- `alpha_formed` / `alpha_broken`:
-  - scalar `>= 0` ⇒ broadcast to `len(formed)` / `len(broken)`
-  - list `>= 0` で length が `formed` / `broken` と一致 (`broken=[]` なら `[]` のみ valid)
-  - **特例**: `broken=[]` のとき `alpha_broken = 0.0` scalar、`alpha_broken = []` list、`alpha_broken` 省略のいずれも valid (broadcast の結果同じく `[]`)
+- `alpha_formed` (`broken` と対称ルール):
+  - **`formed = []`** のとき: `alpha_formed = 0.0` scalar、`alpha_formed = []` list、`alpha_formed` 省略 (default 0.0) いずれも valid (broadcast の結果同じく `[]`、AFIR には何も渡らない)
+  - **`formed ≠ []`** のとき: scalar `> 0` (各 pair に同値 broadcast)、または list で全要素 `> 0` かつ length が `formed` と一致。**非空 pair に `α = 0` を渡したら `ConfigError`** (force が常時 0 の pair は永遠に latch しないため、debug が混乱する。意図的に AFIR を弱めたい場合は小さい正値 `α = 0.01` を渡す)
+- `alpha_broken`: 上記 `formed` ↔ `broken` 入れ替えで同じルール (`broken=[]` で 3 形式 valid、`broken≠[]` で正値必須)
 - `max_relax_steps > 0`
 - `r_broken_threshold`:
-  - `broken=[]` ⇒ 省略可、scalar / list を渡しても warning なしで無視
+  - `broken=[]` ⇒ 省略可。scalar / list を明示しても warning なしで無視 (古い設定の残骸検出は将来 phase で検討)
   - `broken≠[]` ⇒ **必須**。scalar `> 0` または list `> 0` で length が `broken` と一致
 - `r_formed_threshold`:
-  - 省略可。省略時は per-pair auto-default `1.15 * (R_i + R_j)_Cordero` (Blender bond-tol `1.1 × Rsum` よりわずかに緩めて transient stretch 許容)
+  - 省略可。省略時は per-pair auto-default `1.15 * (R_i + R_j)_Cordero` (Blender bond-tol `1.1 × Rsum` より 0.05 × Rsum 緩めて transient stretch 許容)
   - 明示時は scalar `> 0` または list `> 0` で length が `formed` と一致
+- α/threshold の **NaN / inf を reject**: `math.isfinite()` が False なら `ConfigError`
 - 旧 keys (`k_form`, `k_broken`, `r_broken`, `r_form`、`[restraints]` セクション) が出現したら `ConfigError` で reject
+
+`ConfigError` は本仕様で新規定義する exception (現状 `ValueError` で代用されている validation エラーを統一)。CLI の top-level catch (`reactx/cli.py`) で `ConfigError` を `ValueError` と並列に catch し、exit code 2 で reject + stderr に詳細メッセージを出力する。
 
 ### 4.5 `reactx/scoring.py` — `reached_product` + `product_distance_residual`
 
@@ -528,6 +564,32 @@ def product_distance_residual(
         d = float(np.linalg.norm(pos[j] - pos[i]))
         res += max(thr - d, 0.0) ** 2
     return res
+
+
+def count_initial_latched(
+    atoms: Atoms,
+    formed: list[tuple[int, int]],
+    broken: list[tuple[int, int]],
+    formed_thresholds: list[float],
+    broken_thresholds: list[float],
+) -> dict[str, int]:
+    """Count pairs that already satisfy their threshold at relax start.
+
+    A non-zero count signals "AFIR will never push this pair" — useful
+    to flag trials where placement happened to land already inside the
+    product manifold for some pair. Recorded in meta.json as a debug
+    diagnostic (does NOT affect scoring).
+    """
+    pos = atoms.positions
+    n_f = sum(
+        1 for (i, j), thr in zip(formed, formed_thresholds, strict=True)
+        if float(np.linalg.norm(pos[j] - pos[i])) <= thr
+    )
+    n_b = sum(
+        1 for (i, j), thr in zip(broken, broken_thresholds, strict=True)
+        if float(np.linalg.norm(pos[j] - pos[i])) >= thr
+    )
+    return {"formed": n_f, "broken": n_b}
 ```
 
 `score_trials` 更新:
@@ -554,32 +616,53 @@ afir_cs = build_afir_constraint(
     broken_thresholds=bt,
 )
 
-# 既存の relax_with_restraints をそのまま呼ぶ
-frames, energies = relax_with_restraints(
+# 初期 latch 観測 (relax 開始前に initial frame で評価、debug 情報として記録)
+# AFIRConstraint 構築直後 (= 全 latch False) の状態で initial frame の r vs threshold
+# を評価し、すでに satisfied な pair の数を数える。これは「偶発的近接配置で AFIR が
+# 一度も働かない」trial を可視化するため。
+initial_latched = count_initial_latched(atoms_init, formed, broken, ft, bt)
+# 中身は scoring 側に小さなヘルパとして実装、reached_product と同じ距離評価ロジック
+# を per-pair に切った版。
+
+# 既存の relax_with_restraints をそのまま呼ぶ。戻り値に latch state を含める
+# (ASE の atoms.copy() / set_constraint() が constraint instance を copy する場合
+# でも呼び出し元から確実に latch state を読めるよう、relax_with_restraints が
+# 終了時に内部で `atoms.constraints[0].formed_latched` を読み取って返す)。
+frames, energies, final_constraint_state = relax_with_restraints(
     atoms_init, afir_cs, calc,
     max_steps=cfg.afir.max_relax_steps,
     fmax=relax_fmax,
     traj_stride=traj_stride,
 )
+# final_constraint_state は { 'formed_latched': list[bool], 'broken_latched': list[bool] }
+# AFIR constraint がない trial (formed=[] かつ broken=[]) では空 dict。
 
-# 最終 frame で reached_product と residual 評価
+# 最終 frame で reached_product (唯一の成功判定) と residual を評価
 final = frames[-1]
 ok = reached_product(final, formed, broken, ft, bt)
 residual = product_distance_residual(final, formed, broken, ft, bt)
 peak_energy = max(energies)
 
+formed_latch_count = sum(final_constraint_state.get("formed_latched", []))
+broken_latch_count = sum(final_constraint_state.get("broken_latched", []))
+
 trial = ScreeningTrialResult(
-    ..., reached_product=ok,
+    ..., reached_product=ok,             # ← scoring の成功判定はこれだけ
     peak_energy=peak_energy,
     product_distance_residual=residual,
     n_steps=len(frames),
+    formed_latch_count=formed_latch_count,    # debug
+    broken_latch_count=broken_latch_count,    # debug
+    initial_latched=initial_latched,          # debug、{ 'formed': int, 'broken': int }
     ...,
 )
 ```
 
 `meta.json` per-trial エントリ更新:
 - 削除: `r_broken_target`, `r_form_target`, `k_form`, `k_broken`
-- 追加: `alpha_formed: list[float]`, `alpha_broken: list[float]`, `formed_thresholds: list[float]`, `broken_thresholds: list[float]`, `product_distance_residual: float`, `formed_latch_count: int`, `broken_latch_count: int` (relax 終了時の latch ON 数、デバッグ用)
+- 追加 (主指標): `alpha_formed: list[float]`, `alpha_broken: list[float]`, `formed_thresholds: list[float]`, `broken_thresholds: list[float]`, `product_distance_residual: float`
+- 追加 (debug 情報、scoring には使わない): `formed_latch_count: int`, `broken_latch_count: int` (relax 終了時の latch ON 数)、`initial_latched_formed: int`, `initial_latched_broken: int` (relax 開始前の initial frame で既に threshold satisfied だった pair 数)
+- `reached_product` の判定は **最終 frame のみ** で行う (latch 状態とは独立に)
 
 NEB refine path (`--neb-refine`、1+1 のみ):
 - **既存実装維持**: NEB endpoint は引き続き reactant 軌跡フレーム + embedded/aligned product から取得 (`align_product_to_reactant` が必要)。
@@ -649,11 +732,20 @@ per-pair AFIR は「step あたりの押し速度 = `α × dt × maxstep`」が 
 ### 6.4 既存 slow integration tests (`pytest -m slow`)
 
 8 反応すべての統合テストを retune:
-- `selected_trial >= 0` で `reached_product=True` が 1 件以上
-- selected_trial の **最終 frame で `reached_product=True`** (latch all ON)
-- selected_trial の `meta.json.formed_latch_count == len(formed)` (全 formed pair が latch ON)
-- selected_trial の `meta.json.broken_latch_count == len(broken)` (全 broken pair が latch ON)
-- **新規 assertion**: selected_trial の trajectory 全 frame での **min 非結合 atom-pair 距離 ≥ 0.5 Å**。「非結合 pair」は以下を**除外**した残り: ① 初期 frame で `d_ij ≤ 1.1 × Rsum_Cordero` の pair (= initial bonded)、② `formed` / `broken` リストに含まれる pair、③ 同じ初期 fragment 内の任意 pair (placement で同 fragment は内部結合済とみなす)。実装ヘルパは `tests/conftest.py` に置く。
+
+**主 assertion (scoring の成功判定)**:
+- `selected_trial >= 0` で **`reached_product=True`** が 1 件以上
+- selected_trial の **最終 frame で `reached_product=True`** (これが本仕様の唯一の成功判定)
+
+**副 assertion (debug 情報、fail 時に diagnose しやすくする目的)**:
+- selected_trial の `meta.json.formed_latch_count == len(formed)` を **expected** (大半の trial で全 latch ON、ただし latch ON ≠ reached_product なので fail しても reached_product=True なら trial は成功扱い、debug 警告のみ)
+- selected_trial の `meta.json.broken_latch_count == len(broken)` を expected (同上)
+- selected_trial の `meta.json.initial_latched_formed == 0` を expected (初期 frame で formed pair がすでに satisfied なのは placement 偶発、稀)。non-zero なら warning のみ
+- selected_trial の `product_distance_residual == 0.0` (reached_product=True と等価)
+
+**安全 assertion (UMA off-manifold 検出)**:
+- selected_trial の trajectory 全 frame での **min 非結合 atom-pair 距離 ≥ 0.5 Å**。「非結合 pair」は以下を**除外**した残り: ① 初期 frame で `d_ij ≤ 1.1 × Rsum_Cordero` の pair (= initial bonded)、② `formed` / `broken` リストに含まれる pair。**「同じ初期 fragment 内の任意 pair」は除外しない** (intramolecular の異常接近を逆に検出するため)。実装ヘルパは `tests/conftest.py` に置く。
+- formed / broken pair 自身の min 距離も別途測定し、過短結合 (`< 0.5 × Rsum_Cordero`) があれば warning + trial を error として記録 (これは reactive pair 用の別 assertion)
 
 ### 6.5 削除する tests
 
@@ -776,10 +868,29 @@ v3 では **per-pair sticky latch + 1-stage relax** に再設計し、以下を�
 - **NEB refine 既存実装維持**: AFIR endpoint 直接利用は Phase 10 へ。
 - 「symmetric α なら対称性崩れない」記述を削除。
 
-### 10.3 v1 (rejected, 2026-05-08)
+### 10.3 v3 → v3.1 patch 理由 (third codex review)
+
+v3 spec を 3 周目の codex review に投じたところ、Stage 廃止と latch 機構自体は妥当と評価されたものの、以下 5 点の critical 指摘が出された:
+
+1. **`latch_count == n_pairs` を `reached_product=True` の代替に見せている**: latch は「過去に一度満たした」、reached は「最終 frame で満たす」で push-back により食い違う。
+2. **非空 pair に `α=0` が指定可能だと永遠に latch しない**: `adjust_forces` が `α=0` で `continue` する設計のため。
+3. **`formed=[]` の `alpha_formed` 取扱が `broken=[]` 対称に書かれていない**。
+4. **初期 frame で偶発的に threshold を満たす pair の即 latch が観測不能**: AFIR が一度も働かないまま終わった trial の検出手段なし。
+5. **ASE が `set_constraint` 時に constraint instance を copy する可能性**: 呼び出し元の `afir_cs[0]` から latch state が読めない。
+
+v3.1 では以下を patch:
+- §1 で「**`final reached_product` を唯一の成功判定**、latch state は debug 情報」と明記。
+- §4.4 で「非空 pair に `α=0` を指定したら `ConfigError`」、`formed=[]` と `broken=[]` を対称ルールで記述、NaN/inf reject、`ConfigError` exception class を新規定義。
+- §4.5 に `count_initial_latched` ヘルパを追加、§4.6 で初期 latch を `meta.json` の `initial_latched_formed` / `initial_latched_broken` に記録。
+- §4.2 で `relax_with_restraints` の戻り値に `final_constraint_state: dict` を追加 (ASE constraint copy 問題への対処)、`_snapshot()` で constraint も外す修正。
+- §6.4 で slow test の主 assertion を `reached_product` に統一、latch_count は副次 / debug 情報に降格、min 非結合距離の除外 set から「同 fragment」を削除。
+
+v3.1 patch で codex の medium 残課題 (Blender bond-tol 0.05 × Rsum 差、`r_broken_threshold` `broken=[]` 明示時 warning、`alpha_*` dataclass default、`TrialResult` に residual 必須追加の breaking change 範囲、latch transition test の FIRE なしシミュレート、有限差分 test の fresh constraint パターン) は **implementation plan の "Open questions" に持ち越し**、本 spec ではここまでで closure する。
+
+### 10.4 v1 (rejected, 2026-05-08)
 
 multi-pair ω-weighted collective ρ、single `α_formed`/`α_broken` scalar、1-stage relax (early-stop なし)、`r_broken_threshold` を covalent radii × 2.5 で auto-derive、formed 判定 `Rsum × 1.3`、p=6 が schema に任意 key として露出、`r < 1e-10` skip。
 
-### 10.4 v2 (rejected, 2026-05-08)
+### 10.5 v2 (rejected, 2026-05-08)
 
 per-pair AFIR、Stage A (early-stop) + Stage B (unbiased relax 50 steps)、`stable_window_steps=3` の言及のみ、`r_broken_threshold` 必須/省略可の矛盾、AFIR が Stage A 中に過圧縮する緩和不十分、`peak_energy` Stage A only と least-bad fallback の相性問題、frame 境界重複、Blender bond-tol との不一致 (`Rsum + 0.4 Å`)。
