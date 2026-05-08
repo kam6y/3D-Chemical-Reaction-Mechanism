@@ -1,13 +1,10 @@
 """Constrained relaxation that yields a trajectory of frames.
 
-Used by Phase Re1 to convert (initial geometry + bond-change restraints) into
-a reaction path: FIRE relaxation under Hookean (attractive) + PullApart
-(repulsive) constraints drives the system from reactant toward product.
-Frames are snapshotted every `traj_stride` optimizer steps; the final frame
-is always included.
-
-Use this with a shared calculator (e.g. UMA) to avoid model reloads between
-trials.
+Phase 9: returns 3-tuple (frames, energies, final_constraint_state).
+The third element captures AFIRConstraint latch state at relax end —
+read via `atoms.constraints[0]` so it works regardless of whether ASE
+copies constraint instances internally. `_snapshot()` also strips
+constraints so latch state never leaks into trajectory.xyz.
 """
 from __future__ import annotations
 
@@ -24,13 +21,7 @@ def relax_with_restraints(
     max_steps: int = 100,
     fmax: float = 0.1,
     traj_stride: int = 5,
-) -> tuple[list[Atoms], list[float]]:
-    """Run FIRE under the given restraints; return (frames, energies).
-
-    The first frame is the initial state; thereafter snapshots are taken every
-    `traj_stride` steps, plus the final state. `frames[i].calc` is None to
-    avoid keeping references to the shared calculator in trajectory output.
-    """
+) -> tuple[list[Atoms], list[float], dict]:
     atoms = atoms.copy()
     atoms.calc = calc
     if restraints:
@@ -39,10 +30,6 @@ def relax_with_restraints(
     frames: list[Atoms] = [_snapshot(atoms)]
     energies: list[float] = [float(atoms.get_potential_energy())]
 
-    # `maxstep=0.1` Å caps per-step displacement to suppress overshoot when
-    # Hookean restraints pull strongly across long distances; `dtmax=0.2` fs
-    # prevents FIRE from accelerating the integration timestep, which was the
-    # source of spring-like bouncing observed in early SN2 trajectories.
     opt = FIRE(atoms, logfile=None, dt=0.05, a=0.1, maxstep=0.1, dtmax=0.2)
 
     def _record():
@@ -56,11 +43,20 @@ def relax_with_restraints(
     if step_count % traj_stride != 0 or step_count == 0:
         _record()
 
-    return frames, energies
+    final_state: dict = {}
+    if atoms.constraints:
+        c = atoms.constraints[0]
+        if hasattr(c, "formed_latched"):
+            final_state = {
+                "formed_latched": list(c.formed_latched),
+                "broken_latched": list(c.broken_latched),
+            }
+
+    return frames, energies, final_state
 
 
 def _snapshot(atoms: Atoms) -> Atoms:
-    """Detach calculator so frame is independent and serializable."""
     a = atoms.copy()
     a.calc = None
+    a.set_constraint([])
     return a

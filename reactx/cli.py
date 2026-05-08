@@ -262,7 +262,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             k_broken=k_broken_targets,
         )
         try:
-            frames, energies = relax_with_restraints(
+            frames, energies, _ = relax_with_restraints(
                 atoms_init, restraints, calc,
                 max_steps=cfg.restraints.max_relax_steps,
                 fmax=args.relax_fmax,
