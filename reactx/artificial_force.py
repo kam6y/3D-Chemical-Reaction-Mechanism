@@ -133,3 +133,51 @@ def _broadcast_r_form(
             )
         return [float(v) for v in value]
     return [float(value)] * len(formed)
+
+
+class AFIRConstraint(FixConstraint):
+    """Per-pair AFIR force with sticky per-pair latch (Phase 9, spec §4.1)."""
+
+    def __init__(
+        self,
+        formed: list[tuple[int, int]],
+        broken: list[tuple[int, int]],
+        *,
+        alpha_formed: list[float],
+        alpha_broken: list[float],
+        formed_thresholds: list[float],
+        broken_thresholds: list[float],
+    ):
+        self.formed = [(int(a), int(b)) for a, b in formed]
+        self.broken = [(int(a), int(b)) for a, b in broken]
+        self.alpha_formed = [float(x) for x in alpha_formed]
+        self.alpha_broken = [float(x) for x in alpha_broken]
+        self.formed_thresholds = [float(t) for t in formed_thresholds]
+        self.broken_thresholds = [float(t) for t in broken_thresholds]
+        self.formed_latched = [False] * len(formed)
+        self.broken_latched = [False] * len(broken)
+
+    def adjust_positions(self, atoms, newpositions):
+        return
+
+    def adjust_forces(self, atoms, forces):
+        pos = atoms.positions
+        for k, (i, j) in enumerate(self.formed):
+            r, d_hat = self._geom(pos, i, j)
+            f_on_j = -self.alpha_formed[k] * d_hat
+            forces[j] += f_on_j
+            forces[i] -= f_on_j
+        for k, (i, j) in enumerate(self.broken):
+            r, d_hat = self._geom(pos, i, j)
+            f_on_j = +self.alpha_broken[k] * d_hat
+            forces[j] += f_on_j
+            forces[i] -= f_on_j
+
+    @staticmethod
+    def _geom(pos, i, j):
+        v = pos[j] - pos[i]
+        r = float(np.linalg.norm(v))
+        return r, v / r
+
+    def get_indices(self):
+        return sorted({a for pair in (self.formed + self.broken) for a in pair})
