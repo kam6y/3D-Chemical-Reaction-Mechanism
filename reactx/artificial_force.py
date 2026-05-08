@@ -81,26 +81,55 @@ def build_restraints(
     formed: list[tuple[int, int]],
     broken: list[tuple[int, int]],
     *,
-    r_form: float | None = None,
-    r_broken: float = 4.0,
-    k_form: float = 0.5,
-    k_broken: float = 1.0,
+    r_form: float | list[float] | None = None,
+    r_broken: float | list[float] = 4.0,
+    k_form: float | list[float] = 0.5,
+    k_broken: float | list[float] = 1.0,
 ) -> list:
     """Return a list of ASE constraints driving formed bonds together and
     broken bonds apart.
 
-    `r_form=None` (default) looks each pair up in DEFAULT_R_FORM by element
-    symbols. A scalar overrides the table by **broadcasting the same value to
-    every formed bond**. Per-bond targets (different rt for each bond) are
-    NOT supported in Phase 3 — formed=1 is the only multi-bond shape Phase 3
-    actually exercises (E2). Per-bond list support is Phase 4+ when reactions
-    with formed≥2 are added (Diels-Alder etc.).
+    `r_form=None` looks each pair up in DEFAULT_R_FORM by element symbols.
+    Scalar values are broadcast across all bonds; list values must match
+    `len(formed)` (for k_form / r_form) or `len(broken)` (for k_broken /
+    r_broken).
     """
     syms = atoms.get_chemical_symbols()
+    r_forms = _broadcast_r_form(r_form, formed, syms)
+    k_forms = _broadcast(k_form, len(formed), key="k_form")
+    r_brokens = _broadcast(r_broken, len(broken), key="r_broken")
+    k_brokens = _broadcast(k_broken, len(broken), key="k_broken")
+
     constraints: list = []
-    for a, b in formed:
-        rt = lookup_r_form(syms[a], syms[b]) if r_form is None else float(r_form)
-        constraints.append(Hookean(a1=a, a2=b, rt=rt, k=k_form))
-    for a, b in broken:
-        constraints.append(PullApart(a1=a, a2=b, k=k_broken, rt=r_broken))
+    for (a, b), rt, k in zip(formed, r_forms, k_forms, strict=True):
+        constraints.append(Hookean(a1=a, a2=b, rt=rt, k=k))
+    for (a, b), rt, k in zip(broken, r_brokens, k_brokens, strict=True):
+        constraints.append(PullApart(a1=a, a2=b, k=k, rt=rt))
     return constraints
+
+
+def _broadcast(value: float | list[float], n: int, *, key: str) -> list[float]:
+    """Scalar → list[n], list passthrough with length check."""
+    if isinstance(value, list):
+        if len(value) != n:
+            raise ValueError(
+                f"build_restraints: {key} list length {len(value)} != n_bonds {n}"
+            )
+        return [float(v) for v in value]
+    return [float(value)] * n
+
+
+def _broadcast_r_form(
+    value: float | list[float] | None,
+    formed: list[tuple[int, int]],
+    syms: list[str],
+) -> list[float]:
+    if value is None:
+        return [lookup_r_form(syms[a], syms[b]) for a, b in formed]
+    if isinstance(value, list):
+        if len(value) != len(formed):
+            raise ValueError(
+                f"build_restraints: r_form list length {len(value)} != n_formed {len(formed)}"
+            )
+        return [float(v) for v in value]
+    return [float(value)] * len(formed)

@@ -10,6 +10,9 @@
 - **E2 elimination** (1 formed + 2 broken)
 - **SN1 step 1 解離** (0 formed + 1 broken、unimolecular)
 - **SN1 step 2 recombination** (1 formed + 0 broken)
+- **Diels–Alder** ([4+2] cycloaddition、`bridges == 2`、2 formed + 0 broken)
+  - butadiene + ethylene → cyclohexene
+  - cyclopentadiene + maleic anhydride → norbornene-2,3-dicarboxylic anhydride (endo/exo 両 trial 自動展開)
 
 ## セットアップ
 
@@ -27,6 +30,9 @@ Blender 4.x と `atomic-blender-pdb-xyz` アドオンを別途インストール
 reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
 # Proton transfer
 reactx run examples/proton_transfer.rxn -o out/pt/ --backend uma --render
+# Diels-Alder
+reactx run examples/diels_alder_simple.rxn -o out/da/ --backend uma --render
+reactx run examples/diels_alder_endo.rxn -o out/da_endo/ --backend uma --render
 ```
 
 反応クラスごとの全パラメータは `examples/<name>.rxn.toml` に集約されている (下節 [Per-reaction .rxn.toml config](#per-reaction-rxntoml-config) 参照)。
@@ -74,8 +80,12 @@ max_relax_steps = 100
 | e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 1.0 | 1.0 | 4.0 | 200 | 元素表 | 64 |
 | sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | 0.0 | 2.0 | 6.0 | 200 | — | **1** |
 | sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.0 | 0.0 | 4.0 | 200 | 元素表 (C-Cl 1.78) | 64 |
+| diels_alder_simple.rxn | DA: butadiene + ethylene | `[[1,5],[4,6]]` | `[]` | `[3.0, 3.0]` | 0.0 | 4.0 | 200 | 元素表 | 64 |
+| diels_alder_endo.rxn | DA endo: CP + MA | `[[1,5],[4,6]]` | `[]` | `[3.0, 3.0]` | 0.0 | 4.0 | 250 | 元素表 | **16** |
 
 `r_form` は省略時に Cordero (2008) 共有結合半径表で per-bond ルックアップ、scalar で全 formed 同値、list で per-bond 指定。`[sampling]` は省略可能で `n_candidates=64` がデフォルト。各反応とも反応点 (anchor) を中心とした全球面 (4π sr) Fibonacci サンプリングで初期方向を生成し、ステリック blocking (角度シャドウ + d_min ceiling) を通過した方向すべてを UMA で full relax する。`n_candidates` を `[sampling]` で調整可能 (例: ステリックに混雑した anchor で生存数が少ない場合は大きく)。
+
+Phase 8 から `k_form` / `k_broken` / `r_broken` も `r_form` 同様 `scalar | list[float]` 両対応。list の場合は対応する `formed` / `broken` 数と一致を要求 (E2 のような `len(broken)==2` 系で per-bond 拘束が活かせる)。
 
 ```bash
 reactx run examples/sn2.rxn -o out/sn2/ --backend uma --render
@@ -97,7 +107,11 @@ reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
    → unimolecular auto-clamp で `meta.json.trials` が 1 件、`trajectory.xyz` で C–Br 距離 ≥ 4.5 Å
 6. `reactx run examples/sn1_recomb.rxn -o out/sn1r/ --backend uma --render`
    → bimolecular で 64 候補、blocking 後の生存全件を UMA で full relax、Cl⁻ が tBu⁺ の平面方向から接近 → C–Cl 結合形成を視認
-7. `pytest -m slow` で 6 反応すべての統合テストが pass
+7. `reactx run examples/diels_alder_simple.rxn -o out/da/ --backend uma --render`
+   → meta.json で `placement_kind == "multi_anchor"`, `orientation` に "achiral" (ethylene C2 対称で縮約) が出ることを確認、最終フレームで C1-C5 ≤ 1.8 Å、C4-C6 ≤ 1.8 Å を視認
+8. `reactx run examples/diels_alder_endo.rxn -o out/da_endo/ --backend uma --render`
+   → meta.json で endo, exo 両 trial が出力、selected_trial の orientation を確認 (UMA の挙動次第で endo/exo どちらか) + 6-membered ring + bicyclic 構造の形成を視認
+9. `pytest -m slow` で Phase 8 含む 8 反応 (DA × 2 を含む) すべての統合テストが pass
 
 ## レンダリング: 原子球サイズと結合棒
 
@@ -114,11 +128,13 @@ reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
 
 - 目的は妥当なアニメーション。TS エネルギーの正確さは保証しない
 - NEB refine は default off。`--neb-refine` は **1 formed + 1 broken 反応のみ対応** (E2 / SN1 dissoc / SN1 recomb では CLI が exit code 2 で reject)
-- 対応反応は上節「対応反応」を参照。中性 addition / cycloaddition / metathesis / Diels–Alder などは未対応
+- 対応反応は上節「対応反応」を参照。中性 addition / metathesis などは未対応
 - ラジカル / open-shell / 溶媒効果は対象外
 - σ-only connectivity diff のため、結合次数変化 (single↔double) は明示的に追跡しない (π 形成は QM calculator に委ねる)
 - 初期配置は反応点 (anchor) を中心とした全球面 (4π sr) Fibonacci サンプル + ステリック blocking (角度シャドウ + d_min ceiling) で決定する。anchor が完全に埋まった (全候補が blocked) 場合は `RuntimeError` で停止する
 - `[prescreen]` セクション、`n_angles` キー、`cone_half_deg` キーは Phase 7 で廃止。古い TOML を読ませると `ConfigError` で reject される
+- multi-anchor placement は `bridges == 2` (Diels-Alder) までを対応。`bridges >= 3` (一般 cycloaddition、1,3-dipolar 等) と cheletropic (incoming 側 anchor が 1 つで substrate 側に 2 つ bridge) は Phase 9+
+- DA の endo/exo は配置時に 0°/180° の 2 値で離散化。連続 rotation を sample しない (kinetic vs thermodynamic の精密判定には不十分)
 
 詳細仕様: `docs/superpowers/specs/2026-05-03-rxn-config-sidecar-design.md`
 
@@ -134,8 +150,12 @@ RTX 5070 Ti + UMA-m-1p1 で実測 (`n_candidates=64`、Blender 4.5 LTS で `--re
 | E2 (`examples/e2.rxn`) | 740 s | 42 | 42 / 42 | 1 formed + 2 broken、全方向が product 到達 |
 | SN1 dissoc (`examples/sn1_dissoc.rxn`) | 25 s | 1 | 1 / 1 | unimolecular auto-clamp で n_candidates=1、UMA model load 後ほぼ即終了 |
 | SN1 recomb (`examples/sn1_recomb.rxn`) | 339 s | 27 | 16 / 27 | bimolecular、Cl⁻ が tBu⁺ の sp²-平面方向から接近 |
+| Diels-Alder simple (`examples/diels_alder_simple.rxn`) | 1291 s | 62 | 59 / 62 | 64 候補、ethylene C2 対称で achiral 縮約適用、`k_form=[3.0,3.0]` で C-C σ bond ≈ 1.59 Å |
+| Diels-Alder endo (`examples/diels_alder_endo.rxn`) | 578 s | 28 | 15 / 28 | `n_candidates=16` × 2 endo/exo (12-atom CP+MA は trial 1 件あたり ~30 s)、selected orientation = "exo" (peak energy 最小)、C-C σ bond ≈ 1.56 Å |
 
 UMA model load (~25–30 s) が固定コスト。Phase 7 では MMFF prescreen を廃止したため、blocking で生存した候補の数 (`n_valid`) が wall-clock を直接決める。`n_candidates=64` で各反応の anchor 周辺ステリックにより 20–42 程度が生存し、それぞれ UMA で full relax する。混雑した anchor で生存が少ないとログ警告が出る (`only K/N candidates survived blocking ...`)。生存ゼロは `RuntimeError` で停止する。
+
+Diels-Alder endo は CP + MA の 12 原子で trial 1 件あたり ~30 s かかるため、`n_candidates=16` (上限 32 trials = 16 endo + 16 exo; 実測 `n_valid=28` は blocking で 2 direction 脱落 → 14 direction × 2 orientation) で wall-clock を抑制している。symmetric な butadiene + ethylene は default `n_candidates=64` で 62 valid (achiral 縮約適用)。なお spec §5.7 で推定した DA-simple 生存数 8–12 を実測 (62) が大きく上回るのは、40% 非対称閾値 (`DUAL_ANCHOR_ASYMMETRY_THRESHOLD`) が permissive で大部分の direction が reachability blocking を通過するため。閾値の再 calibration は将来 phase で検討する。
 
 全球面サンプリングでは個々の trial が「正確な backside」から数十度ずれることが多いため、Phase 6 の cone サンプル時代より restraint をやや強めにする必要がある。特に Menshutkin のように gas-phase で product が contact ion pair より高エネルギーになる反応では、`k_form` を 4.0 程度まで強くしないと UMA の repulsive 領域を押し切れず N-C bond が形成されない。
 
@@ -149,7 +169,7 @@ UMA model load (~25–30 s) が固定コスト。Phase 7 では MMFF prescreen �
 
 ```bash
 pytest                   # 高速ユニットテストのみ (slow / blender マーカーは除外)
-pytest -m slow           # UMA 依存の 6 反応統合テスト
+pytest -m slow           # UMA 依存の 8 反応統合テスト (Phase 8 DA × 2 を含む)
 pytest -m blender        # Blender smoke test (ローカル環境のみ)
 ```
 
@@ -166,8 +186,15 @@ pytest -m blender        # Blender smoke test (ローカル環境のみ)
                                        (per-fragment ETKDG + MMFF)
                                                        │
                                                        ▼
-                                       placement.valid_placements
-                                       (4π sr Fibonacci + 角度シャドウ + d_min ceiling)
+                       placement.valid_placements
+                       ├─ 1 fragment      → unimolecular passthrough
+                       ├─ bridges == 1     → single-anchor (Phase 7)
+                       │      └─ Fibonacci on direction → blocking → trials
+                       └─ bridges == 2     → multi-anchor (Phase 8)
+                              ├─ Fibonacci on face direction
+                              ├─ rigid-body alignment (translation + 2-point Kabsch)
+                              ├─ endo/exo 0°/180° 展開、対称分子は achiral 縮約
+                              └─ blocking: angular shadow + d_min ceiling + unreachable / asymmetric
                                                        │
                                                        ▼
                               ┌── trial 1 ──┐
@@ -186,3 +213,5 @@ pytest -m blender        # Blender smoke test (ローカル環境のみ)
 
 詳細設計: `docs/superpowers/specs/2026-05-04-generic-placement-design.md`
 実装計画: `docs/superpowers/plans/2026-05-04-generic-placement.md`
+詳細設計: `docs/superpowers/specs/2026-05-05-phase-8-cycloaddition-design.md`
+実装計画: `docs/superpowers/plans/2026-05-05-phase-8-cycloaddition.md`

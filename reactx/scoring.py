@@ -38,25 +38,36 @@ def reached_product(
     broken: list[tuple[int, int]],
     *,
     r_form_targets: list[float],
-    r_broken_target: float,
+    r_broken_target: float | list[float],
     form_tol: float = 0.3,
     broken_tol: float = 0.5,
 ) -> bool:
     """True iff every formed bond is within r_form + form_tol AND every broken
     bond is at least r_broken - broken_tol apart.
+
+    `r_broken_target` accepts scalar (broadcast to all broken bonds) or
+    `list[float]` of length len(broken).
     """
     if len(formed) != len(r_form_targets):
         raise ValueError(
             f"formed ({len(formed)}) must match r_form_targets ({len(r_form_targets)})"
+        )
+    if isinstance(r_broken_target, list):
+        r_broken_targets = r_broken_target
+    else:
+        r_broken_targets = [float(r_broken_target)] * len(broken)
+    if len(broken) != len(r_broken_targets):
+        raise ValueError(
+            f"broken ({len(broken)}) must match r_broken_target list ({len(r_broken_targets)})"
         )
     p = final_atoms.positions
     for (a, b), rt in zip(formed, r_form_targets, strict=True):
         d = float(np.linalg.norm(p[a] - p[b]))
         if d > rt + form_tol:
             return False
-    for a, b in broken:
+    for (a, b), rt in zip(broken, r_broken_targets, strict=True):
         d = float(np.linalg.norm(p[a] - p[b]))
-        if d < r_broken_target - broken_tol:
+        if d < rt - broken_tol:
             return False
     return True
 

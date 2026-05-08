@@ -360,3 +360,213 @@ max_relax_steps = 100
 """)
     cfg = load_config(rxn)
     assert cfg.sampling.n_candidates == 64
+
+
+def test_load_k_form_as_list_of_two(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "DA"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0, 1.5]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    assert cfg.restraints.k_form == (1.0, 1.5)
+
+
+def test_k_form_list_length_must_match_formed(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "bad"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    with pytest.raises(ValueError, match="k_form.*list length"):
+        load_config(rxn)
+
+
+def test_k_form_list_negative_value_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "bad"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0, -0.1]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    with pytest.raises(ValueError, match="k_form.*must be >= 0"):
+        load_config(rxn)
+
+
+def test_load_k_broken_as_list_of_two_for_e2_pattern(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "E2 per-bond k"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+[restraints]
+k_form = 1.0
+k_broken = [1.0, 2.0]
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    assert cfg.restraints.k_broken == (1.0, 2.0)
+
+
+def test_k_broken_list_length_must_match_broken(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "bad"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+[restraints]
+k_form = 1.0
+k_broken = [1.0]
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    with pytest.raises(ValueError, match="k_broken.*list length"):
+        load_config(rxn)
+
+
+def test_k_broken_scalar_with_empty_broken_filler_ok(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "DA broken empty"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0, 1.0]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    assert cfg.restraints.k_broken == 0.0
+
+
+def test_load_r_broken_as_list_for_e2(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "E2 per-bond r_broken"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+[restraints]
+k_form = 1.0
+k_broken = 1.0
+r_broken = [3.0, 5.0]
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    assert cfg.restraints.r_broken == (3.0, 5.0)
+
+
+def test_r_broken_list_must_be_positive(tmp_path: Path):
+    rxn = _write(tmp_path, """\
+description = "bad"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+[restraints]
+k_form = 1.0
+k_broken = 1.0
+r_broken = [3.0, 0.0]
+max_relax_steps = 200
+""")
+    with pytest.raises(ValueError, match="r_broken.*must be > 0"):
+        load_config(rxn)
+
+
+def test_resolve_k_form_targets_scalar_broadcasts(tmp_path: Path):
+    from reactx.config import resolve_k_form_targets
+    rxn = _write(tmp_path, """\
+description = "scalar k_form"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = 1.5
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    targets = resolve_k_form_targets(cfg, [(0, 4), (3, 5)])
+    assert targets == [1.5, 1.5]
+
+
+def test_resolve_k_form_targets_list_passes_through(tmp_path: Path):
+    from reactx.config import resolve_k_form_targets
+    rxn = _write(tmp_path, """\
+description = "list k_form"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0, 2.0]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    targets = resolve_k_form_targets(cfg, [(0, 4), (3, 5)])
+    assert targets == [1.0, 2.0]
+
+
+def test_resolve_k_broken_targets_scalar_broadcasts(tmp_path: Path):
+    from reactx.config import resolve_k_broken_targets
+    rxn = _write(tmp_path, """\
+description = "scalar k_broken"
+formed = [[1, 2]]
+broken = [[1, 3], [2, 4]]
+[restraints]
+k_form = 0.5
+k_broken = 1.5
+r_broken = 4.0
+max_relax_steps = 100
+""")
+    cfg = load_config(rxn)
+    targets = resolve_k_broken_targets(cfg, [(0, 2), (1, 3)])
+    assert targets == [1.5, 1.5]
+
+
+def test_resolve_r_broken_targets_list_passes_through(tmp_path: Path):
+    from reactx.config import resolve_r_broken_targets
+    rxn = _write(tmp_path, """\
+description = "list r_broken"
+formed = [[1, 2]]
+broken = [[1, 3], [2, 4]]
+[restraints]
+k_form = 0.5
+k_broken = 1.0
+r_broken = [3.0, 5.0]
+max_relax_steps = 100
+""")
+    cfg = load_config(rxn)
+    targets = resolve_r_broken_targets(cfg, [(0, 2), (1, 3)])
+    assert targets == [3.0, 5.0]
+
+
+def test_resolve_helpers_empty_input_returns_empty(tmp_path: Path):
+    from reactx.config import (
+        resolve_k_broken_targets,
+        resolve_k_form_targets,
+        resolve_r_broken_targets,
+    )
+    rxn = _write(tmp_path, """\
+description = "no broken"
+formed = [[1, 5], [4, 6]]
+broken = []
+[restraints]
+k_form = [1.0, 2.0]
+k_broken = 0.0
+r_broken = 4.0
+max_relax_steps = 200
+""")
+    cfg = load_config(rxn)
+    assert resolve_k_broken_targets(cfg, []) == []
+    assert resolve_r_broken_targets(cfg, []) == []
+    assert resolve_k_form_targets(cfg, [(0, 4), (3, 5)]) == [1.0, 2.0]

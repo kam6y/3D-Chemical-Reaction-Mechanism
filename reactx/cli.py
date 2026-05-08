@@ -16,7 +16,14 @@ from reactx.align import align_product_to_reactant
 from reactx.artificial_force import build_restraints
 from reactx.bond_changes import BondChanges
 from reactx.calculators import make_calculator
-from reactx.config import ReactionConfig, load_config, resolve_r_form_targets
+from reactx.config import (
+    ReactionConfig,
+    load_config,
+    resolve_k_broken_targets,
+    resolve_k_form_targets,
+    resolve_r_broken_targets,
+    resolve_r_form_targets,
+)
 from reactx.embed3d import embed_fragments_to_positions
 from reactx.neb import run_neb
 from reactx.path_relax import relax_with_restraints
@@ -81,6 +88,10 @@ def _sanitize_for_json(obj):
     if isinstance(obj, list):
         return [_sanitize_for_json(v) for v in obj]
     return obj
+
+
+def _scalar_or_list(v: float | tuple[float, ...]) -> float | list[float]:
+    return v if isinstance(v, float) else list(v)
 
 
 def _check_hf_auth() -> int:
@@ -184,12 +195,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
     broken_pairs = list(bond_changes.broken)
     syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
     r_form_targets = resolve_r_form_targets(cfg, syms_r, formed_pairs)
+    k_form_targets = resolve_k_form_targets(cfg, formed_pairs)
+    k_broken_targets = resolve_k_broken_targets(cfg, broken_pairs)
+    r_broken_targets = resolve_r_broken_targets(cfg, broken_pairs)
     log.info(
-        "description=%s effective: k_form=%.2f k_broken=%.2f r_broken=%.2f "
+        "description=%s effective: k_form=%s k_broken=%s r_broken=%s "
         "max_relax_steps=%d r_form_targets=%s",
         cfg.description,
-        cfg.restraints.k_form, cfg.restraints.k_broken,
-        cfg.restraints.r_broken, cfg.restraints.max_relax_steps,
+        k_form_targets, k_broken_targets, r_broken_targets,
+        cfg.restraints.max_relax_steps,
         [f"{x:.3f}" for x in r_form_targets] if r_form_targets else "[]",
     )
 
@@ -242,10 +256,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             atoms_init,
             formed=formed_pairs,
             broken=broken_pairs,
-            r_form=r_form_targets[0] if r_form_targets else None,
-            r_broken=cfg.restraints.r_broken,
-            k_form=cfg.restraints.k_form,
-            k_broken=cfg.restraints.k_broken,
+            r_form=r_form_targets,
+            r_broken=r_broken_targets,
+            k_form=k_form_targets,
+            k_broken=k_broken_targets,
         )
         try:
             frames, energies = relax_with_restraints(
@@ -267,7 +281,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             formed=formed_pairs,
             broken=broken_pairs,
             r_form_targets=r_form_targets,
-            r_broken_target=cfg.restraints.r_broken,
+            r_broken_target=r_broken_targets,
         )
         peak = max(energies) if energies else float("inf")
         trials.append(TrialResult(
@@ -382,9 +396,10 @@ def _write_outputs_and_exit(
             "n_candidates": placement.n_candidates,
             "n_blocked": placement.n_blocked,
             "n_valid": len(placement.trials),
+            "placement_kind": placement.placement_kind,
         }
         if placement is not None
-        else {"n_candidates": 0, "n_blocked": 0, "n_valid": 0}
+        else {"n_candidates": 0, "n_blocked": 0, "n_valid": 0, "placement_kind": None}
     )
     meta: dict = {
         "backend": args.backend,
@@ -400,6 +415,11 @@ def _write_outputs_and_exit(
                     if math.isfinite(t.peak_energy) else None,
                 "n_steps": t.n_steps,
                 "direction": [float(x) for x in t.direction],
+                "orientation": (
+                    placement.trials[t.trial_idx].orientation
+                    if placement is not None and t.trial_idx < len(placement.trials)
+                    else "single"
+                ),
             }
             for t in trials
         ],
@@ -407,9 +427,9 @@ def _write_outputs_and_exit(
         "neb_refined": neb_refined,
         "effective_params": (
             {
-                "k_form": cfg.restraints.k_form,
-                "k_broken": cfg.restraints.k_broken,
-                "r_broken": cfg.restraints.r_broken,
+                "k_form": _scalar_or_list(cfg.restraints.k_form),
+                "k_broken": _scalar_or_list(cfg.restraints.k_broken),
+                "r_broken": _scalar_or_list(cfg.restraints.r_broken),
                 "max_relax_steps": cfg.restraints.max_relax_steps,
                 "r_form_targets": list(r_form_targets) if r_form_targets is not None else [],
                 "n_candidates": cfg.sampling.n_candidates,
