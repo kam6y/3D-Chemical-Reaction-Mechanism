@@ -11,11 +11,15 @@ _SN2_NEB = """\
 description = "SN2 neb-refine fast"
 formed = [[1, 3]]
 broken = [[1, 2]]
-[restraints]
-k_form = 0.5
-k_broken = 1.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = 0.5
+alpha_broken = 1.0
 max_relax_steps = 30
+
+[scoring]
+r_broken_threshold = 4.0
+
 [sampling]
 n_candidates = 4
 """

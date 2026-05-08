@@ -2,8 +2,10 @@ description = "Menshutkin: NH3 + CH3Cl -> CH3NH3+ + Cl-"
 formed = [[1, 5]]
 broken = [[5, 9]]
 
-[restraints]
-k_form = 4.0
-k_broken = 2.0
-r_broken = 5.0
+[afir]
+alpha_formed = 4.0
+alpha_broken = 1.5
 max_relax_steps = 200
+
+[scoring]
+r_broken_threshold = 5.0

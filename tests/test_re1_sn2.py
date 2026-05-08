@@ -12,11 +12,15 @@ _SN2_FAST = """\
 description = "SN2 fast"
 formed = [[1, 3]]
 broken = [[1, 2]]
-[restraints]
-k_form = 0.5
-k_broken = 1.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = 0.5
+alpha_broken = 1.0
 max_relax_steps = 50
+
+[scoring]
+r_broken_threshold = 4.0
+
 [sampling]
 n_candidates = 8
 """

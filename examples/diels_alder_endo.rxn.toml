@@ -2,10 +2,8 @@ description = "Diels-Alder endo: cyclopentadiene + maleic anhydride -> norbornen
 formed = [[1, 5], [4, 6]]
 broken = []
 
-[restraints]
-k_form = [3.0, 3.0]
-k_broken = 0.0
-r_broken = 4.0
+[afir]
+alpha_formed = [2.5, 2.5]
 max_relax_steps = 250
 
 [sampling]

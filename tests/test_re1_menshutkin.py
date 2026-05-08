@@ -17,11 +17,15 @@ _MEN_FAST = """\
 description = "Menshutkin fast"
 formed = [[1, 5]]
 broken = [[5, 9]]
-[restraints]
-k_form = 2.0
-k_broken = 2.0
-r_broken = 5.0
+
+[afir]
+alpha_formed = 2.0
+alpha_broken = 1.5
 max_relax_steps = 200
+
+[scoring]
+r_broken_threshold = 5.0
+
 [sampling]
 n_candidates = 8
 """
@@ -36,9 +40,9 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["description"] == "Menshutkin fast"
-    assert meta["effective_params"]["k_form"] == 2.0
-    assert meta["effective_params"]["k_broken"] == 2.0
-    assert meta["effective_params"]["r_broken"] == 5.0
+    assert meta["effective_params"]["alpha_formed"] == 2.0
+    assert meta["effective_params"]["alpha_broken"] == 1.5
+    assert meta["effective_params"]["r_broken_threshold"] == 5.0
     assert meta["effective_params"]["max_relax_steps"] == 200
     assert meta["selected_trial"] >= 0
     pl = meta["placement"]

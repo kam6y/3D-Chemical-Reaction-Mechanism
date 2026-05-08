@@ -11,12 +11,16 @@ _PT_FAST = """\
 description = "Proton transfer fast"
 formed = [[1, 3]]
 broken = [[1, 2]]
-[restraints]
-k_form = 0.5
-k_broken = 1.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = 0.5
+alpha_broken = 1.0
 max_relax_steps = 100
-r_form = 1.05
+
+[scoring]
+r_broken_threshold = 4.0
+r_formed_threshold = 1.5
+
 [sampling]
 n_candidates = 8
 """

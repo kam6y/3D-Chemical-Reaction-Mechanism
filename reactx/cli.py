@@ -13,16 +13,23 @@ from ase.io import read, write
 from rdkit import Chem
 
 from reactx.align import align_product_to_reactant
-from reactx.artificial_force import build_restraints
+from reactx.artificial_force import build_afir_constraint
 from reactx.bond_changes import BondChanges
 from reactx.calculators import make_calculator
 from reactx.config import (
-    ReactionConfig,
-    load_config,
-    resolve_k_broken_targets,
-    resolve_k_form_targets,
-    resolve_r_broken_targets,
-    resolve_r_form_targets,
+    ConfigError,
+)
+from reactx.config import (
+    ReactionConfigV9 as ReactionConfig,
+)
+from reactx.config import (
+    load_config_v9 as load_config,
+)
+from reactx.config import (
+    resolve_alpha_broken_v9 as resolve_alpha_broken,
+)
+from reactx.config import (
+    resolve_alpha_formed_v9 as resolve_alpha_formed,
 )
 from reactx.embed3d import embed_fragments_to_positions
 from reactx.neb import run_neb
@@ -33,7 +40,21 @@ from reactx.placement import (
     valid_placements,
 )
 from reactx.rxn_parser import atom_map_to_reactant_idx, heavy_to_hydrogen_groups, parse_rxn
-from reactx.scoring import TrialResult, reached_product, score_trials
+from reactx.scoring import (
+    TrialResultV9 as TrialResult,
+)
+from reactx.scoring import (
+    count_initial_latched,
+    product_distance_residual,
+    resolve_broken_thresholds,
+    resolve_formed_thresholds,
+)
+from reactx.scoring import (
+    reached_product_v9 as reached_product,
+)
+from reactx.scoring import (
+    score_trials_v9 as score_trials,
+)
 
 log = logging.getLogger("reactx")
 
@@ -90,8 +111,10 @@ def _sanitize_for_json(obj):
     return obj
 
 
-def _scalar_or_list(v: float | tuple[float, ...]) -> float | list[float]:
-    return v if isinstance(v, float) else list(v)
+def _scalar_or_list(value):
+    if isinstance(value, tuple):
+        return list(value)
+    return value
 
 
 def _check_hf_auth() -> int:
@@ -128,6 +151,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     try:
         cfg = load_config(args.rxn_path)
+    except ConfigError as exc:
+        log.error("config error: %s", exc)
+        return 2
     except FileNotFoundError as exc:
         log.error("%s", exc)
         log.error(
@@ -193,24 +219,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     formed_pairs = list(bond_changes.formed)
     broken_pairs = list(bond_changes.broken)
-    syms_r = [a.GetSymbol() for a in r_h.GetAtoms()]
-    r_form_targets = resolve_r_form_targets(cfg, syms_r, formed_pairs)
-    k_form_targets = resolve_k_form_targets(cfg, formed_pairs)
-    k_broken_targets = resolve_k_broken_targets(cfg, broken_pairs)
-    r_broken_targets = resolve_r_broken_targets(cfg, broken_pairs)
+
     log.info(
-        "description=%s effective: k_form=%s k_broken=%s r_broken=%s "
-        "max_relax_steps=%d r_form_targets=%s",
+        "description=%s effective: alpha_formed=%s alpha_broken=%s "
+        "max_relax_steps=%d",
         cfg.description,
-        k_form_targets, k_broken_targets, r_broken_targets,
-        cfg.restraints.max_relax_steps,
-        [f"{x:.3f}" for x in r_form_targets] if r_form_targets else "[]",
+        cfg.afir.alpha_formed, cfg.afir.alpha_broken,
+        cfg.afir.max_relax_steps,
     )
 
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
     calc = make_calculator(args.backend, **model_kwargs)
 
-    # Phase 7 placement: per-fragment embed -> sphere sample -> blocking -> trials
     n_frags_reactant = len(Chem.GetMolFrags(r_h))
     effective_n_candidates = cfg.sampling.n_candidates
     if n_frags_reactant == 1 and effective_n_candidates > 1:
@@ -246,25 +266,36 @@ def _cmd_run(args: argparse.Namespace) -> int:
         len(placement.trials), placement.n_candidates, placement.n_blocked,
     )
 
-    # Phase 7: UMA full relax for every blocking-survivor (no prescreen).
+    af = resolve_alpha_formed(cfg)
+    ab = resolve_alpha_broken(cfg)
+
     trials: list[TrialResult] = []
     for i, t in enumerate(placement.trials):
         atoms_init = build_atoms_from_positions(mol_h_r, t.positions)
         log.info("trial %d (direction=%s)",
                  i, np.array2string(t.direction, precision=3))
-        restraints = build_restraints(
-            atoms_init,
-            formed=formed_pairs,
-            broken=broken_pairs,
-            r_form=r_form_targets,
-            r_broken=r_broken_targets,
-            k_form=k_form_targets,
-            k_broken=k_broken_targets,
+
+        ft = resolve_formed_thresholds(
+            atoms_init, formed_pairs, cfg.scoring.r_formed_threshold,
         )
+        bt = resolve_broken_thresholds(
+            atoms_init, broken_pairs, cfg.scoring.r_broken_threshold,
+        )
+
+        initial_latched = count_initial_latched(
+            atoms_init, formed_pairs, broken_pairs, ft, bt,
+        )
+
+        afir_cs = build_afir_constraint(
+            atoms_init, formed_pairs, broken_pairs,
+            alpha_formed=af, alpha_broken=ab,
+            formed_thresholds=ft, broken_thresholds=bt,
+        )
+
         try:
-            frames, energies, _ = relax_with_restraints(
-                atoms_init, restraints, calc,
-                max_steps=cfg.restraints.max_relax_steps,
+            frames, energies, final_state = relax_with_restraints(
+                atoms_init, afir_cs, calc,
+                max_steps=cfg.afir.max_relax_steps,
                 fmax=args.relax_fmax,
                 traj_stride=args.traj_stride,
             )
@@ -273,29 +304,40 @@ def _cmd_run(args: argparse.Namespace) -> int:
             trials.append(TrialResult(
                 trial_idx=i, direction=t.direction, frames=[], energies=[],
                 reached_product=False, peak_energy=float("inf"), n_steps=0,
+                formed_thresholds=ft, broken_thresholds=bt,
+                product_distance_residual=float("inf"),
+                formed_latch_count=0, broken_latch_count=0,
+                initial_latched_formed=initial_latched["formed"],
+                initial_latched_broken=initial_latched["broken"],
             ))
             continue
 
-        ok = reached_product(
-            frames[-1],
-            formed=formed_pairs,
-            broken=broken_pairs,
-            r_form_targets=r_form_targets,
-            r_broken_target=r_broken_targets,
+        ok = reached_product(frames[-1], formed_pairs, broken_pairs, ft, bt)
+        residual = product_distance_residual(
+            frames[-1], formed_pairs, broken_pairs, ft, bt,
         )
         peak = max(energies) if energies else float("inf")
+        formed_latch_count = sum(final_state.get("formed_latched", []))
+        broken_latch_count = sum(final_state.get("broken_latched", []))
+
         trials.append(TrialResult(
             trial_idx=i, direction=t.direction,
             frames=frames, energies=energies,
             reached_product=ok, peak_energy=float(peak),
             n_steps=len(frames),
+            formed_thresholds=ft, broken_thresholds=bt,
+            product_distance_residual=residual,
+            formed_latch_count=formed_latch_count,
+            broken_latch_count=broken_latch_count,
+            initial_latched_formed=initial_latched["formed"],
+            initial_latched_broken=initial_latched["broken"],
         ))
 
     if not any(t.frames for t in trials):
         log.error("All trials failed. See meta.json for details.")
         return _write_outputs_and_exit(
             args, trials, t_start, neb_refined=False, rc=1,
-            cfg=cfg, r_form_targets=r_form_targets, placement=placement,
+            cfg=cfg, placement=placement,
         )
 
     best = score_trials(trials)
@@ -358,7 +400,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     rc = _write_outputs_and_exit(
         args, trials, t_start, neb_refined=neb_refined, rc=0,
-        cfg=cfg, r_form_targets=r_form_targets, placement=placement,
+        cfg=cfg, placement=placement,
     )
     if rc != 0:
         return rc
@@ -380,7 +422,6 @@ def _write_outputs_and_exit(
     neb_refined: bool,
     rc: int,
     cfg: ReactionConfig | None = None,
-    r_form_targets: list[float] | None = None,
     placement: PlacementResult | None = None,
 ) -> int:
     best: TrialResult | None = None
@@ -420,6 +461,16 @@ def _write_outputs_and_exit(
                     if placement is not None and t.trial_idx < len(placement.trials)
                     else "single"
                 ),
+                "formed_thresholds": [float(x) for x in t.formed_thresholds],
+                "broken_thresholds": [float(x) for x in t.broken_thresholds],
+                "product_distance_residual": (
+                    float(t.product_distance_residual)
+                    if math.isfinite(t.product_distance_residual) else None
+                ),
+                "formed_latch_count": t.formed_latch_count,
+                "broken_latch_count": t.broken_latch_count,
+                "initial_latched_formed": t.initial_latched_formed,
+                "initial_latched_broken": t.initial_latched_broken,
             }
             for t in trials
         ],
@@ -427,11 +478,17 @@ def _write_outputs_and_exit(
         "neb_refined": neb_refined,
         "effective_params": (
             {
-                "k_form": _scalar_or_list(cfg.restraints.k_form),
-                "k_broken": _scalar_or_list(cfg.restraints.k_broken),
-                "r_broken": _scalar_or_list(cfg.restraints.r_broken),
-                "max_relax_steps": cfg.restraints.max_relax_steps,
-                "r_form_targets": list(r_form_targets) if r_form_targets is not None else [],
+                "alpha_formed": _scalar_or_list(cfg.afir.alpha_formed),
+                "alpha_broken": _scalar_or_list(cfg.afir.alpha_broken),
+                "max_relax_steps": cfg.afir.max_relax_steps,
+                "r_broken_threshold": (
+                    _scalar_or_list(cfg.scoring.r_broken_threshold)
+                    if cfg.scoring.r_broken_threshold is not None else None
+                ),
+                "r_formed_threshold": (
+                    _scalar_or_list(cfg.scoring.r_formed_threshold)
+                    if cfg.scoring.r_formed_threshold is not None else None
+                ),
                 "n_candidates": cfg.sampling.n_candidates,
             }
             if cfg is not None else None

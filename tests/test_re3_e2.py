@@ -11,11 +11,15 @@ _E2_FAST = """\
 description = "E2 fast"
 formed = [[4, 5]]
 broken = [[2, 5], [1, 3]]
-[restraints]
-k_form = 1.0
-k_broken = 1.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = 1.0
+alpha_broken = [1.0, 1.0]
 max_relax_steps = 100
+
+[scoring]
+r_broken_threshold = [4.0, 4.0]
+
 [sampling]
 n_candidates = 8
 """
@@ -33,8 +37,9 @@ def test_re3_e2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert any(t["reached_product"] for t in meta["trials"]), (
         f"no E2 trial reached product: {meta['trials']}"
     )
-    assert isinstance(meta["effective_params"]["r_form_targets"], list)
-    assert len(meta["effective_params"]["r_form_targets"]) == 1
+    # Phase 9: per-trial formed_thresholds replaces effective_params.r_form_targets
+    assert isinstance(meta["trials"][0]["formed_thresholds"], list)
+    assert len(meta["trials"][0]["formed_thresholds"]) == 1
     assert meta["description"] == "E2 fast"
 
     frames = read(str(out / "trajectory.xyz"), index=":")

@@ -11,11 +11,14 @@ _SN1D_FAST = """\
 description = "SN1 dissoc fast"
 formed = []
 broken = [[1, 5]]
-[restraints]
-k_form = 0.0
-k_broken = 2.0
-r_broken = 6.0
+
+[afir]
+alpha_broken = 1.5
 max_relax_steps = 100
+
+[scoring]
+r_broken_threshold = 6.0
+
 [sampling]
 n_candidates = 1
 """
@@ -33,7 +36,8 @@ def test_re3_sn1_dissoc_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
         f"unimolecular auto-clamp expected 1 trial; got {len(meta['trials'])}"
     )
     assert meta["selected_trial"] == 0
-    assert meta["effective_params"]["r_form_targets"] == []
+    # Phase 9: per-trial formed_thresholds (empty for SN1 dissoc) replaces r_form_targets
+    assert meta["trials"][0]["formed_thresholds"] == []
     assert meta["description"] == "SN1 dissoc fast"
 
     pl = meta["placement"]

@@ -8,11 +8,14 @@ _SN1_DISSOC_FAST = """\
 description = "sn1_dissoc fast"
 formed = []
 broken = [[1, 5]]
-[restraints]
-k_form = 0.0
-k_broken = 2.0
-r_broken = 6.0
+
+[afir]
+alpha_broken = 1.0
 max_relax_steps = 5
+
+[scoring]
+r_broken_threshold = 6.0
+
 [sampling]
 n_candidates = 8
 """
