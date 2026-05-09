@@ -68,3 +68,40 @@ def test_re3_e2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert d_oh_last < d_oh_first - 1.0, (
         f"O-H_β should shrink: {d_oh_first:.2f} -> {d_oh_last:.2f}"
     )
+
+
+_E2_SAFETY = """\
+description = "E2 safety check"
+formed = [[4, 5]]
+broken = [[2, 5], [1, 3]]
+
+[afir]
+alpha_formed = 1.5
+alpha_broken = [1.0, 1.5]
+max_relax_steps = 200
+
+[scoring]
+r_broken_threshold = [3.0, 4.0]
+"""
+
+
+@pytest.mark.slow
+def test_re3_e2_min_nonbonded_distance(
+    tmp_path: Path, tmp_rxn_with_toml, assert_min_nonbonded_distance_ok,
+):
+    """Spec §6.4: AFIR-driven trajectory must not produce non-bonded
+    atom pairs closer than 0.5 Å (UMA off-manifold detection).
+
+    e2.rxn atom-map: 1->idx 0 (Cα), 2->idx 1 (Cβ), 3->idx 2 (Cl),
+    5->idx 3 (Hβ), 4->idx 4 (O), 6->idx 5 (H of OH).
+    formed=[[4,5]] -> (3,4); broken=[[2,5],[1,3]] -> (1,3),(0,2).
+    """
+    rxn = tmp_rxn_with_toml("e2", toml_body=_E2_SAFETY)
+    out = tmp_path / "e2_safety"
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
+    assert rc == 0
+
+    frames = read(str(out / "trajectory.xyz"), index=":")
+    assert_min_nonbonded_distance_ok(
+        frames, formed=[(3, 4)], broken=[(1, 3), (0, 2)],
+    )

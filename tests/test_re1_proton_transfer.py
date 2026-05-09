@@ -62,3 +62,40 @@ def test_re1_proton_transfer_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert d_h_n_last < d_h_n_first - 0.5, (
         f"H-N should shrink: {d_h_n_first:.2f} -> {d_h_n_last:.2f}"
     )
+
+
+_PT_SAFETY = """\
+description = "Proton transfer safety check"
+formed = [[1, 3]]
+broken = [[1, 2]]
+
+[afir]
+alpha_formed = 1.5
+alpha_broken = 1.0
+max_relax_steps = 100
+
+[scoring]
+r_broken_threshold = 4.0
+r_formed_threshold = 1.5
+"""
+
+
+@pytest.mark.slow
+def test_re1_proton_transfer_min_nonbonded_distance(
+    tmp_path: Path, tmp_rxn_with_toml, assert_min_nonbonded_distance_ok,
+):
+    """Spec §6.4: AFIR-driven trajectory must not produce non-bonded
+    atom pairs closer than 0.5 Å (UMA off-manifold detection).
+
+    proton_transfer.rxn atom-map: 1->idx 0 (H), 2->idx 1 (Cl), 3->idx 2 (N).
+    formed=[[1,3]] -> (0,2); broken=[[1,2]] -> (0,1).
+    """
+    rxn = tmp_rxn_with_toml("proton_transfer", toml_body=_PT_SAFETY)
+    out = tmp_path / "pt_safety"
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
+    assert rc == 0
+
+    frames = read(str(out / "trajectory.xyz"), index=":")
+    assert_min_nonbonded_distance_ok(
+        frames, formed=[(0, 2)], broken=[(0, 1)],
+    )

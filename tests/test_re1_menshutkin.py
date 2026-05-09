@@ -71,3 +71,39 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert d_ccl_last >= 3.5, (
         f"C-Cl should break: {d_ccl_first:.2f} -> {d_ccl_last:.2f} (target ≥ 3.5)"
     )
+
+
+_MEN_SAFETY = """\
+description = "Menshutkin safety check"
+formed = [[1, 5]]
+broken = [[5, 9]]
+
+[afir]
+alpha_formed = 4.0
+alpha_broken = 1.5
+max_relax_steps = 200
+
+[scoring]
+r_broken_threshold = 5.0
+"""
+
+
+@pytest.mark.slow
+def test_re1_menshutkin_min_nonbonded_distance(
+    tmp_path: Path, tmp_rxn_with_toml, assert_min_nonbonded_distance_ok,
+):
+    """Spec §6.4: AFIR-driven trajectory must not produce non-bonded
+    atom pairs closer than 0.5 Å (UMA off-manifold detection).
+
+    menshutkin.rxn atom-map: 1->idx 0 (N), 5->idx 4 (C), 9->idx 8 (Cl).
+    formed=[[1,5]] -> (0,4); broken=[[5,9]] -> (4,8).
+    """
+    rxn = tmp_rxn_with_toml("menshutkin", toml_body=_MEN_SAFETY)
+    out = tmp_path / "menshutkin_safety"
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
+    assert rc == 0
+
+    frames = read(str(out / "trajectory.xyz"), index=":")
+    assert_min_nonbonded_distance_ok(
+        frames, formed=[(0, 4)], broken=[(4, 8)],
+    )

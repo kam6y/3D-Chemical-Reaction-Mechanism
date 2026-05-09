@@ -55,3 +55,35 @@ def test_re4_sn1_recomb_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     d_to_cl = [(i, float(((pos_last[i] - pos_last[cl_idx]) ** 2).sum() ** 0.5)) for i in c_atoms]
     central, d_last = min(d_to_cl, key=lambda kv: kv[1])
     assert d_last <= 1.95, f"final C-Cl should be ≤1.95 A (Cordero × 1.1), got {d_last:.2f}"
+
+
+_SN1R_SAFETY = """\
+description = "SN1 recomb safety check"
+formed = [[1, 5]]
+broken = []
+
+[afir]
+alpha_formed = 1.5
+max_relax_steps = 200
+"""
+
+
+@pytest.mark.slow
+def test_re4_sn1_recomb_min_nonbonded_distance(
+    tmp_path: Path, tmp_rxn_with_toml, assert_min_nonbonded_distance_ok,
+):
+    """Spec §6.4: AFIR-driven trajectory must not produce non-bonded
+    atom pairs closer than 0.5 Å (UMA off-manifold detection).
+
+    sn1_recomb.rxn atom-map: 1->idx 0 (C+), 5->idx 4 (Cl-).
+    formed=[[1,5]] -> (0,4); broken=[].
+    """
+    rxn = tmp_rxn_with_toml("sn1_recomb", toml_body=_SN1R_SAFETY)
+    out = tmp_path / "sn1r_safety"
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
+    assert rc == 0
+
+    frames = read(str(out / "trajectory.xyz"), index=":")
+    assert_min_nonbonded_distance_ok(
+        frames, formed=[(0, 4)], broken=[],
+    )
