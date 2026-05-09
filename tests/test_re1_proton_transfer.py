@@ -13,12 +13,12 @@ formed = [[1, 3]]
 broken = [[1, 2]]
 
 [afir]
-alpha_formed = 0.5
-alpha_broken = 1.0
-max_relax_steps = 100
+alpha_formed = 2.0
+alpha_broken = 5.0
+max_relax_steps = 300
 
 [scoring]
-r_broken_threshold = 4.0
+r_broken_threshold = 3.0
 r_formed_threshold = 1.5
 
 [sampling]
@@ -70,12 +70,12 @@ formed = [[1, 3]]
 broken = [[1, 2]]
 
 [afir]
-alpha_formed = 1.5
-alpha_broken = 1.0
-max_relax_steps = 100
+alpha_formed = 2.0
+alpha_broken = 5.0
+max_relax_steps = 300
 
 [scoring]
-r_broken_threshold = 4.0
+r_broken_threshold = 3.0
 r_formed_threshold = 1.5
 """
 
