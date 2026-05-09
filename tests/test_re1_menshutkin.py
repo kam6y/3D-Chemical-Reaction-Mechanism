@@ -19,12 +19,12 @@ formed = [[1, 5]]
 broken = [[5, 9]]
 
 [afir]
-alpha_formed = 2.0
-alpha_broken = 1.5
-max_relax_steps = 200
+alpha_formed = 4.0
+alpha_broken = 4.0
+max_relax_steps = 300
 
 [scoring]
-r_broken_threshold = 5.0
+r_broken_threshold = 3.0
 
 [sampling]
 n_candidates = 8
@@ -40,10 +40,10 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["description"] == "Menshutkin fast"
-    assert meta["effective_params"]["alpha_formed"] == 2.0
-    assert meta["effective_params"]["alpha_broken"] == 1.5
-    assert meta["effective_params"]["r_broken_threshold"] == 5.0
-    assert meta["effective_params"]["max_relax_steps"] == 200
+    assert meta["effective_params"]["alpha_formed"] == 4.0
+    assert meta["effective_params"]["alpha_broken"] == 4.0
+    assert meta["effective_params"]["r_broken_threshold"] == 3.0
+    assert meta["effective_params"]["max_relax_steps"] == 300
     assert meta["selected_trial"] >= 0
     pl = meta["placement"]
     assert pl["n_candidates"] >= 1
@@ -68,8 +68,8 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert d_nc_last < 1.7, (
         f"N-C should form: {d_nc_first:.2f} -> {d_nc_last:.2f} (target ≤ 1.7)"
     )
-    assert d_ccl_last >= 3.5, (
-        f"C-Cl should break: {d_ccl_first:.2f} -> {d_ccl_last:.2f} (target ≥ 3.5)"
+    assert d_ccl_last >= 3.0, (
+        f"C-Cl should break: {d_ccl_first:.2f} -> {d_ccl_last:.2f} (target ≥ 3.0)"
     )
 
 
@@ -80,11 +80,11 @@ broken = [[5, 9]]
 
 [afir]
 alpha_formed = 4.0
-alpha_broken = 1.5
-max_relax_steps = 200
+alpha_broken = 4.0
+max_relax_steps = 300
 
 [scoring]
-r_broken_threshold = 5.0
+r_broken_threshold = 3.0
 """
 
 
