@@ -13,8 +13,8 @@ formed = []
 broken = [[1, 5]]
 
 [afir]
-alpha_broken = 1.5
-max_relax_steps = 100
+alpha_broken = 2.5
+max_relax_steps = 200
 
 [scoring]
 r_broken_threshold = 6.0
@@ -61,3 +61,25 @@ def test_re3_sn1_dissoc_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
         f"C-Br should grow appreciably: {d_first:.2f} -> {d_last:.2f}"
     )
     assert d_last >= 4.5, f"final C-Br should be at least 4.5 A, got {d_last:.2f}"
+
+
+@pytest.mark.slow
+def test_re3_sn1_dissoc_min_nonbonded_distance(
+    tmp_path: Path, tmp_rxn_with_toml, assert_min_nonbonded_distance_ok,
+):
+    """Spec §6.4 safety: AFIR-driven trajectory must not produce non-bonded
+    atom pairs closer than 0.5 Å (UMA off-manifold detection).
+
+    Uses the same TOML as the end-to-end test. Atom-map 1->idx 0 (C central),
+    atom-map 5->idx 4 (Br) per examples/sn1_dissoc.rxn, so broken=[(0, 4)].
+    """
+    rxn = tmp_rxn_with_toml("sn1_dissoc", toml_body=_SN1D_FAST)
+    out = tmp_path / "sn1d_safety"
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
+    assert rc == 0
+
+    frames = read(str(out / "trajectory.xyz"), index=":")
+    # SN1 dissoc: formed=[], broken=[[1, 5]] in atom-map -> (0, 4) in 0-based.
+    assert_min_nonbonded_distance_ok(
+        frames, formed=[], broken=[(0, 4)],
+    )

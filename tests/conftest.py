@@ -157,12 +157,12 @@ def tmp_rxn_with_toml(tmp_path: Path):
     return _make
 
 
-def assert_min_nonbonded_distance_ok(
-    frames, *, formed, broken, threshold: float = 0.5
-) -> None:
-    """Assert across all `frames` no pair of atoms gets closer than
-    `threshold` (Å) — except (a) initial-bonded pairs (any pair within
-    1.1 × covalent_sum at frame 0), (b) `formed` pairs, (c) `broken` pairs.
+@pytest.fixture()
+def assert_min_nonbonded_distance_ok():
+    """Pytest fixture returning a callable that asserts across all `frames`
+    no pair of atoms gets closer than `threshold` (Å) — except (a)
+    initial-bonded pairs (any pair within 1.1 × covalent_sum at frame 0),
+    (b) `formed` pairs, (c) `broken` pairs.
 
     Used in slow integration tests as a UMA off-manifold guard.
     """
@@ -170,34 +170,38 @@ def assert_min_nonbonded_distance_ok(
 
     from reactx.covalent_radii import cordero_radii_for_atoms
 
-    if not frames:
-        return
-    first = frames[0]
-    cov = cordero_radii_for_atoms(first)
-    n = len(first)
-    initial_bonded = set()
-    pos0 = first.positions
-    for i in range(n):
-        for j in range(i + 1, n):
-            d = float(np.linalg.norm(pos0[j] - pos0[i]))
-            if d <= 1.1 * (cov[i] + cov[j]):
-                initial_bonded.add((i, j))
-    reactive = set()
-    for (i, j) in formed:
-        reactive.add((min(i, j), max(i, j)))
-    for (i, j) in broken:
-        reactive.add((min(i, j), max(i, j)))
-
-    excluded = initial_bonded | reactive
-
-    for frame_idx, frame in enumerate(frames):
-        pos = frame.positions
+    def _assert(frames, *, formed, broken, threshold: float = 0.5) -> None:
+        if not frames:
+            return
+        first = frames[0]
+        cov = cordero_radii_for_atoms(first)
+        n = len(first)
+        initial_bonded = set()
+        pos0 = first.positions
         for i in range(n):
             for j in range(i + 1, n):
-                if (i, j) in excluded:
-                    continue
-                d = float(np.linalg.norm(pos[j] - pos[i]))
-                assert d >= threshold, (
-                    f"frame {frame_idx}: non-bonded pair ({i},{j}) "
-                    f"distance {d:.3f} < {threshold} Å (UMA off-manifold?)"
-                )
+                d = float(np.linalg.norm(pos0[j] - pos0[i]))
+                if d <= 1.1 * (cov[i] + cov[j]):
+                    initial_bonded.add((i, j))
+        reactive = set()
+        for (i, j) in formed:
+            reactive.add((min(i, j), max(i, j)))
+        for (i, j) in broken:
+            reactive.add((min(i, j), max(i, j)))
+
+        excluded = initial_bonded | reactive
+
+        for frame_idx, frame in enumerate(frames):
+            pos = frame.positions
+            for i in range(n):
+                for j in range(i + 1, n):
+                    if (i, j) in excluded:
+                        continue
+                    d = float(np.linalg.norm(pos[j] - pos[i]))
+                    assert d >= threshold, (
+                        f"frame {frame_idx}: non-bonded pair ({i},{j}) "
+                        f"distance {d:.3f} < {threshold} Å "
+                        f"(UMA off-manifold?)"
+                    )
+
+    return _assert

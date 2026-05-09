@@ -3,7 +3,7 @@ formed = []
 broken = [[1, 5]]
 
 [afir]
-alpha_broken = 1.5
+alpha_broken = 2.5
 max_relax_steps = 200
 
 [scoring]
