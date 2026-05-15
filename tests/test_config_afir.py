@@ -244,6 +244,80 @@ max_relax_steps = 0
         load_config(rxn)
 
 
+def test_pre_relax_steps_default_is_30(tmp_path: Path):
+    rxn = _write(tmp_path, """
+description = "default pre_relax"
+formed = [[1, 2]]
+broken = []
+
+[afir]
+alpha_formed = 1.0
+max_relax_steps = 100
+""")
+    cfg = load_config(rxn)
+    assert cfg.afir.pre_relax_steps == 30
+
+
+def test_pre_relax_steps_accepts_positive_int(tmp_path: Path):
+    rxn = _write(tmp_path, """
+description = "explicit pre_relax"
+formed = [[1, 2]]
+broken = []
+
+[afir]
+alpha_formed = 1.0
+max_relax_steps = 100
+pre_relax_steps = 50
+""")
+    cfg = load_config(rxn)
+    assert cfg.afir.pre_relax_steps == 50
+
+
+def test_pre_relax_steps_zero_allowed(tmp_path: Path):
+    rxn = _write(tmp_path, """
+description = "opt-out pre_relax"
+formed = [[1, 2]]
+broken = []
+
+[afir]
+alpha_formed = 1.0
+max_relax_steps = 100
+pre_relax_steps = 0
+""")
+    cfg = load_config(rxn)
+    assert cfg.afir.pre_relax_steps == 0
+
+
+def test_pre_relax_steps_negative_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """
+description = "negative pre_relax"
+formed = [[1, 2]]
+broken = []
+
+[afir]
+alpha_formed = 1.0
+max_relax_steps = 100
+pre_relax_steps = -1
+""")
+    with pytest.raises(ConfigError, match="pre_relax_steps"):
+        load_config(rxn)
+
+
+def test_pre_relax_steps_non_int_rejected(tmp_path: Path):
+    rxn = _write(tmp_path, """
+description = "float pre_relax"
+formed = [[1, 2]]
+broken = []
+
+[afir]
+alpha_formed = 1.0
+max_relax_steps = 100
+pre_relax_steps = 1.5
+""")
+    with pytest.raises(ConfigError, match="pre_relax_steps"):
+        load_config(rxn)
+
+
 def test_obsolete_top_level_keys_rejected(tmp_path: Path):
     for old_key in ["k_form", "k_broken", "r_broken", "r_form"]:
         body = f"""

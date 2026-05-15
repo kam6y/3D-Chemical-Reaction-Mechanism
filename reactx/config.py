@@ -25,6 +25,7 @@ class AFIRSection:
     alpha_formed: float | tuple[float, ...]
     alpha_broken: float | tuple[float, ...]
     max_relax_steps: int
+    pre_relax_steps: int = 30
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ _TOP_LEVEL_KEYS = {"description", "formed", "broken", "afir", "scoring", "sampli
 _TOP_LEVEL_REQUIRED = {"description", "formed", "broken", "afir"}
 _OBSOLETE_TOP_LEVEL = {"restraints", "prescreen", "k_form", "k_broken",
                        "r_broken", "r_form"}
-_AFIR_KEYS = {"alpha_formed", "alpha_broken", "max_relax_steps"}
+_AFIR_KEYS = {"alpha_formed", "alpha_broken", "max_relax_steps", "pre_relax_steps"}
 _AFIR_REQUIRED = {"max_relax_steps"}
 _SCORING_KEYS = {"r_broken_threshold", "r_formed_threshold"}
 _SAMPLING_KEYS = {"n_candidates"}
@@ -128,9 +129,21 @@ def _build_afir(raw: dict, *, formed_count: int, broken_count: int,
             f"{source}: '[afir].max_relax_steps' must be a positive integer "
             f"(got {max_steps!r})"
         )
+    pre_relax_steps = raw.get("pre_relax_steps", 30)
+    if not isinstance(pre_relax_steps, int) or isinstance(pre_relax_steps, bool):
+        raise ConfigError(
+            f"{source}: '[afir].pre_relax_steps' must be a non-negative integer "
+            f"(got {pre_relax_steps!r})"
+        )
+    if pre_relax_steps < 0:
+        raise ConfigError(
+            f"{source}: '[afir].pre_relax_steps' must be a non-negative integer "
+            f"(got {pre_relax_steps!r})"
+        )
     return AFIRSection(
         alpha_formed=alpha_formed, alpha_broken=alpha_broken,
         max_relax_steps=int(max_steps),
+        pre_relax_steps=int(pre_relax_steps),
     )
 
 
