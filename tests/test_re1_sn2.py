@@ -36,6 +36,7 @@ def test_re1_sn2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     meta = json.loads((out / "meta.json").read_text())
     assert meta["description"] == "SN2 fast"
     assert meta["selected_trial"] >= 0
+    assert meta["effective_params"]["pre_relax_steps"] == 30
     pl = meta["placement"]
     assert pl["n_candidates"] >= 1
     assert pl["n_valid"] >= 1
@@ -59,7 +60,12 @@ def test_re1_sn2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
             np.linalg.norm(v_co) * np.linalg.norm(v_ccl)
         ))
         angles.append(float(np.degrees(np.arccos(np.clip(cos_t, -1.0, 1.0)))))
-    assert max(angles) >= 120.0
+    # Phase 10: pre-relax (default 30 steps) orients OH- to Walden back-side
+    # via CH3Cl ion-dipole attraction. Walden inversion ⇒ Cl-C-O ≈ 180°.
+    assert max(angles) >= 150.0, (
+        f"max Cl-C-O angle {max(angles):.2f}° below Walden threshold; "
+        f"pre-relax should orient OH- to back-side attack"
+    )
 
     d_co_first = frames[0].get_distance(c_idx, o_idx)
     d_co_last = frames[-1].get_distance(c_idx, o_idx)
