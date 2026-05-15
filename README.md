@@ -34,6 +34,7 @@ Phase 9 の SN2 実行で求核剤 OH⁻ が CH3Cl の裏側 (Walden 軸、Cl-C-
 - Stage B 開始時に FIRE optimizer を **再生成** (velocity リセット) し最適化の不連続を防ぐ。Stage A 末尾と Stage B 先頭の frame は同一 geometry で重複するが、可視化価値を優先して許容。
 - 効果: SN2 で Cl-C-O 角度 ≥ 150° の Walden inversion 配置が安定して選ばれるようになった (Phase 9: 133°, Phase 10: 159–169°)。CH3Cl の Cl δ-/C δ+ 双極子が OH⁻ を裏側に引き寄せる ion-dipole 相互作用が、placement 由来の任意な開始方向を物理的に正しい pre-reaction complex に補正する。
 - `meta.json.effective_params` に `pre_relax_steps` フィールドを追加。
+- `meta.json.trials[k].initial_latched_formed` / `initial_latched_broken` の **評価フレームが変更**: Phase 9 では placement 直後の `atoms_init`、Phase 10 では Stage A 後の `frame_after_pre_relax` (`pre_relax_steps == 0` のときは従来通り `atoms_init`) で評価される。debug 用途のフィールドだが、Phase 9 出力との直接比較時は注意。
 
 詳細仕様: `docs/superpowers/specs/2026-05-15-phase-10-pre-relax-design.md`
 

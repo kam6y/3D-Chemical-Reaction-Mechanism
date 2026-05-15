@@ -284,6 +284,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("trial %d relax failed: %s", i, exc)
+            # Relax raised before Stage A snapshot could be taken. initial_latched
+            # is evaluated on atoms_init here vs frame_after_pre_relax on the
+            # success path (line below); the field's meaning differs between
+            # branches. Failure-path trials are excluded from scoring (debug only).
             initial_latched = count_initial_latched(
                 atoms_init, formed_pairs, broken_pairs, ft, bt,
             )
@@ -298,6 +302,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             ))
             continue
 
+        # Phase 10: evaluate initial_latched on the geometry AFIR actually
+        # starts from (post pre-relax when enabled, else atoms_init).
         latch_ref_frame = final_state.get("frame_after_pre_relax", atoms_init)
         initial_latched = count_initial_latched(
             latch_ref_frame, formed_pairs, broken_pairs, ft, bt,

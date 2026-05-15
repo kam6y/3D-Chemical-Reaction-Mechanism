@@ -152,6 +152,40 @@ def test_pre_relax_positive_records_intermediate_frame():
     assert len(pre_frame.constraints) == 0
 
 
+def test_pre_relax_frames_concatenate_with_stage_b():
+    """Stage A frames must be concatenated with Stage B frames, not replaced.
+
+    Regression guard for spec §5.2: if Stage A's `opt_a.attach(_record_a, ...)`
+    is removed (or the interval changes silently), Stage A frames go missing
+    while existing single-Stage tests still pass. This test runs the same
+    system with and without pre-relax and asserts the pre-relax run produces
+    strictly more frames.
+    """
+    init_pos = [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]]
+    cs_for = lambda: [Hookean(a1=0, a2=1, rt=2.0, k=10.0)]
+
+    a_no_pre = Atoms("ArAr", positions=init_pos)
+    frames_no_pre, _, _ = relax_with_restraints(
+        a_no_pre, cs_for(), LennardJones(),
+        pre_relax_steps=0,
+        max_steps=20, fmax=1e-6, traj_stride=5,
+    )
+
+    a_with_pre = Atoms("ArAr", positions=init_pos)
+    frames_with_pre, _, state = relax_with_restraints(
+        a_with_pre, cs_for(), LennardJones(),
+        pre_relax_steps=20,
+        max_steps=20, fmax=1e-6, traj_stride=5,
+    )
+
+    assert len(frames_with_pre) > len(frames_no_pre), (
+        f"pre-relax should concatenate Stage A frames on top of Stage B; "
+        f"got with_pre={len(frames_with_pre)}, no_pre={len(frames_no_pre)}. "
+        f"Stage A _record_a attach may be missing."
+    )
+    assert "frame_after_pre_relax" in state
+
+
 def test_pre_relax_phase_does_not_apply_afir_force():
     a = Atoms("CC", positions=[[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
     c = AFIRConstraint(
