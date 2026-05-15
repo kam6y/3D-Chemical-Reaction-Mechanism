@@ -35,40 +35,13 @@ def relax_with_restraints(
 
     if pre_relax_steps > 0:
         atoms.set_constraint([])
-        frames.append(_snapshot(atoms))
-        energies.append(float(atoms.get_potential_energy()))
-
-        opt_a = FIRE(atoms, logfile=None, dt=0.05, a=0.1, maxstep=0.1, dtmax=0.2)
-
-        def _record_a():
-            frames.append(_snapshot(atoms))
-            energies.append(float(atoms.get_potential_energy()))
-
-        opt_a.attach(_record_a, interval=traj_stride)
-        opt_a.run(fmax=fmax, steps=pre_relax_steps)
-        if opt_a.nsteps % traj_stride != 0 or opt_a.nsteps == 0:
-            _record_a()
-
+        _run_stage(atoms, frames, energies,
+                   steps=pre_relax_steps, fmax=fmax, traj_stride=traj_stride)
         final_state["frame_after_pre_relax"] = _snapshot(atoms)
 
-    if restraints:
-        atoms.set_constraint(restraints)
-    else:
-        atoms.set_constraint([])
-
-    frames.append(_snapshot(atoms))
-    energies.append(float(atoms.get_potential_energy()))
-
-    opt_b = FIRE(atoms, logfile=None, dt=0.05, a=0.1, maxstep=0.1, dtmax=0.2)
-
-    def _record_b():
-        frames.append(_snapshot(atoms))
-        energies.append(float(atoms.get_potential_energy()))
-
-    opt_b.attach(_record_b, interval=traj_stride)
-    opt_b.run(fmax=fmax, steps=max_steps)
-    if opt_b.nsteps % traj_stride != 0 or opt_b.nsteps == 0:
-        _record_b()
+    atoms.set_constraint(restraints or [])
+    _run_stage(atoms, frames, energies,
+               steps=max_steps, fmax=fmax, traj_stride=traj_stride)
 
     if atoms.constraints:
         c = atoms.constraints[0]
@@ -77,6 +50,23 @@ def relax_with_restraints(
             final_state["broken_latched"] = list(c.broken_latched)
 
     return frames, energies, final_state
+
+
+def _run_stage(atoms: Atoms, frames: list[Atoms], energies: list[float], *,
+               steps: int, fmax: float, traj_stride: int) -> None:
+    frames.append(_snapshot(atoms))
+    energies.append(float(atoms.get_potential_energy()))
+
+    opt = FIRE(atoms, logfile=None, dt=0.05, a=0.1, maxstep=0.1, dtmax=0.2)
+
+    def _record():
+        frames.append(_snapshot(atoms))
+        energies.append(float(atoms.get_potential_energy()))
+
+    opt.attach(_record, interval=traj_stride)
+    opt.run(fmax=fmax, steps=steps)
+    if opt.nsteps % traj_stride != 0 or opt.nsteps == 0:
+        _record()
 
 
 def _snapshot(atoms: Atoms) -> Atoms:

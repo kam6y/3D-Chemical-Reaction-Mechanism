@@ -130,12 +130,9 @@ def _build_afir(raw: dict, *, formed_count: int, broken_count: int,
             f"(got {max_steps!r})"
         )
     pre_relax_steps = raw.get("pre_relax_steps", 30)
-    if not isinstance(pre_relax_steps, int) or isinstance(pre_relax_steps, bool):
-        raise ConfigError(
-            f"{source}: '[afir].pre_relax_steps' must be a non-negative integer "
-            f"(got {pre_relax_steps!r})"
-        )
-    if pre_relax_steps < 0:
+    if (not isinstance(pre_relax_steps, int)
+            or isinstance(pre_relax_steps, bool)
+            or pre_relax_steps < 0):
         raise ConfigError(
             f"{source}: '[afir].pre_relax_steps' must be a non-negative integer "
             f"(got {pre_relax_steps!r})"
