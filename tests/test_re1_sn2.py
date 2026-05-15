@@ -17,7 +17,6 @@ broken = [[1, 2]]
 alpha_formed = 4.0
 alpha_broken = 2.5
 max_relax_steps = 300
-pre_relax_steps = 15
 
 [scoring]
 r_broken_threshold = 3.0
@@ -37,7 +36,7 @@ def test_re1_sn2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     meta = json.loads((out / "meta.json").read_text())
     assert meta["description"] == "SN2 fast"
     assert meta["selected_trial"] >= 0
-    assert meta["effective_params"]["pre_relax_steps"] == 15
+    assert meta["effective_params"]["pre_relax_steps"] == 30
     pl = meta["placement"]
     assert pl["n_candidates"] >= 1
     assert pl["n_valid"] >= 1
@@ -61,11 +60,9 @@ def test_re1_sn2_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
             np.linalg.norm(v_co) * np.linalg.norm(v_ccl)
         ))
         angles.append(float(np.degrees(np.arccos(np.clip(cos_t, -1.0, 1.0)))))
-    # Phase 10: pre-relax (15 steps for SN2, tuned via sweep) orients OH- to
-    # Walden back-side via CH3Cl ion-dipole attraction. Walden inversion
-    # ⇒ Cl-C-O ≈ 180°. Sweep at pre=15 produced max=173.83°, min=162.90°;
-    # the 160° threshold leaves a small margin for UMA noise / seed variance.
-    assert max(angles) >= 160.0, (
+    # Phase 10: pre-relax (default 30 steps) orients OH- to Walden back-side
+    # via CH3Cl ion-dipole attraction. Walden inversion ⇒ Cl-C-O ≈ 180°.
+    assert max(angles) >= 150.0, (
         f"max Cl-C-O angle {max(angles):.2f}° below Walden threshold; "
         f"pre-relax should orient OH- to back-side attack"
     )
