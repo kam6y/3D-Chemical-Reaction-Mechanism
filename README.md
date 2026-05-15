@@ -74,7 +74,7 @@ reactx run examples/diels_alder_endo.rxn -o out/da_endo/ --backend uma --render
 
 - `out/<rxn>/trajectory.xyz` — best trial trajectory
 - `out/<rxn>/energies.json` — best trial エネルギー列
-- `out/<rxn>/meta.json` — trial 全件のスコア、placement 結果、wall_clock_seconds、neb_refined フラグ、Phase 9 で追加された `formed_thresholds` / `broken_thresholds` / `product_distance_residual` / `formed_latch_count` / `broken_latch_count` / `initial_latched_formed` / `initial_latched_broken`
+- `out/<rxn>/meta.json` — trial 全件のスコア、placement 結果、wall_clock_seconds、neb_refined フラグ、Phase 9 で追加された `formed_thresholds` / `broken_thresholds` / `product_distance_residual` / `formed_latch_count` / `broken_latch_count` / `initial_latched_formed` / `initial_latched_broken`、Phase 10 で `effective_params.pre_relax_steps`
 - `out/<rxn>/scene.blend` — Blender シーン
 
 ## Per-reaction `.rxn.toml` config
@@ -99,16 +99,18 @@ max_relax_steps = 300
 r_broken_threshold = 3.0
 ```
 
-| `.rxn` | description | formed (map) | broken (map) | alpha_formed | alpha_broken | max_relax_steps | r_broken_threshold | r_formed_threshold | n_candidates |
-|---|---|---|---|---|---|---|---|---|---|
-| sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 4.0 | 2.5 | 300 | 3.0 | (default) | 64 |
-| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 2.0 | 5.0 | 300 | 3.0 | 1.5 | 64 |
-| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 4.0 | 4.0 | 300 | 3.0 | (default) | 64 |
-| e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 2.0 | `[1.5, 2.0]` | 200 | `[3.0, 4.0]` | (default) | 64 |
-| sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | (omitted) | 2.5 | 200 | 6.0 | (n/a) | **1** |
-| sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.5 | (omitted) | 200 | (n/a) | (default) | 64 |
-| diels_alder_simple.rxn | DA: butadiene + ethylene | `[[1,5],[4,6]]` | `[]` | `[2.5, 2.5]` | (omitted) | 200 | (n/a) | (default) | 64 |
-| diels_alder_endo.rxn | DA endo: CP + MA | `[[1,5],[4,6]]` | `[]` | `[2.5, 2.5]` | (omitted) | 250 | (n/a) | (default) | **16** |
+| `.rxn` | description | formed (map) | broken (map) | alpha_formed | alpha_broken | max_relax_steps | pre_relax_steps | r_broken_threshold | r_formed_threshold | n_candidates |
+|---|---|---|---|---|---|---|---|---|---|---|
+| sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 4.0 | 2.5 | 300 | 30 | 3.0 | (default) | 64 |
+| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 2.0 | 5.0 | 300 | **0** | 3.0 | 1.5 | 64 |
+| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 4.0 | 4.0 | 300 | 30 | 3.0 | (default) | 64 |
+| e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 2.0 | `[1.5, 2.0]` | 200 | 30 | `[3.0, 4.0]` | (default) | 64 |
+| sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | (omitted) | 2.5 | 200 | 30 | 6.0 | (n/a) | **1** |
+| sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.5 | (omitted) | 200 | 30 | (n/a) | (default) | 64 |
+| diels_alder_simple.rxn | DA: butadiene + ethylene | `[[1,5],[4,6]]` | `[]` | `[2.5, 2.5]` | (omitted) | 200 | 30 | (n/a) | (default) | 64 |
+| diels_alder_endo.rxn | DA endo: CP + MA | `[[1,5],[4,6]]` | `[]` | `[2.5, 2.5]` | (omitted) | 250 | 30 | (n/a) | (default) | **16** |
+
+`pre_relax_steps` の値 30 は default なので各 TOML には書かれていない (省略 = 30)。Phase 10 で **proton_transfer のみ `pre_relax_steps = 0` を明示**して opt-out している (HCl + NH3 → Cl⁻ + NH4⁺ は gas phase で reversible、pre-relax で start geometry が product 近くまで進むと AFIR 早期 latch 後の `max_relax_steps` 残量で UMA が proton を Cl 側に戻してしまい `reached_product=False` になるため)。
 
 `alpha_formed` / `alpha_broken` は scalar で全 pair 同値、list で per-pair 指定 (list の長さは対応する `formed` / `broken` の長さと一致を要求)。**Phase 9 では対応する pair set が空 (`formed = []` または `broken = []`) の場合、その α は省略可** (例: `sn1_dissoc` は `alpha_formed` 不要、`sn1_recomb` / DA は `alpha_broken` 不要)。空でない pair set に対して `α = 0` を指定するのは validation で禁止される (force ゼロを表現したい場合は pair から削除)。
 
@@ -142,7 +144,7 @@ reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
    → meta.json で `placement_kind == "multi_anchor"`, `orientation` に "achiral" (ethylene C2 対称で縮約) が出ることを確認、最終フレームで C1-C5 ≤ 1.8 Å、C4-C6 ≤ 1.8 Å を視認
 8. `reactx run examples/diels_alder_endo.rxn -o out/da_endo/ --backend uma --render`
    → meta.json で endo, exo 両 trial が出力、selected_trial の orientation を確認 (UMA の挙動次第で endo/exo どちらか) + 6-membered ring + bicyclic 構造の形成を視認
-9. `pytest -m slow` で 8 反応すべての統合テストが pass (E2 の strict `reached_product` は現状 xfail、Phase 10 で再 tune 予定)
+9. `pytest -m slow` で 8 反応すべての統合テストが pass (E2 の strict `reached_product` は現状 xfail、Phase 10 で再 tune 予定)。Phase 10 では SN2 で Walden 角度 ≥ 150° の追加 assertion が pass、PT は `pre_relax_steps = 0` で opt-out して旧挙動を維持
 
 ## レンダリング: 原子球サイズと結合棒
 
