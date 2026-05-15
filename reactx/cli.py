@@ -208,10 +208,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     log.info(
         "description=%s effective: alpha_formed=%s alpha_broken=%s "
-        "max_relax_steps=%d",
+        "max_relax_steps=%d pre_relax_steps=%d",
         cfg.description,
         cfg.afir.alpha_formed, cfg.afir.alpha_broken,
-        cfg.afir.max_relax_steps,
+        cfg.afir.max_relax_steps, cfg.afir.pre_relax_steps,
     )
 
     model_kwargs = {"model_name": args.model} if args.backend == "uma" else {}
@@ -268,10 +268,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
             atoms_init, broken_pairs, cfg.scoring.r_broken_threshold,
         )
 
-        initial_latched = count_initial_latched(
-            atoms_init, formed_pairs, broken_pairs, ft, bt,
-        )
-
         afir_cs = build_afir_constraint(
             atoms_init, formed_pairs, broken_pairs,
             alpha_formed=af, alpha_broken=ab,
@@ -281,12 +277,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
         try:
             frames, energies, final_state = relax_with_restraints(
                 atoms_init, afir_cs, calc,
+                pre_relax_steps=cfg.afir.pre_relax_steps,
                 max_steps=cfg.afir.max_relax_steps,
                 fmax=args.relax_fmax,
                 traj_stride=args.traj_stride,
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("trial %d relax failed: %s", i, exc)
+            initial_latched = count_initial_latched(
+                atoms_init, formed_pairs, broken_pairs, ft, bt,
+            )
             trials.append(TrialResult(
                 trial_idx=i, direction=t.direction, frames=[], energies=[],
                 reached_product=False, peak_energy=float("inf"), n_steps=0,
@@ -297,6 +297,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 initial_latched_broken=initial_latched["broken"],
             ))
             continue
+
+        latch_ref_frame = final_state.get("frame_after_pre_relax", atoms_init)
+        initial_latched = count_initial_latched(
+            latch_ref_frame, formed_pairs, broken_pairs, ft, bt,
+        )
 
         ok = reached_product(frames[-1], formed_pairs, broken_pairs, ft, bt)
         residual = product_distance_residual(
@@ -467,6 +472,7 @@ def _write_outputs_and_exit(
                 "alpha_formed": _scalar_or_list(cfg.afir.alpha_formed),
                 "alpha_broken": _scalar_or_list(cfg.afir.alpha_broken),
                 "max_relax_steps": cfg.afir.max_relax_steps,
+                "pre_relax_steps": cfg.afir.pre_relax_steps,
                 "r_broken_threshold": (
                     _scalar_or_list(cfg.scoring.r_broken_threshold)
                     if cfg.scoring.r_broken_threshold is not None else None

@@ -141,6 +141,7 @@ def test_meta_json_includes_description_and_effective_params(tmp_path: Path):
         "alpha_formed": 2.0,
         "alpha_broken": 2.0,
         "max_relax_steps": 200,
+        "pre_relax_steps": 30,
         "r_broken_threshold": 5.0,
         "r_formed_threshold": None,
         "n_candidates": 64,

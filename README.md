@@ -25,6 +25,19 @@ Phase 8 の経験的 `Hookean` (引力) + `PullApart` (斥力) 力場を **per-p
 - `meta.json.trials[k]` に新フィールド: `formed_thresholds`, `broken_thresholds`, `product_distance_residual` (least-bad fallback の tiebreaker), `formed_latch_count` / `broken_latch_count`, `initial_latched_formed` / `initial_latched_broken` (debug 情報)。
 - `reached_product` (最終 frame で全 pair が threshold 達成) を **唯一の成功判定** とし、latch state は debug 情報に降格 (latch ON でも UMA force が pair を threshold の外に押し戻して `reached_product=False` になりうるため)。
 
+## Phase 10 changes
+
+Phase 9 の SN2 実行で求核剤 OH⁻ が CH3Cl の裏側 (Walden 軸、Cl-C-O = 180°) ではなく 133° という不自然な角度から接近する path が選ばれていた問題を、**「AFIR 力を加える前に短時間 unbiased FIRE 緩和を挟む」** 物理的補正で解決した:
+
+- `relax_with_restraints` を **2-stage 化**: Stage A (`pre_relax_steps` 回 constraints OFF で FIRE 緩和) → Stage B (既存の AFIR + sticky latch 緩和)。Stage A の最終 geometry は `final_state["frame_after_pre_relax"]` に保存され、`count_initial_latched` の評価基準として使われる。
+- `[afir]` schema に `pre_relax_steps: int` を追加。**default は 30**。`0` で機能オフ (個別反応で副作用が出た場合の opt-out 用)。
+- Stage B 開始時に FIRE optimizer を **再生成** (velocity リセット) し最適化の不連続を防ぐ。Stage A 末尾と Stage B 先頭の frame は同一 geometry で重複するが、可視化価値を優先して許容。
+- 効果: SN2 で Cl-C-O 角度 ≥ 150° の Walden inversion 配置が安定して選ばれるようになった (Phase 9: 133°, Phase 10: 159–169°)。CH3Cl の Cl δ-/C δ+ 双極子が OH⁻ を裏側に引き寄せる ion-dipole 相互作用が、placement 由来の任意な開始方向を物理的に正しい pre-reaction complex に補正する。
+- `meta.json.effective_params` に `pre_relax_steps` フィールドを追加。
+- `meta.json.trials[k].initial_latched_formed` / `initial_latched_broken` の **評価フレームが変更**: Phase 9 では placement 直後の `atoms_init`、Phase 10 では Stage A 後の `frame_after_pre_relax` (`pre_relax_steps == 0` のときは従来通り `atoms_init`) で評価される。debug 用途のフィールドだが、Phase 9 出力との直接比較時は注意。
+
+詳細仕様: `docs/superpowers/specs/2026-05-15-phase-10-pre-relax-design.md`
+
 ## セットアップ
 
 ```bash
@@ -62,12 +75,14 @@ reactx run examples/diels_alder_endo.rxn -o out/da_endo/ --backend uma --render
 
 - `out/<rxn>/trajectory.xyz` — best trial trajectory
 - `out/<rxn>/energies.json` — best trial エネルギー列
-- `out/<rxn>/meta.json` — trial 全件のスコア、placement 結果、wall_clock_seconds、neb_refined フラグ、Phase 9 で追加された `formed_thresholds` / `broken_thresholds` / `product_distance_residual` / `formed_latch_count` / `broken_latch_count` / `initial_latched_formed` / `initial_latched_broken`
+- `out/<rxn>/meta.json` — trial 全件のスコア、placement 結果、wall_clock_seconds、neb_refined フラグ、Phase 9 で追加された `formed_thresholds` / `broken_thresholds` / `product_distance_residual` / `formed_latch_count` / `broken_latch_count` / `initial_latched_formed` / `initial_latched_broken`、Phase 10 で `effective_params.pre_relax_steps`
 - `out/<rxn>/scene.blend` — Blender シーン
 
 ## Per-reaction `.rxn.toml` config
 
-各 `examples/<name>.rxn` には同階層に同名 stem の sidecar TOML (`<name>.rxn.toml`) を **必須で** 配置する。CLI は `<rxn_path>.toml` を機械的にロードし、結合変化情報 (`formed` / `broken`, atom-map 番号) と AFIR ハイパラ (`alpha_formed` / `alpha_broken` / `max_relax_steps`) と scoring 閾値 (`r_broken_threshold` / `r_formed_threshold`) と sampling 設定をすべてここから取る。
+各 `examples/<name>.rxn` には同階層に同名 stem の sidecar TOML (`<name>.rxn.toml`) を **必須で** 配置する。CLI は `<rxn_path>.toml` を機械的にロードし、結合変化情報 (`formed` / `broken`, atom-map 番号) と AFIR ハイパラ (`alpha_formed` / `alpha_broken` / `max_relax_steps` / `pre_relax_steps`) と scoring 閾値 (`r_broken_threshold` / `r_formed_threshold`) と sampling 設定をすべてここから取る。
+
+`pre_relax_steps` は省略可 (default 30、Phase 10 で追加)。0 を指定すると pre-relax を skip して Phase 9 互換動作になる。
 
 最小例 (`examples/sn2.rxn.toml`):
 
@@ -85,16 +100,18 @@ max_relax_steps = 300
 r_broken_threshold = 3.0
 ```
 
-| `.rxn` | description | formed (map) | broken (map) | alpha_formed | alpha_broken | max_relax_steps | r_broken_threshold | r_formed_threshold | n_candidates |
-|---|---|---|---|---|---|---|---|---|---|
-| sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 4.0 | 2.5 | 300 | 3.0 | (default) | 64 |
-| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 2.0 | 5.0 | 300 | 3.0 | 1.5 | 64 |
-| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 4.0 | 4.0 | 300 | 3.0 | (default) | 64 |
-| e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 2.0 | `[1.5, 2.0]` | 200 | `[3.0, 4.0]` | (default) | 64 |
-| sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | (omitted) | 2.5 | 200 | 6.0 | (n/a) | **1** |
-| sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.5 | (omitted) | 200 | (n/a) | (default) | 64 |
-| diels_alder_simple.rxn | DA: butadiene + ethylene | `[[1,5],[4,6]]` | `[]` | `[2.5, 2.5]` | (omitted) | 200 | (n/a) | (default) | 64 |
-| diels_alder_endo.rxn | DA endo: CP + MA | `[[1,5],[4,6]]` | `[]` | `[2.5, 2.5]` | (omitted) | 250 | (n/a) | (default) | **16** |
+| `.rxn` | description | formed (map) | broken (map) | alpha_formed | alpha_broken | max_relax_steps | pre_relax_steps | r_broken_threshold | r_formed_threshold | n_candidates |
+|---|---|---|---|---|---|---|---|---|---|---|
+| sn2.rxn | SN2 anion (`O⁻ + CH₃Cl`) | `[[1,3]]` | `[[1,2]]` | 4.0 | 2.5 | 300 | 30 | 3.0 | (default) | 64 |
+| proton_transfer.rxn | Proton transfer (`HCl + NH₃`) | `[[1,3]]` | `[[1,2]]` | 2.0 | 5.0 | 300 | **0** | 3.0 | 1.5 | 64 |
+| menshutkin.rxn | Menshutkin (`NH₃ + CH₃Cl`) | `[[1,5]]` | `[[5,9]]` | 4.0 | 4.0 | 300 | 30 | 3.0 | (default) | 64 |
+| e2.rxn | E2 elimination | `[[4,5]]` | `[[2,5],[1,3]]` | 2.0 | `[1.5, 2.0]` | 200 | 30 | `[3.0, 4.0]` | (default) | 64 |
+| sn1_dissoc.rxn | SN1 step 1 解離 | `[]` | `[[1,5]]` | (omitted) | 2.5 | 200 | 30 | 6.0 | (n/a) | **1** |
+| sn1_recomb.rxn | SN1 step 2 recombination | `[[1,5]]` | `[]` | 1.5 | (omitted) | 200 | 30 | (n/a) | (default) | 64 |
+| diels_alder_simple.rxn | DA: butadiene + ethylene | `[[1,5],[4,6]]` | `[]` | `[2.5, 2.5]` | (omitted) | 200 | 30 | (n/a) | (default) | 64 |
+| diels_alder_endo.rxn | DA endo: CP + MA | `[[1,5],[4,6]]` | `[]` | `[2.5, 2.5]` | (omitted) | 250 | 30 | (n/a) | (default) | **16** |
+
+`pre_relax_steps` の値 30 は default なので各 TOML には書かれていない (省略 = 30)。Phase 10 で **proton_transfer のみ `pre_relax_steps = 0` を明示**して opt-out している (HCl + NH3 → Cl⁻ + NH4⁺ は gas phase で reversible、pre-relax で start geometry が product 近くまで進むと AFIR 早期 latch 後の `max_relax_steps` 残量で UMA が proton を Cl 側に戻してしまい `reached_product=False` になるため)。
 
 `alpha_formed` / `alpha_broken` は scalar で全 pair 同値、list で per-pair 指定 (list の長さは対応する `formed` / `broken` の長さと一致を要求)。**Phase 9 では対応する pair set が空 (`formed = []` または `broken = []`) の場合、その α は省略可** (例: `sn1_dissoc` は `alpha_formed` 不要、`sn1_recomb` / DA は `alpha_broken` 不要)。空でない pair set に対して `α = 0` を指定するのは validation で禁止される (force ゼロを表現したい場合は pair から削除)。
 
@@ -128,7 +145,7 @@ reactx run examples/menshutkin.rxn -o out/men/ --backend uma --render
    → meta.json で `placement_kind == "multi_anchor"`, `orientation` に "achiral" (ethylene C2 対称で縮約) が出ることを確認、最終フレームで C1-C5 ≤ 1.8 Å、C4-C6 ≤ 1.8 Å を視認
 8. `reactx run examples/diels_alder_endo.rxn -o out/da_endo/ --backend uma --render`
    → meta.json で endo, exo 両 trial が出力、selected_trial の orientation を確認 (UMA の挙動次第で endo/exo どちらか) + 6-membered ring + bicyclic 構造の形成を視認
-9. `pytest -m slow` で 8 反応すべての統合テストが pass (E2 の strict `reached_product` は現状 xfail、Phase 10 で再 tune 予定)
+9. `pytest -m slow` で 8 反応すべての統合テストが pass (E2 の strict `reached_product` は現状 xfail、Phase 10 で再 tune 予定)。Phase 10 では SN2 で Walden 角度 ≥ 150° の追加 assertion が pass、PT は `pre_relax_steps = 0` で opt-out して旧挙動を維持
 
 ## レンダリング: 原子球サイズと結合棒
 
