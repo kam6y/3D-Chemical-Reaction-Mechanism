@@ -6,6 +6,13 @@ broken = [[1, 2]]
 alpha_formed = 4.0
 alpha_broken = 2.5
 max_relax_steps = 300
+# Phase 10: pre_relax_steps=15 was selected by sweep over {0,15,30,60,100,200}.
+# 15 gave the highest Walden TS angle (173.83° vs 173.62° at 30, 172.73° at
+# 100). More steps drift slightly off-axis as secondary relax modes set in
+# (methyl distortion, internal rearrangement). 15 is the sweet spot:
+# enough for the CH3Cl dipole to orient OH-, not so many that the Walden
+# axis is perturbed.
+pre_relax_steps = 15
 
 [scoring]
 r_broken_threshold = 3.0
