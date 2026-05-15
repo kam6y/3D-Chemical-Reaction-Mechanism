@@ -6,6 +6,12 @@ broken = [[1, 2]]
 alpha_formed = 2.0
 alpha_broken = 5.0
 max_relax_steps = 300
+# Phase 10: opt out of pre-relax. HCl + NH3 -> Cl- + NH4+ is reversible
+# in gas phase; pre-relax brings the starting geometry closer to product,
+# AFIR latches early, and the long post-latch remainder of max_relax_steps
+# lets unbiased UMA pull the proton back to Cl. Phase 9 behavior is restored
+# by skipping Stage A.
+pre_relax_steps = 0
 
 [scoring]
 r_broken_threshold = 3.0

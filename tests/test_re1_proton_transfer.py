@@ -16,6 +16,7 @@ broken = [[1, 2]]
 alpha_formed = 2.0
 alpha_broken = 5.0
 max_relax_steps = 300
+pre_relax_steps = 0
 
 [scoring]
 r_broken_threshold = 3.0
@@ -73,6 +74,7 @@ broken = [[1, 2]]
 alpha_formed = 2.0
 alpha_broken = 5.0
 max_relax_steps = 300
+pre_relax_steps = 0
 
 [scoring]
 r_broken_threshold = 3.0
