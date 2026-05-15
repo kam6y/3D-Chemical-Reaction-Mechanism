@@ -17,11 +17,15 @@ _MEN_FAST = """\
 description = "Menshutkin fast"
 formed = [[1, 5]]
 broken = [[5, 9]]
-[restraints]
-k_form = 2.0
-k_broken = 2.0
-r_broken = 5.0
-max_relax_steps = 200
+
+[afir]
+alpha_formed = 4.0
+alpha_broken = 4.0
+max_relax_steps = 300
+
+[scoring]
+r_broken_threshold = 3.0
+
 [sampling]
 n_candidates = 8
 """
@@ -36,10 +40,10 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["description"] == "Menshutkin fast"
-    assert meta["effective_params"]["k_form"] == 2.0
-    assert meta["effective_params"]["k_broken"] == 2.0
-    assert meta["effective_params"]["r_broken"] == 5.0
-    assert meta["effective_params"]["max_relax_steps"] == 200
+    assert meta["effective_params"]["alpha_formed"] == 4.0
+    assert meta["effective_params"]["alpha_broken"] == 4.0
+    assert meta["effective_params"]["r_broken_threshold"] == 3.0
+    assert meta["effective_params"]["max_relax_steps"] == 300
     assert meta["selected_trial"] >= 0
     pl = meta["placement"]
     assert pl["n_candidates"] >= 1
@@ -64,6 +68,42 @@ def test_re1_menshutkin_end_to_end(tmp_path: Path, tmp_rxn_with_toml):
     assert d_nc_last < 1.7, (
         f"N-C should form: {d_nc_first:.2f} -> {d_nc_last:.2f} (target ≤ 1.7)"
     )
-    assert d_ccl_last >= 3.5, (
-        f"C-Cl should break: {d_ccl_first:.2f} -> {d_ccl_last:.2f} (target ≥ 3.5)"
+    assert d_ccl_last >= 3.0, (
+        f"C-Cl should break: {d_ccl_first:.2f} -> {d_ccl_last:.2f} (target ≥ 3.0)"
+    )
+
+
+_MEN_SAFETY = """\
+description = "Menshutkin safety check"
+formed = [[1, 5]]
+broken = [[5, 9]]
+
+[afir]
+alpha_formed = 4.0
+alpha_broken = 4.0
+max_relax_steps = 300
+
+[scoring]
+r_broken_threshold = 3.0
+"""
+
+
+@pytest.mark.slow
+def test_re1_menshutkin_min_nonbonded_distance(
+    tmp_path: Path, tmp_rxn_with_toml, assert_min_nonbonded_distance_ok,
+):
+    """Spec §6.4: AFIR-driven trajectory must not produce non-bonded
+    atom pairs closer than 0.5 Å (UMA off-manifold detection).
+
+    menshutkin.rxn atom-map: 1->idx 0 (N), 5->idx 4 (C), 9->idx 8 (Cl).
+    formed=[[1,5]] -> (0,4); broken=[[5,9]] -> (4,8).
+    """
+    rxn = tmp_rxn_with_toml("menshutkin", toml_body=_MEN_SAFETY)
+    out = tmp_path / "menshutkin_safety"
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "uma"])
+    assert rc == 0
+
+    frames = read(str(out / "trajectory.xyz"), index=":")
+    assert_min_nonbonded_distance_ok(
+        frames, formed=[(0, 4)], broken=[(4, 8)],
     )

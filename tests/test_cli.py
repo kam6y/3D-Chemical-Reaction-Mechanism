@@ -11,9 +11,10 @@ import pytest
 
 from reactx.cli import _write_outputs_and_exit, build_parser, main
 from reactx.config import (
+    AFIRSection,
     ReactionConfig,
-    RestraintConfig,
     SamplingConfig,
+    ScoringSection,
 )
 from reactx.placement import PlacementResult, PlacementTrial
 from reactx.scoring import TrialResult
@@ -24,9 +25,14 @@ def _sample_cfg() -> ReactionConfig:
         description="sample",
         formed=((1, 2),),
         broken=((1, 3),),
-        restraints=RestraintConfig(
-            k_form=2.0, k_broken=2.0, r_broken=5.0,
-            max_relax_steps=200, r_form=None,
+        afir=AFIRSection(
+            alpha_formed=2.0,
+            alpha_broken=2.0,
+            max_relax_steps=200,
+        ),
+        scoring=ScoringSection(
+            r_broken_threshold=5.0,
+            r_formed_threshold=None,
         ),
         sampling=SamplingConfig(),
     )
@@ -42,6 +48,43 @@ def _sample_placement() -> PlacementResult:
         n_candidates=64,
         n_blocked=63,
         blocked_reasons=[None] + ["angle_shadow:atom_index=0"] * 63,
+    )
+
+
+def _trial(
+    trial_idx: int = 0,
+    direction=None,
+    *,
+    reached_product: bool = True,
+    peak_energy: float = 2.0,
+    n_steps: int = 2,
+    formed_thresholds=None,
+    broken_thresholds=None,
+    energies=None,
+) -> TrialResult:
+    if direction is None:
+        direction = np.array([0.0, 0.0, 1.0])
+    if formed_thresholds is None:
+        formed_thresholds = [1.6]
+    if broken_thresholds is None:
+        broken_thresholds = [4.0]
+    if energies is None:
+        energies = [1.0, 2.0]
+    return TrialResult(
+        trial_idx=trial_idx,
+        direction=direction,
+        frames=[],
+        energies=energies,
+        reached_product=reached_product,
+        peak_energy=peak_energy,
+        n_steps=n_steps,
+        formed_thresholds=formed_thresholds,
+        broken_thresholds=broken_thresholds,
+        product_distance_residual=0.0,
+        formed_latch_count=1,
+        broken_latch_count=1,
+        initial_latched_formed=0,
+        initial_latched_broken=0,
     )
 
 
@@ -83,26 +126,23 @@ def test_neb_refine_flag():
 def test_meta_json_includes_description_and_effective_params(tmp_path: Path):
     args = argparse.Namespace(backend="lj", output=tmp_path)
     cfg = _sample_cfg()
-    r_form_targets = [1.47]
-    trials = [TrialResult(
-        trial_idx=0, direction=np.array([0.0, 0.0, 1.0]),
-        frames=[], energies=[1.0, 2.0],
-        reached_product=True, peak_energy=2.0, n_steps=2,
-    )]
+    trials = [_trial()]
     with patch("reactx.cli.score_trials", return_value=trials[0]):
         rc = _write_outputs_and_exit(
             args, trials, t_start=0.0,
             neb_refined=False, rc=0,
-            cfg=cfg, r_form_targets=r_form_targets, placement=None,
+            cfg=cfg, placement=None,
         )
     assert rc == 0
     meta = json.loads((tmp_path / "meta.json").read_text())
     assert meta["description"] == "sample"
     assert "reaction_type" not in meta
     assert meta["effective_params"] == {
-        "k_form": 2.0, "k_broken": 2.0,
-        "r_broken": 5.0, "max_relax_steps": 200,
-        "r_form_targets": [1.47],
+        "alpha_formed": 2.0,
+        "alpha_broken": 2.0,
+        "max_relax_steps": 200,
+        "r_broken_threshold": 5.0,
+        "r_formed_threshold": None,
         "n_candidates": 64,
     }
 
@@ -111,16 +151,12 @@ def test_meta_json_placement_block(tmp_path: Path):
     args = argparse.Namespace(backend="lj", output=tmp_path)
     cfg = _sample_cfg()
     placement = _sample_placement()
-    trials = [TrialResult(
-        trial_idx=0, direction=np.array([0.0, 0.0, 1.0]),
-        frames=[], energies=[1.0, 2.0],
-        reached_product=True, peak_energy=2.0, n_steps=2,
-    )]
+    trials = [_trial()]
     with patch("reactx.cli.score_trials", return_value=trials[0]):
         rc = _write_outputs_and_exit(
             args, trials, t_start=0.0,
             neb_refined=False, rc=0,
-            cfg=cfg, r_form_targets=[1.47], placement=placement,
+            cfg=cfg, placement=placement,
         )
     assert rc == 0
     meta = json.loads((tmp_path / "meta.json").read_text())
@@ -136,16 +172,12 @@ def test_meta_json_placement_block(tmp_path: Path):
 def test_meta_json_trials_have_direction_field(tmp_path: Path):
     args = argparse.Namespace(backend="lj", output=tmp_path)
     cfg = _sample_cfg()
-    trials = [TrialResult(
-        trial_idx=0, direction=np.array([0.5, -0.5, 0.7071]),
-        frames=[], energies=[1.0, 2.0],
-        reached_product=True, peak_energy=2.0, n_steps=2,
-    )]
+    trials = [_trial(direction=np.array([0.5, -0.5, 0.7071]))]
     with patch("reactx.cli.score_trials", return_value=trials[0]):
         rc = _write_outputs_and_exit(
             args, trials, t_start=0.0,
             neb_refined=False, rc=0,
-            cfg=cfg, r_form_targets=[1.47], placement=_sample_placement(),
+            cfg=cfg, placement=_sample_placement(),
         )
     assert rc == 0
     meta = json.loads((tmp_path / "meta.json").read_text())
@@ -161,7 +193,7 @@ def test_meta_json_when_cfg_missing_writes_null_effective(tmp_path: Path):
     rc = _write_outputs_and_exit(
         args, trials=[], t_start=0.0,
         neb_refined=False, rc=1,
-        cfg=None, r_form_targets=None, placement=None,
+        cfg=None, placement=None,
     )
     assert rc == 1
     meta = json.loads((tmp_path / "meta.json").read_text())
@@ -175,14 +207,18 @@ def test_meta_json_when_cfg_missing_writes_null_effective(tmp_path: Path):
 def test_meta_includes_per_bond_lists_when_toml_uses_lists(tmp_path, tmp_rxn_with_toml):
     """TOML で list 指定したら meta.json も list を保持する。"""
     body = """\
-description = "sn2 with list k_form"
+description = "sn2 with list alpha_formed"
 formed = [[1, 3]]
 broken = [[1, 2]]
-[restraints]
-k_form = [0.5]
-k_broken = 1.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = [0.5]
+alpha_broken = 1.0
 max_relax_steps = 5
+
+[scoring]
+r_broken_threshold = 4.0
+
 [sampling]
 n_candidates = 2
 """
@@ -193,9 +229,9 @@ n_candidates = 2
     assert meta_path.exists()
     meta = json.loads(meta_path.read_text())
     ep = meta["effective_params"]
-    assert ep["k_form"] == [0.5]   # list passes through
-    assert ep["k_broken"] == 1.0   # scalar stays scalar
-    assert ep["r_broken"] == 4.0   # scalar stays scalar
+    assert ep["alpha_formed"] == [0.5]   # list passes through
+    assert ep["alpha_broken"] == 1.0     # scalar stays scalar
+    assert ep["r_broken_threshold"] == 4.0
 
 
 def test_meta_includes_placement_kind_and_orientation_phase_7_compat(tmp_path, tmp_rxn_with_toml):
@@ -204,11 +240,15 @@ def test_meta_includes_placement_kind_and_orientation_phase_7_compat(tmp_path, t
 description = "sn2 quick"
 formed = [[1, 3]]
 broken = [[1, 2]]
-[restraints]
-k_form = 0.5
-k_broken = 1.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = 0.5
+alpha_broken = 1.0
 max_relax_steps = 5
+
+[scoring]
+r_broken_threshold = 4.0
+
 [sampling]
 n_candidates = 2
 """

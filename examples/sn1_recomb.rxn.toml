@@ -1,9 +1,7 @@
-description = "SN1 step 2 recombination: tBu+ + Cl- -> (CH3)3CCl"
+description = "SN1 step 2 recombination: tBu+ + Cl- -> tBuCl"
 formed = [[1, 5]]
 broken = []
 
-[restraints]
-k_form = 1.0
-k_broken = 0.0
-r_broken = 4.0
+[afir]
+alpha_formed = 1.5
 max_relax_steps = 200

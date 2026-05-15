@@ -6,11 +6,15 @@ _E2_TOML = """\
 description = "e2 fast"
 formed = [[4, 5]]
 broken = [[2, 5], [1, 3]]
-[restraints]
-k_form = 1.0
-k_broken = 1.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = 1.0
+alpha_broken = [1.0, 1.0]
 max_relax_steps = 5
+
+[scoring]
+r_broken_threshold = [4.0, 4.0]
+
 [sampling]
 n_candidates = 1
 """
@@ -19,11 +23,11 @@ _SN1_RECOMB_TOML = """\
 description = "sn1_recomb fast"
 formed = [[1, 5]]
 broken = []
-[restraints]
-k_form = 1.0
-k_broken = 0.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = 1.0
 max_relax_steps = 5
+
 [sampling]
 n_candidates = 1
 """
@@ -32,11 +36,15 @@ _SN2_TOML = """\
 description = "sn2 fast"
 formed = [[1, 3]]
 broken = [[1, 2]]
-[restraints]
-k_form = 0.5
-k_broken = 1.0
-r_broken = 4.0
+
+[afir]
+alpha_formed = 0.5
+alpha_broken = 1.0
 max_relax_steps = 5
+
+[scoring]
+r_broken_threshold = 4.0
+
 [sampling]
 n_candidates = 8
 """

@@ -664,7 +664,7 @@ def valid_placements(
             raise RuntimeError(
                 f"anchor pair (A1={bridges[0][0]}, A2={bridges[1][0]}) has no valid "
                 f"placement direction (all {n_candidates} candidates blocked); "
-                f"check substrate geometry / r_form / d_min_ceiling"
+                f"check substrate geometry / r_formed_threshold / d_min_ceiling"
             )
         if len(survivors) < max(1, n_candidates // 8):
             log.warning(
