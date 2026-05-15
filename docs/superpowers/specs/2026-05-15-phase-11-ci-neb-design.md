@@ -17,6 +17,10 @@
 
 ユーザー指摘の核心: **「endpoint は .rxn ファイルで与えられている。それより NEB 両端の構造を事前に十分緩和することの方が大切」**。Phase 11 の精度は endpoint relax の収束品質で決まる。
 
+### 1.1 `.rxn` の 2D 座標は使わない
+
+本パイプラインは `.rxn` ファイルから取り出すのは **connectivity (bond list, bond order)・atom map number・元素** の 3 点のみで、`.rxn` 内の 2D 座標は無視する。3D 座標は `embed_fragments_to_positions` が **ETKDG + MMFF94** で fragment ごとに新規生成し、fragment 間相対配置は `simple_placement`、最終的な精密 minimum は `endpoint_relax` (UMA) が担う。したがって `examples/*.rxn` の座標が雑でも結果に影響しない (Phase 9/10 と同様)。
+
 ## 2. Non-goals
 
 - **複数 trial / 多候補 sampling**: 1 反応につき R / P endpoint は 1 通り。Fibonacci sphere / blocking / endo-exo 2 trial 等は全廃。endo/exo を比較したい場合は別 `.rxn` ファイルを用意する (`diels_alder_endo.rxn` / `diels_alder_exo.rxn` のように)。
