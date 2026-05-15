@@ -114,3 +114,60 @@ def test_snapshot_strips_constraint():
     )
     for f in frames:
         assert len(f.constraints) == 0
+
+
+# Phase 10: pre-relax (unbiased Stage A before AFIR Stage B)
+
+def test_pre_relax_zero_omits_state_key():
+    a = Atoms("CC", positions=[[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+    c = AFIRConstraint(
+        formed=[(0, 1)], broken=[],
+        alpha_formed=[0.5], alpha_broken=[],
+        formed_thresholds=[1.5], broken_thresholds=[],
+    )
+    _, _, state = relax_with_restraints(
+        a, [c], LennardJones(),
+        pre_relax_steps=0,
+        max_steps=10, fmax=0.5, traj_stride=2,
+    )
+    assert "frame_after_pre_relax" not in state
+
+
+def test_pre_relax_positive_records_intermediate_frame():
+    a = Atoms("CC", positions=[[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+    c = AFIRConstraint(
+        formed=[(0, 1)], broken=[],
+        alpha_formed=[0.5], alpha_broken=[],
+        formed_thresholds=[1.5], broken_thresholds=[],
+    )
+    _, _, state = relax_with_restraints(
+        a, [c], LennardJones(),
+        pre_relax_steps=5,
+        max_steps=10, fmax=0.5, traj_stride=2,
+    )
+    assert "frame_after_pre_relax" in state
+    pre_frame = state["frame_after_pre_relax"]
+    assert isinstance(pre_frame, Atoms)
+    assert len(pre_frame) == 2
+    assert len(pre_frame.constraints) == 0
+
+
+def test_pre_relax_phase_does_not_apply_afir_force():
+    a = Atoms("CC", positions=[[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+    c = AFIRConstraint(
+        formed=[(0, 1)], broken=[],
+        alpha_formed=[10.0], alpha_broken=[],
+        formed_thresholds=[0.1], broken_thresholds=[],
+    )
+    _, _, state = relax_with_restraints(
+        a, [c], LennardJones(),
+        pre_relax_steps=80,
+        max_steps=0,
+        fmax=1e-6, traj_stride=10,
+    )
+    pre_frame = state["frame_after_pre_relax"]
+    d = float(np.linalg.norm(pre_frame.positions[1] - pre_frame.positions[0]))
+    assert d > 0.9, (
+        f"distance after pre-relax {d:.3f} too close — looks like AFIR force "
+        f"was applied during Stage A"
+    )

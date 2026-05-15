@@ -1,10 +1,13 @@
 """Constrained relaxation that yields a trajectory of frames.
 
 Phase 9: returns 3-tuple (frames, energies, final_constraint_state).
-The third element captures AFIRConstraint latch state at relax end —
-read via `atoms.constraints[0]` so it works regardless of whether ASE
-copies constraint instances internally. `_snapshot()` also strips
-constraints so latch state never leaks into trajectory.xyz.
+Phase 10: optional Stage A (unbiased FIRE pre-relax) before Stage B
+(AFIR-constrained relax). When `pre_relax_steps > 0`, FIRE first runs
+without any constraints; the geometry at Stage A end is recorded in
+`final_state["frame_after_pre_relax"]` so the caller can recompute
+initial-latch state against it. Stage A frames are concatenated with
+Stage B frames; the boundary geometry may appear twice (acceptable —
+visualisation value over deduplication).
 """
 from __future__ import annotations
 
@@ -18,39 +21,60 @@ def relax_with_restraints(
     restraints: list,
     calc: Calculator,
     *,
+    pre_relax_steps: int = 0,
     max_steps: int = 100,
     fmax: float = 0.1,
     traj_stride: int = 5,
 ) -> tuple[list[Atoms], list[float], dict]:
     atoms = atoms.copy()
     atoms.calc = calc
-    if restraints:
-        atoms.set_constraint(restraints)
 
-    frames: list[Atoms] = [_snapshot(atoms)]
-    energies: list[float] = [float(atoms.get_potential_energy())]
+    frames: list[Atoms] = []
+    energies: list[float] = []
+    final_state: dict = {}
 
-    opt = FIRE(atoms, logfile=None, dt=0.05, a=0.1, maxstep=0.1, dtmax=0.2)
-
-    def _record():
+    if pre_relax_steps > 0:
+        atoms.set_constraint([])
         frames.append(_snapshot(atoms))
         energies.append(float(atoms.get_potential_energy()))
 
-    opt.attach(_record, interval=traj_stride)
-    opt.run(fmax=fmax, steps=max_steps)
-    step_count = opt.nsteps
+        opt_a = FIRE(atoms, logfile=None, dt=0.05, a=0.1, maxstep=0.1, dtmax=0.2)
 
-    if step_count % traj_stride != 0 or step_count == 0:
-        _record()
+        def _record_a():
+            frames.append(_snapshot(atoms))
+            energies.append(float(atoms.get_potential_energy()))
 
-    final_state: dict = {}
+        opt_a.attach(_record_a, interval=traj_stride)
+        opt_a.run(fmax=fmax, steps=pre_relax_steps)
+        if opt_a.nsteps % traj_stride != 0 or opt_a.nsteps == 0:
+            _record_a()
+
+        final_state["frame_after_pre_relax"] = _snapshot(atoms)
+
+    if restraints:
+        atoms.set_constraint(restraints)
+    else:
+        atoms.set_constraint([])
+
+    frames.append(_snapshot(atoms))
+    energies.append(float(atoms.get_potential_energy()))
+
+    opt_b = FIRE(atoms, logfile=None, dt=0.05, a=0.1, maxstep=0.1, dtmax=0.2)
+
+    def _record_b():
+        frames.append(_snapshot(atoms))
+        energies.append(float(atoms.get_potential_energy()))
+
+    opt_b.attach(_record_b, interval=traj_stride)
+    opt_b.run(fmax=fmax, steps=max_steps)
+    if opt_b.nsteps % traj_stride != 0 or opt_b.nsteps == 0:
+        _record_b()
+
     if atoms.constraints:
         c = atoms.constraints[0]
         if hasattr(c, "formed_latched"):
-            final_state = {
-                "formed_latched": list(c.formed_latched),
-                "broken_latched": list(c.broken_latched),
-            }
+            final_state["formed_latched"] = list(c.formed_latched)
+            final_state["broken_latched"] = list(c.broken_latched)
 
     return frames, energies, final_state
 
