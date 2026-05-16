@@ -119,4 +119,5 @@ def run_neb(
         "final_fmax": final_fmax,
         "image_energies": image_energies,
         "pad_frames": pad_frames,
+        "image_atoms": [img.copy() for img in images],
     }
