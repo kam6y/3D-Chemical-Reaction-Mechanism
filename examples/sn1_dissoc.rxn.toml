@@ -1,10 +1,4 @@
 description = "SN1 step 1 dissociation: tBuBr -> tBu+ + Br-"
-formed = []
-broken = [[1, 5]]
 
-[afir]
-alpha_broken = 2.5
-max_relax_steps = 200
-
-[scoring]
-r_broken_threshold = 6.0
+[placement]
+initial_separation = 6.0
