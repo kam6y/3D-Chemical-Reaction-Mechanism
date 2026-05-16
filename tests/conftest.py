@@ -1,4 +1,5 @@
 """Shared pytest fixtures for reactx tests."""
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +7,14 @@ import pytest
 from rdkit import Chem
 
 from reactx.bond_changes import BondChanges
+
+
+@pytest.fixture(autouse=True)
+def reset_reactx_logger_after_test():
+    yield
+    logger = logging.getLogger("reactx")
+    logger.handlers.clear()
+    logger.propagate = True
 
 
 @pytest.fixture()
@@ -130,16 +139,11 @@ def tmp_rxn_with_toml(tmp_path: Path):
     Usage:
         rxn_path = tmp_rxn_with_toml("sn2", toml_body='''\\
             description = "sn2 fast"
-            formed = [[1, 3]]
-            broken = [[1, 2]]
-            [afir]
-            alpha_formed = 0.5
-            alpha_broken = 1.0
-            max_relax_steps = 30
-            [scoring]
-            r_broken_threshold = 4.0
-            [sampling]
-            n_candidates = 1
+            [endpoint_relax]
+            max_steps = 1
+            [neb]
+            n_images = 3
+            max_steps = 1
         ''')
 
     Returns the temp `.rxn` Path. The .rxn body is unchanged from

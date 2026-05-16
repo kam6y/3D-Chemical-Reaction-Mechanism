@@ -93,54 +93,14 @@ def test_blender_bonds_detected(tmp_path: Path):
 
 _SN2_BLENDER = """\
 description = "SN2 blender smoke"
-formed = [[1, 3]]
-broken = [[1, 2]]
-
-[afir]
-alpha_formed = 0.5
-alpha_broken = 1.0
-max_relax_steps = 30
-
-[scoring]
-r_broken_threshold = 4.0
-
-[sampling]
-n_candidates = 4
 """
 
 _PT_BLENDER = """\
 description = "Proton transfer blender smoke"
-formed = [[1, 3]]
-broken = [[1, 2]]
-
-[afir]
-alpha_formed = 0.5
-alpha_broken = 1.0
-max_relax_steps = 30
-
-[scoring]
-r_broken_threshold = 4.0
-r_formed_threshold = 1.5
-
-[sampling]
-n_candidates = 4
 """
 
 _E2_BLENDER = """\
 description = "E2 blender smoke"
-formed = [[4, 5]]
-broken = [[2, 5], [1, 3]]
-
-[afir]
-alpha_formed = 1.0
-alpha_broken = [1.0, 1.0]
-max_relax_steps = 30
-
-[scoring]
-r_broken_threshold = [4.0, 4.0]
-
-[sampling]
-n_candidates = 4
 """
 
 
@@ -154,7 +114,7 @@ n_candidates = 4
 def test_re1_blender_smoke_writes_blend(
     tmp_path: Path, stem: str, toml_body: str, tmp_rxn_with_toml,
 ):
-    """End-to-end Phase Re1 + Phase 3 pipeline + Blender renders.
+    """End-to-end Phase 11 pipeline + Blender renders.
 
     SN1 dissoc is intentionally omitted: an ion-pair endpoint is not visually
     interesting as a Blender smoke (no bond formation, only a stretch).
