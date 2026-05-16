@@ -1,57 +1,71 @@
-"""Per-reaction sidecar TOML config (`<rxn_path>.toml`).
+"""Per-reaction sidecar TOML config (Phase 11).
 
-Phase 9 schema: [afir] + [scoring] sections.
-Spec: docs/superpowers/specs/2026-05-08-afir-force-design.md §4.4
+Schema sections: [placement], [endpoint_relax], [neb]. Only `description`
+is required; all sections are optional.
 """
 from __future__ import annotations
 
 import math
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
 class ConfigError(ValueError):
-    """Raised when `<rxn_path>.toml` violates the Phase 9 schema."""
+    """Raised when `<rxn_path>.toml` violates the Phase 11 schema."""
 
 
 @dataclass(frozen=True)
-class SamplingConfig:
-    n_candidates: int = 64
+class PlacementSection:
+    initial_separation: float = 4.0
+    orientation: str = "default"
 
 
 @dataclass(frozen=True)
-class AFIRSection:
-    alpha_formed: float | tuple[float, ...]
-    alpha_broken: float | tuple[float, ...]
-    max_relax_steps: int
-    pre_relax_steps: int = 30
+class EndpointRelaxSection:
+    fmax: float = 0.01
+    max_steps: int = 500
+    optimizer: str = "FIRE"
 
 
 @dataclass(frozen=True)
-class ScoringSection:
-    r_broken_threshold: float | tuple[float, ...] | None = None
-    r_formed_threshold: float | tuple[float, ...] | None = None
+class NEBSection:
+    n_images: int = 11
+    fmax: float = 0.05
+    max_steps: int = 200
+    k: float = 1.0
+    climb: bool = True
+    pad_frames: int = 0
 
 
 @dataclass(frozen=True)
 class ReactionConfig:
     description: str
-    formed: tuple[tuple[int, int], ...]
-    broken: tuple[tuple[int, int], ...]
-    afir: AFIRSection
-    scoring: ScoringSection
-    sampling: SamplingConfig = field(default_factory=SamplingConfig)
+    placement: PlacementSection
+    endpoint_relax: EndpointRelaxSection
+    neb: NEBSection
 
 
-_TOP_LEVEL_KEYS = {"description", "formed", "broken", "afir", "scoring", "sampling"}
-_TOP_LEVEL_REQUIRED = {"description", "formed", "broken", "afir"}
-_OBSOLETE_TOP_LEVEL = {"restraints", "prescreen", "k_form", "k_broken",
-                       "r_broken", "r_form"}
-_AFIR_KEYS = {"alpha_formed", "alpha_broken", "max_relax_steps", "pre_relax_steps"}
-_AFIR_REQUIRED = {"max_relax_steps"}
-_SCORING_KEYS = {"r_broken_threshold", "r_formed_threshold"}
-_SAMPLING_KEYS = {"n_candidates"}
+_TOP_LEVEL_KEYS = {"description", "placement", "endpoint_relax", "neb"}
+_TOP_LEVEL_REQUIRED = {"description"}
+_OBSOLETE_TOP_LEVEL = {
+    "afir",
+    "broken",
+    "formed",
+    "k_broken",
+    "k_form",
+    "prescreen",
+    "r_broken",
+    "r_form",
+    "restraints",
+    "sampling",
+    "scoring",
+}
+_PLACEMENT_KEYS = {"initial_separation", "orientation"}
+_ENDPOINT_KEYS = {"fmax", "max_steps", "optimizer"}
+_NEB_KEYS = {"n_images", "fmax", "max_steps", "k", "climb", "pad_frames"}
+_VALID_ORIENTATIONS = {"default", "endo", "exo"}
+_VALID_OPTIMIZERS = {"FIRE", "BFGS"}
 
 
 def sidecar_path(rxn_path: Path) -> Path:
@@ -60,12 +74,7 @@ def sidecar_path(rxn_path: Path) -> Path:
 
 
 def load_config(rxn_path: Path) -> ReactionConfig:
-    """Load `<rxn_path>.toml` and return a validated ReactionConfig.
-
-    Raises:
-        FileNotFoundError: when the sidecar TOML is missing.
-        ConfigError: on schema violations.
-    """
+    """Load `<rxn_path>.toml` and return a validated ReactionConfig."""
     toml_path = sidecar_path(rxn_path)
     if not toml_path.is_file():
         raise FileNotFoundError(
@@ -76,224 +85,141 @@ def load_config(rxn_path: Path) -> ReactionConfig:
 
 
 def _validate(raw: dict, *, source: str) -> ReactionConfig:
-    for k in _OBSOLETE_TOP_LEVEL:
-        if k in raw:
+    for key in _OBSOLETE_TOP_LEVEL:
+        if key in raw:
             raise ConfigError(
-                f"{source}: '[{k}]' or '{k}' is removed in Phase 9; "
-                f"migrate to '[afir]' / '[scoring]' (see spec §4.4)"
+                f"{source}: '{key}' is removed in Phase 11. "
+                "Migrate to [placement] / [endpoint_relax] / [neb] schema."
             )
-    _check_keys(raw, _TOP_LEVEL_KEYS, _TOP_LEVEL_REQUIRED,
-                scope="<top>", source=source)
+
+    _check_keys(raw, _TOP_LEVEL_KEYS, _TOP_LEVEL_REQUIRED, scope="<top>", source=source)
 
     description = raw["description"]
     if not isinstance(description, str) or not description.strip():
         raise ConfigError(f"{source}: 'description' must be a non-empty string")
 
-    formed = _to_pair_tuple(raw["formed"], key="formed", source=source)
-    broken = _to_pair_tuple(raw["broken"], key="broken", source=source)
-    if not formed and not broken:
-        raise ConfigError(
-            f"{source}: at least one of 'formed' or 'broken' must be non-empty"
-        )
-
-    afir = _build_afir(
-        raw["afir"], formed_count=len(formed), broken_count=len(broken),
+    placement = _build_placement(raw.get("placement", {}), source=source)
+    endpoint_relax = _build_endpoint_relax(
+        raw.get("endpoint_relax", {}),
         source=source,
     )
-    scoring = _build_scoring(
-        raw.get("scoring", {}), formed_count=len(formed), broken_count=len(broken),
-        source=source,
-    )
-    sampling = _build_sampling(raw.get("sampling", {}), source=source)
+    neb = _build_neb(raw.get("neb", {}), source=source)
 
     return ReactionConfig(
-        description=description, formed=formed, broken=broken,
-        afir=afir, scoring=scoring, sampling=sampling,
+        description=description,
+        placement=placement,
+        endpoint_relax=endpoint_relax,
+        neb=neb,
     )
 
 
-def _build_afir(raw: dict, *, formed_count: int, broken_count: int,
-                source: str) -> AFIRSection:
-    _check_keys(raw, _AFIR_KEYS, _AFIR_REQUIRED, scope="[afir]", source=source)
-    alpha_formed = _normalize_alpha(
-        raw.get("alpha_formed", 0.0), expected_count=formed_count,
-        key="alpha_formed", source=source,
+def _build_placement(raw: dict, *, source: str) -> PlacementSection:
+    _check_keys(raw, _PLACEMENT_KEYS, set(), scope="[placement]", source=source)
+    initial_separation = _positive_float(
+        raw.get("initial_separation", 4.0),
+        key="[placement].initial_separation",
+        source=source,
     )
-    alpha_broken = _normalize_alpha(
-        raw.get("alpha_broken", 0.0), expected_count=broken_count,
-        key="alpha_broken", source=source,
-    )
-    max_steps = raw["max_relax_steps"]
-    if not isinstance(max_steps, int) or max_steps <= 0:
+    orientation = raw.get("orientation", "default")
+    if orientation not in _VALID_ORIENTATIONS:
         raise ConfigError(
-            f"{source}: '[afir].max_relax_steps' must be a positive integer "
-            f"(got {max_steps!r})"
+            f"{source}: '[placement].orientation' must be one of "
+            f"{sorted(_VALID_ORIENTATIONS)}, got {orientation!r}"
         )
-    pre_relax_steps = raw.get("pre_relax_steps", 30)
-    if (not isinstance(pre_relax_steps, int)
-            or isinstance(pre_relax_steps, bool)
-            or pre_relax_steps < 0):
+    return PlacementSection(
+        initial_separation=initial_separation,
+        orientation=orientation,
+    )
+
+
+def _build_endpoint_relax(raw: dict, *, source: str) -> EndpointRelaxSection:
+    _check_keys(raw, _ENDPOINT_KEYS, set(), scope="[endpoint_relax]", source=source)
+    fmax = _positive_float(
+        raw.get("fmax", 0.01),
+        key="[endpoint_relax].fmax",
+        source=source,
+    )
+    max_steps = _positive_int(
+        raw.get("max_steps", 500),
+        key="[endpoint_relax].max_steps",
+        source=source,
+    )
+    optimizer = raw.get("optimizer", "FIRE")
+    if optimizer not in _VALID_OPTIMIZERS:
         raise ConfigError(
-            f"{source}: '[afir].pre_relax_steps' must be a non-negative integer "
-            f"(got {pre_relax_steps!r})"
+            f"{source}: '[endpoint_relax].optimizer' must be one of "
+            f"{sorted(_VALID_OPTIMIZERS)}, got {optimizer!r}"
         )
-    return AFIRSection(
-        alpha_formed=alpha_formed, alpha_broken=alpha_broken,
-        max_relax_steps=int(max_steps),
-        pre_relax_steps=int(pre_relax_steps),
+    return EndpointRelaxSection(
+        fmax=fmax,
+        max_steps=max_steps,
+        optimizer=optimizer,
     )
 
 
-def _normalize_alpha(value, *, expected_count: int, key: str,
-                     source: str) -> float | tuple[float, ...]:
-    def _check_finite(v, ctx: str):
-        if not isinstance(v, (int, float)):
-            raise ConfigError(
-                f"{source}: '[afir].{key}'{ctx} must be numeric (got {v!r})"
-            )
-        if not math.isfinite(v):
-            raise ConfigError(
-                f"{source}: '[afir].{key}'{ctx} must be finite (got {v!r})"
-            )
-
-    if isinstance(value, list):
-        for idx, v in enumerate(value):
-            _check_finite(v, f"[{idx}]")
-    else:
-        _check_finite(value, "")
-
-    if expected_count == 0:
-        return tuple()
-
-    if isinstance(value, list):
-        if len(value) != expected_count:
-            raise ConfigError(
-                f"{source}: '[afir].{key}' list length {len(value)} != "
-                f"expected {expected_count}"
-            )
-        for v in value:
-            if v <= 0:
-                raise ConfigError(
-                    f"{source}: '[afir].{key}' must be > 0 for non-empty "
-                    f"pair set (spec §4.4 forbids α=0); got {v}"
-                )
-        return tuple(float(v) for v in value)
-
-    if value <= 0:
-        raise ConfigError(
-            f"{source}: '[afir].{key}' must be > 0 for non-empty pair set "
-            f"(spec §4.4 forbids α=0); got {value}"
-        )
-    return float(value)
-
-
-def _build_scoring(raw: dict, *, formed_count: int, broken_count: int,
-                   source: str) -> ScoringSection:
-    _check_keys(raw, _SCORING_KEYS, set(), scope="[scoring]", source=source)
-    r_broken = _normalize_threshold(
-        raw.get("r_broken_threshold"), expected_count=broken_count,
-        key="r_broken_threshold", source=source,
-        required_when_pairs_present=True,
+def _build_neb(raw: dict, *, source: str) -> NEBSection:
+    _check_keys(raw, _NEB_KEYS, set(), scope="[neb]", source=source)
+    n_images = _positive_int(raw.get("n_images", 11), key="[neb].n_images", source=source)
+    if n_images < 3:
+        raise ConfigError(f"{source}: '[neb].n_images' must be >= 3")
+    fmax = _positive_float(raw.get("fmax", 0.05), key="[neb].fmax", source=source)
+    max_steps = _positive_int(
+        raw.get("max_steps", 200),
+        key="[neb].max_steps",
+        source=source,
     )
-    r_formed = _normalize_threshold(
-        raw.get("r_formed_threshold"), expected_count=formed_count,
-        key="r_formed_threshold", source=source,
-        required_when_pairs_present=False,
+    k = _positive_float(raw.get("k", 1.0), key="[neb].k", source=source)
+    climb = raw.get("climb", True)
+    if not isinstance(climb, bool):
+        raise ConfigError(f"{source}: '[neb].climb' must be boolean")
+    pad_frames = _non_negative_int(
+        raw.get("pad_frames", 0),
+        key="[neb].pad_frames",
+        source=source,
     )
-    return ScoringSection(
-        r_broken_threshold=r_broken, r_formed_threshold=r_formed,
+    return NEBSection(
+        n_images=n_images,
+        fmax=fmax,
+        max_steps=max_steps,
+        k=k,
+        climb=climb,
+        pad_frames=pad_frames,
     )
 
 
-def _normalize_threshold(value, *, expected_count: int, key: str, source: str,
-                         required_when_pairs_present: bool):
-    if expected_count == 0:
-        return None
-    if value is None:
-        if required_when_pairs_present:
-            raise ConfigError(
-                f"{source}: '[scoring].{key}' is required when there are "
-                f"non-empty pairs"
-            )
-        return None
-    if isinstance(value, list):
-        if len(value) != expected_count:
-            raise ConfigError(
-                f"{source}: '[scoring].{key}' list length {len(value)} != "
-                f"expected {expected_count}"
-            )
-        for v in value:
-            if not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
-                raise ConfigError(
-                    f"{source}: '[scoring].{key}' must contain finite, "
-                    f"positive values; got {v!r}"
-                )
-        return tuple(float(v) for v in value)
-    if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
-        raise ConfigError(
-            f"{source}: '[scoring].{key}' must be a finite, positive "
-            f"number (got {value!r})"
-        )
-    return float(value)
-
-
-def _check_keys(raw: dict, allowed: set[str], required: set[str], *,
-                scope: str, source: str) -> None:
+def _check_keys(
+    raw: dict,
+    allowed: set[str],
+    required: set[str],
+    *,
+    scope: str,
+    source: str,
+) -> None:
     if not isinstance(raw, dict):
-        raise ConfigError(
-            f"{source}: '{scope}' must be a table, got {type(raw).__name__}"
-        )
+        raise ConfigError(f"{source}: {scope} must be a table")
     missing = required - raw.keys()
     if missing:
-        raise ConfigError(
-            f"{source}: {scope} missing required keys: {sorted(missing)}"
-        )
+        raise ConfigError(f"{source}: {scope} missing required keys: {sorted(missing)}")
     extra = set(raw.keys()) - allowed
     if extra:
-        raise ConfigError(
-            f"{source}: {scope} contains unknown keys: {sorted(extra)}"
-        )
+        raise ConfigError(f"{source}: {scope} contains unknown keys: {sorted(extra)}")
 
 
-def _to_pair_tuple(value, *, key: str, source: str) -> tuple[tuple[int, int], ...]:
-    if not isinstance(value, list):
-        raise ConfigError(f"{source}: '{key}' must be a list of [i, j] pairs")
-    out: list[tuple[int, int]] = []
-    for pair in value:
-        if (
-            not isinstance(pair, list)
-            or len(pair) != 2
-            or not all(isinstance(x, int) and not isinstance(x, bool) for x in pair)
-        ):
-            raise ConfigError(
-                f"{source}: '{key}' entries must be [int, int] pairs (got {pair!r})"
-            )
-        out.append((int(pair[0]), int(pair[1])))
-    return tuple(out)
+def _positive_float(value, *, key: str, source: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{source}: '{key}' must be a positive number")
+    if not math.isfinite(float(value)) or float(value) <= 0.0:
+        raise ConfigError(f"{source}: '{key}' must be a finite positive number")
+    return float(value)
 
 
-def _build_sampling(raw: dict, *, source: str) -> SamplingConfig:
-    _check_keys(raw, _SAMPLING_KEYS, set(), scope="sampling", source=source)
-    n_candidates = raw.get("n_candidates", 64)
-    if not isinstance(n_candidates, int) or isinstance(n_candidates, bool) or n_candidates <= 0:
-        raise ConfigError(
-            f"{source}: 'sampling.n_candidates' must be a positive integer "
-            f"(got {n_candidates!r})"
-        )
-    return SamplingConfig(n_candidates=int(n_candidates))
+def _positive_int(value, *, key: str, source: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ConfigError(f"{source}: '{key}' must be a positive integer")
+    return int(value)
 
 
-def resolve_alpha_formed(cfg: ReactionConfig) -> list[float]:
-    return _broadcast(cfg.afir.alpha_formed, len(cfg.formed))
-
-
-def resolve_alpha_broken(cfg: ReactionConfig) -> list[float]:
-    return _broadcast(cfg.afir.alpha_broken, len(cfg.broken))
-
-
-def _broadcast(value, n: int) -> list[float]:
-    if n == 0:
-        return []
-    if isinstance(value, tuple):
-        return [float(v) for v in value]
-    return [float(value)] * n
+def _non_negative_int(value, *, key: str, source: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(f"{source}: '{key}' must be a non-negative integer")
+    return int(value)
