@@ -9,9 +9,8 @@ from reactx.cli import main
 
 _DA_SIMPLE_TOML = """\
 description = "DA simple test"
-
-[placement]
-orientation = "default"
+reactant_structure = "diels_alder_simple.reactant.xyz"
+product_structure = "diels_alder_simple.product.xyz"
 """
 
 

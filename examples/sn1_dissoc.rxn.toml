@@ -1,1 +1,3 @@
 description = "SN1 step 1 dissociation: tBuBr -> tBu+ + Br-"
+reactant_structure = "sn1_dissoc.reactant.xyz"
+product_structure = "sn1_dissoc.product.xyz"

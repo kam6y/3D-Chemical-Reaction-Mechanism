@@ -1,9 +1,11 @@
-# reactx — Generic Pure CI-NEB Reaction Path Engine
+# reactx - Generic Pure CI-NEB Reaction Path Engine
 
-2D reaction mechanisms (`.rxn`) plus sidecar TOML config are converted into
-direct R/P 3D endpoints, independently relaxed to local minima with UMA, then
-connected with CI-NEB (IDPP interpolation + two-phase climb). The resulting
-trajectory can be rendered in Blender as a ball-and-stick animation.
+`reactx` converts mapped 2D reaction mechanisms into CI-NEB reaction
+animations. A `.rxn` file supplies atom mapping and reactant/product
+connectivity, the sidecar `.rxn.toml` supplies run configuration, and explicit
+XYZ endpoint files supply the complete reactant and product coordinates. The
+endpoints are relaxed independently and then connected with CI-NEB using IDPP
+interpolation and a two-phase climb.
 
 The goal is plausible reaction animation, not quantitatively accurate transition
 state energetics. Supported example reactions:
@@ -15,29 +17,21 @@ state energetics. Supported example reactions:
 - SN1 dissociation
 - SN1 recombination
 - Diels-Alder cycloaddition
+- Diels-Alder endo cycloaddition
 
-## Phase 11 changes
+## Explicit endpoint inputs
 
-Phase 11 replaces the previous multi-trial force-search path engine with a Pure
-CI-NEB pipeline built directly from the `.rxn` reactant and product endpoints:
+The normal CLI path is driven by explicit endpoint structures:
 
-- `BondChanges.from_reaction_diff(r_mol, p_mol)` infers formed/broken bonds
-  from atom-map connectivity differences. TOML no longer contains `formed` or
-  `broken`.
-- `reactx/placement.py` again samples 64 directions over the full sphere,
-  filters sterically blocked placements, and relaxes the top placement
-  candidates before choosing R/P endpoints. This avoids SN2 front-side or
-  sideways starts that endpoint relaxation cannot reliably fix.
-- `reactx/endpoint_relax.py` relaxes R and P endpoints independently with
-  FIRE or BFGS before NEB.
-- TOML schema is now `[placement]`, `[endpoint_relax]`, and `[neb]`.
-  `description` is the only required key.
-- CLI always runs NEB. Legacy sampling, relaxation, and optional refinement
-  flags have been removed.
-- `meta.json` now contains `endpoint_relax_r`, `endpoint_relax_p`, `neb`, and
-  `effective_params`.
-
-Detailed spec: `docs/superpowers/specs/2026-05-15-phase-11-ci-neb-design.md`
+- The `.rxn` file provides atom mapping plus reactant and product connectivity.
+- The sidecar `.rxn.toml` requires `reactant_structure` and
+  `product_structure`.
+- The referenced XYZ files provide complete NEB endpoint coordinates, with atom
+  order matching the mapped `.rxn`.
+- The CLI reads those endpoint files directly, relaxes them, and runs one NEB.
+  It does not generate or select alternative 3D endpoint coordinates.
+- `meta.json` records `endpoint_source`, `bond_changes`, reactant and product
+  endpoint relaxation summaries, NEB summaries, and `effective_params`.
 
 ## Setup
 
@@ -65,31 +59,31 @@ Main flags:
 
 Outputs:
 
-- `trajectory.xyz` — NEB image sequence
-- `energies.json` — NEB image energies
-- `meta.json` — endpoint relax info, NEB info, effective parameters
-- `scene.blend` — Blender scene when `--render` is used
+- `trajectory.xyz` - NEB image sequence
+- `energies.json` - NEB image energies
+- `meta.json` - endpoint source, bond changes, relax info, NEB info, effective
+  parameters
+- `scene.blend` - Blender scene when `--render` is used
 
 ## Per-reaction `.rxn.toml` config
 
-Each `examples/<name>.rxn` requires `<name>.rxn.toml` beside it. Only
-`description` is required.
+Each `examples/<name>.rxn` requires `<name>.rxn.toml` beside it. The config
+must name the reactant and product XYZ endpoint files.
 
 Minimal example:
 
 ```toml
 description = "SN2 anion: CH3Cl + OH- -> CH3OH + Cl-"
+reactant_structure = "sn2.reactant.xyz"
+product_structure = "sn2.product.xyz"
 ```
 
-Full schema:
+User-facing schema:
 
 ```toml
 description = "..."
-
-[placement]
-orientation = "default"  # "default" | "endo" | "exo"
-n_candidates = 64
-relaxed_candidates = 3
+reactant_structure = "name.reactant.xyz"
+product_structure = "name.product.xyz"
 
 [endpoint_relax]
 fmax = 0.01
@@ -100,21 +94,20 @@ optimizer = "FIRE"       # "FIRE" | "BFGS"
 n_images = 11
 fmax = 0.05
 max_steps = 200
-k = 1.0
 climb = true
 pad_frames = 0
 ```
 
-| `.rxn` | description | notes |
-|---|---|---|
-| `sn2.rxn` | SN2 anion | all defaults |
-| `proton_transfer.rxn` | Proton transfer | all defaults |
-| `menshutkin.rxn` | Menshutkin | all defaults |
-| `e2.rxn` | E2 elimination | all defaults |
-| `sn1_dissoc.rxn` | SN1 step 1 dissociation | all defaults |
-| `sn1_recomb.rxn` | SN1 step 2 recombination | all defaults |
-| `diels_alder_simple.rxn` | Diels-Alder simple | `orientation = "default"` |
-| `diels_alder_endo.rxn` | Diels-Alder endo | `orientation = "endo"` |
+| `.rxn` | reactant endpoint | product endpoint | description |
+|---|---|---|---|
+| `sn2.rxn` | `sn2.reactant.xyz` | `sn2.product.xyz` | SN2 anion |
+| `proton_transfer.rxn` | `proton_transfer.reactant.xyz` | `proton_transfer.product.xyz` | Proton transfer |
+| `menshutkin.rxn` | `menshutkin.reactant.xyz` | `menshutkin.product.xyz` | Menshutkin |
+| `e2.rxn` | `e2.reactant.xyz` | `e2.product.xyz` | E2 elimination |
+| `sn1_dissoc.rxn` | `sn1_dissoc.reactant.xyz` | `sn1_dissoc.product.xyz` | SN1 step 1 dissociation |
+| `sn1_recomb.rxn` | `sn1_recomb.reactant.xyz` | `sn1_recomb.product.xyz` | SN1 step 2 recombination |
+| `diels_alder_simple.rxn` | `diels_alder_simple.reactant.xyz` | `diels_alder_simple.product.xyz` | Diels-Alder simple |
+| `diels_alder_endo.rxn` | `diels_alder_endo.reactant.xyz` | `diels_alder_endo.product.xyz` | Diels-Alder endo |
 
 ## Architecture
 
@@ -124,14 +117,10 @@ pad_frames = 0
                                       v
                     BondChanges.from_reaction_diff(r_mol, p_mol)
                                       |
+                                      v
+                 load_endpoint_pair from explicit XYZ endpoint files
+                                      |
               +-----------------------+-----------------------+
-              v                                               v
- embed_fragments_to_positions(r_mol)            embed_fragments_to_positions(p_mol)
-              |                                               |
-              v                                               v
- valid_placements(side="reactant")             valid_placements(side="product")
- endpoint candidate relax + select             endpoint candidate relax + select
-              |                                               |
               v                                               v
  relax_endpoint(atoms_r, UMA)                   relax_endpoint(atoms_p, UMA)
               +-----------------------+-----------------------+
@@ -147,13 +136,13 @@ pad_frames = 0
 
 Key files:
 
-- `reactx/bond_changes.py` — R/P bond-set diff
-- `reactx/placement.py` — full-sphere endpoint candidate placement
-- `reactx/endpoint_relax.py` — FIRE/BFGS endpoint relaxation
-- `reactx/align.py` — atom-map and H permutation alignment
-- `reactx/neb.py` — IDPP + CI-NEB
-- `reactx/config.py` — Phase 11 TOML schema
-- `reactx/cli.py` — Pure CI-NEB pipeline
+- `reactx/endpoints.py` - explicit XYZ endpoint loading and validation
+- `reactx/bond_changes.py` - R/P bond-set diff
+- `reactx/endpoint_relax.py` - FIRE/BFGS endpoint relaxation
+- `reactx/align.py` - atom-map and H permutation alignment
+- `reactx/neb.py` - IDPP + CI-NEB
+- `reactx/config.py` - TOML schema
+- `reactx/cli.py` - explicit-endpoint CI-NEB pipeline
 
 ## Rendering
 
@@ -170,15 +159,13 @@ disappear during the trajectory.
 - Endpoint relaxation may return `converged=false`; the partially relaxed
   endpoint is still passed to NEB and recorded in `meta.json`.
 - IDPP can create poor initial paths for difficult atom-rearrangement cases.
-- Diels-Alder orientation is discrete (`default`, `endo`, `exo`); full-sphere
-  approach directions are sampled, but continuous face torsion is not.
 - Radical, open-shell, solvent, and multi-step mechanisms are out of scope.
 
-## Wall-clock (planned)
+## Wall-clock
 
-Phase 11 runs full-sphere placement screening, relaxes the top endpoint
-candidates on each side, then runs one NEB. The 8 example reactions need to be
-remeasured with UMA-m-1p1 on the target GPU before publishing final timings.
+The examples run one endpoint relaxation per side followed by one NEB. The 8
+example reactions need to be measured with UMA-m-1p1 on the target GPU before
+publishing final timings.
 
 ## Tests
 

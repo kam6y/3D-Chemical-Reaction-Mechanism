@@ -9,9 +9,8 @@ from reactx.cli import main
 
 _DA_ENDO_TOML = """\
 description = "DA endo test"
-
-[placement]
-orientation = "endo"
+reactant_structure = "diels_alder_endo.reactant.xyz"
+product_structure = "diels_alder_endo.product.xyz"
 """
 
 

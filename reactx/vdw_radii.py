@@ -1,4 +1,4 @@
-"""Shared van der Waals radius table for placement and rendering.
+"""Shared van der Waals radius table for rendering and geometry checks.
 
 Alvarez (2013) "A cartography of the van der Waals territories"
 Dalton Trans. 42, 8617. Values in Angstrom for Z=1..83 (H..Bi),

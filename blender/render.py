@@ -12,7 +12,7 @@ import bpy  # type: ignore[import-not-found]
 import mathutils  # type: ignore[import-not-found]
 import numpy as np
 
-# Alvarez (2013) vdW radii are shared with reactx.placement; see reactx/vdw_radii.py.
+# Alvarez (2013) vdW radii come from reactx.vdw_radii.
 # Blender's bundled Python may not have the project root on sys.path, so we
 # vendor a fallback copy that must stay byte-identical to reactx/vdw_radii.py.
 try:

@@ -1,1 +1,3 @@
 description = "E2 elimination: CH3CH2Cl + OH- -> CH2=CH2 + Cl- + H2O"
+reactant_structure = "e2.reactant.xyz"
+product_structure = "e2.product.xyz"

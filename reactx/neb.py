@@ -17,9 +17,9 @@ except ImportError:  # ASE < 3.23
 log = logging.getLogger(__name__)
 
 
-def _make_neb(images: list[Atoms], *, climb: bool) -> NEB:
+def _make_neb(images: list[Atoms], *, climb: bool, k: float) -> NEB:
     return NEB(
-        images, k=1.0, climb=climb,
+        images, k=k, climb=climb,
         allow_shared_calculator=True, method="improvedtangent",
     )
 
@@ -52,6 +52,7 @@ def run_neb(
     output_xyz: str | Path,
     fmax: float = 0.05,
     max_steps: int = 200,
+    k: float = 1.0,
     climb: bool = True,
     pad_frames: int = 0,
 ) -> dict:
@@ -78,8 +79,9 @@ def run_neb(
     # Two-phase NEB: warm up with plain NEB, then climb the TS. IDPP can
     # produce non-physical midpoints for position-swapping reactions, so
     # starting CI-NEB from a bad initial path tends to chase a wrong saddle.
-    # k=1.0 prevents image bunching near minima (default k=0.1 is too weak for
-    # position-swapping reactions like SN2 where images collapse to R/P sides).
+    # The configured spring constant prevents image bunching near minima.
+    # The default k=1.0 is stronger than ASE's default k=0.1, which is too weak
+    # for position-swapping reactions like SN2 where images collapse to R/P sides.
     warmup_steps = max(1, max_steps // 2)
     climb_steps = max(1, max_steps - warmup_steps)
 
@@ -87,14 +89,14 @@ def run_neb(
     # NEB optimizer mutates image positions in place, so the climb band
     # automatically inherits the warmup-relaxed path — no second
     # interpolate() call is needed (and would in fact overwrite warmup work).
-    neb_warm = _make_neb(images, climb=False)
+    neb_warm = _make_neb(images, climb=False, k=k)
     neb_warm.interpolate(method="idpp")
     warm_converged = _run_phase("warmup", neb_warm, fmax=fmax, steps=warmup_steps)
 
     climb_converged = False
     final_neb = neb_warm
     if climb:
-        neb_climb = _make_neb(images, climb=True)
+        neb_climb = _make_neb(images, climb=True, k=k)
         climb_converged = _run_phase("climb", neb_climb, fmax=fmax, steps=climb_steps)
         # Prefer the climb band even on partial convergence — its forces/energies
         # are at least as recent as the warmup's.
@@ -118,6 +120,7 @@ def run_neb(
         "converged": converged,
         "final_fmax": final_fmax,
         "image_energies": image_energies,
+        "k": k,
         "pad_frames": pad_frames,
         "image_atoms": [img.copy() for img in images],
     }

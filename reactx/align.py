@@ -66,10 +66,10 @@ def align_product_to_reactant(
     aligned = product[permutation]
 
     # Rigid-body rotate+translate product onto reactant. Without this step,
-    # embed3d generates R and P in independent orientations, which causes the
-    # NEB interpolated path to pass atoms through each other (e.g. F/Cl
-    # swapping sides across C in SN2). Alignment is driven by atom-index
-    # correspondence so the RMSD-minimization is chemically meaningful.
+    # independently prepared endpoints can make the NEB interpolated path pass
+    # atoms through each other (e.g. F/Cl swapping sides across C in SN2).
+    # Alignment is driven by atom-index correspondence so the RMSD-minimization
+    # is chemically meaningful.
     minimize_rotation_and_translation(reactant, aligned)
 
     # ETKDG seeds R and P independently, so hydrogens bonded to the same heavy

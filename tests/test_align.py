@@ -84,18 +84,21 @@ def test_align_works_on_multi_bond_reaction():
 
     from rdkit import Chem
 
-    from reactx.embed3d import embed_fragments_to_positions
-    from reactx.placement import build_atoms_from_positions
-    from reactx.rxn_parser import parse_rxn, heavy_to_hydrogen_groups
+    from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
 
     examples = Path(__file__).resolve().parent.parent / "examples"
     r_mol, p_mol, heavy_mapping = parse_rxn(examples / "e2.rxn")
     r_h = Chem.AddHs(r_mol)
     p_h = Chem.AddHs(p_mol)
-    _, _, pos_r = embed_fragments_to_positions(r_mol, seed=0)
-    _, _, pos_p = embed_fragments_to_positions(p_mol, seed=0)
-    atoms_r = build_atoms_from_positions(r_h, pos_r)
-    atoms_p = build_atoms_from_positions(p_h, pos_p)
+
+    atoms_r = Atoms(
+        symbols=[atom.GetSymbol() for atom in r_h.GetAtoms()],
+        positions=[(i, i % 3, (i * i) % 5) for i in range(r_h.GetNumAtoms())],
+    )
+    atoms_p = Atoms(
+        symbols=[atom.GetSymbol() for atom in p_h.GetAtoms()],
+        positions=[(i % 4, i, (2 * i) % 7) for i in range(p_h.GetNumAtoms())],
+    )
     rH = heavy_to_hydrogen_groups(r_h)
     pH = heavy_to_hydrogen_groups(p_h)
     aligned = align_product_to_reactant(atoms_r, atoms_p, heavy_mapping, rH, pH)

@@ -1,1 +1,3 @@
 description = "Menshutkin: NH3 + CH3Cl -> CH3NH3+ + Cl-"
+reactant_structure = "menshutkin.reactant.xyz"
+product_structure = "menshutkin.product.xyz"
