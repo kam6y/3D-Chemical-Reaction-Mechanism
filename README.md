@@ -29,7 +29,7 @@ The normal CLI path is driven by explicit endpoint structures:
 - The referenced XYZ files provide complete NEB endpoint coordinates, with atom
   order matching the mapped `.rxn`.
 - The CLI reads those endpoint files directly, relaxes them, and runs one NEB.
-  It does not generate or select alternative 3D endpoint trials.
+  It does not generate or select alternative 3D endpoint coordinates.
 - `meta.json` records `endpoint_source`, `bond_changes`, reactant and product
   endpoint relaxation summaries, NEB summaries, and `effective_params`.
 
@@ -78,7 +78,7 @@ reactant_structure = "sn2.reactant.xyz"
 product_structure = "sn2.product.xyz"
 ```
 
-Full schema:
+User-facing schema:
 
 ```toml
 description = "..."
