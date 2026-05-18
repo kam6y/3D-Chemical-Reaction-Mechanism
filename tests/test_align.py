@@ -76,3 +76,28 @@ def test_align_reactant_heavy_not_in_mapping_raises():
             reactant=r, product=p, heavy_mapping={0: 1},  # missing reactant idx 1
             reactant_h_groups={0: [], 1: []}, product_h_groups={1: []},
         )
+
+
+def test_align_works_on_multi_bond_reaction():
+    """E2: 1 formed + 2 broken still aligns using only heavy_mapping."""
+    from pathlib import Path
+
+    from rdkit import Chem
+
+    from reactx.embed3d import embed_fragments_to_positions
+    from reactx.placement import build_atoms_from_positions
+    from reactx.rxn_parser import parse_rxn, heavy_to_hydrogen_groups
+
+    examples = Path(__file__).resolve().parent.parent / "examples"
+    r_mol, p_mol, heavy_mapping = parse_rxn(examples / "e2.rxn")
+    r_h = Chem.AddHs(r_mol)
+    p_h = Chem.AddHs(p_mol)
+    _, _, pos_r = embed_fragments_to_positions(r_mol, seed=0)
+    _, _, pos_p = embed_fragments_to_positions(p_mol, seed=0)
+    atoms_r = build_atoms_from_positions(r_h, pos_r)
+    atoms_p = build_atoms_from_positions(p_h, pos_p)
+    rH = heavy_to_hydrogen_groups(r_h)
+    pH = heavy_to_hydrogen_groups(p_h)
+    aligned = align_product_to_reactant(atoms_r, atoms_p, heavy_mapping, rH, pH)
+    assert len(aligned) == len(atoms_r)
+    assert aligned.get_chemical_symbols() == atoms_r.get_chemical_symbols()

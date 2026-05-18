@@ -1,11 +1,1 @@
 description = "Menshutkin: NH3 + CH3Cl -> CH3NH3+ + Cl-"
-formed = [[1, 5]]
-broken = [[5, 9]]
-
-[afir]
-alpha_formed = 4.0
-alpha_broken = 4.0
-max_relax_steps = 300
-
-[scoring]
-r_broken_threshold = 3.0

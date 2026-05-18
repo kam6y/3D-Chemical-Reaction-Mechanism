@@ -1,7 +1,1 @@
 description = "SN1 step 2 recombination: tBu+ + Cl- -> tBuCl"
-formed = [[1, 5]]
-broken = []
-
-[afir]
-alpha_formed = 1.5
-max_relax_steps = 200
