@@ -26,6 +26,7 @@ def test_relax_endpoint_fire_converges_lj_diatomic():
     assert 1.10 < r < 1.13, f"r={r} not near LJ minimum 1.122"
     assert info["final_fmax"] <= 0.001
     assert info["n_steps"] > 0
+    assert info["energy"] < 0.0
 
 
 def test_relax_endpoint_bfgs_converges_lj_diatomic():

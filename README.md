@@ -24,9 +24,10 @@ CI-NEB pipeline built directly from the `.rxn` reactant and product endpoints:
 - `BondChanges.from_reaction_diff(r_mol, p_mol)` infers formed/broken bonds
   from atom-map connectivity differences. TOML no longer contains `formed` or
   `broken`.
-- `reactx/placement.py` is reduced to deterministic `simple_placement`.
-  Bimolecular endpoints place reaction anchors along `+z` at
-  `initial_separation=4.0`.
+- `reactx/placement.py` again samples 64 directions over the full sphere,
+  filters sterically blocked placements, and relaxes the top placement
+  candidates before choosing R/P endpoints. This avoids SN2 front-side or
+  sideways starts that endpoint relaxation cannot reliably fix.
 - `reactx/endpoint_relax.py` relaxes R and P endpoints independently with
   FIRE or BFGS before NEB.
 - TOML schema is now `[placement]`, `[endpoint_relax]`, and `[neb]`.
@@ -86,8 +87,9 @@ Full schema:
 description = "..."
 
 [placement]
-initial_separation = 4.0
 orientation = "default"  # "default" | "endo" | "exo"
+n_candidates = 64
+relaxed_candidates = 3
 
 [endpoint_relax]
 fmax = 0.01
@@ -109,7 +111,7 @@ pad_frames = 0
 | `proton_transfer.rxn` | Proton transfer | all defaults |
 | `menshutkin.rxn` | Menshutkin | all defaults |
 | `e2.rxn` | E2 elimination | all defaults |
-| `sn1_dissoc.rxn` | SN1 step 1 dissociation | `initial_separation = 6.0` |
+| `sn1_dissoc.rxn` | SN1 step 1 dissociation | all defaults |
 | `sn1_recomb.rxn` | SN1 step 2 recombination | all defaults |
 | `diels_alder_simple.rxn` | Diels-Alder simple | `orientation = "default"` |
 | `diels_alder_endo.rxn` | Diels-Alder endo | `orientation = "endo"` |
@@ -127,7 +129,8 @@ pad_frames = 0
  embed_fragments_to_positions(r_mol)            embed_fragments_to_positions(p_mol)
               |                                               |
               v                                               v
- simple_placement(side="reactant")              simple_placement(side="product")
+ valid_placements(side="reactant")             valid_placements(side="product")
+ endpoint candidate relax + select             endpoint candidate relax + select
               |                                               |
               v                                               v
  relax_endpoint(atoms_r, UMA)                   relax_endpoint(atoms_p, UMA)
@@ -145,7 +148,7 @@ pad_frames = 0
 Key files:
 
 - `reactx/bond_changes.py` — R/P bond-set diff
-- `reactx/placement.py` — deterministic endpoint placement
+- `reactx/placement.py` — full-sphere endpoint candidate placement
 - `reactx/endpoint_relax.py` — FIRE/BFGS endpoint relaxation
 - `reactx/align.py` — atom-map and H permutation alignment
 - `reactx/neb.py` — IDPP + CI-NEB
@@ -167,15 +170,15 @@ disappear during the trajectory.
 - Endpoint relaxation may return `converged=false`; the partially relaxed
   endpoint is still passed to NEB and recorded in `meta.json`.
 - IDPP can create poor initial paths for difficult atom-rearrangement cases.
-- Diels-Alder orientation is discrete (`default`, `endo`, `exo`); continuous
-  face rotation is not sampled.
+- Diels-Alder orientation is discrete (`default`, `endo`, `exo`); full-sphere
+  approach directions are sampled, but continuous face torsion is not.
 - Radical, open-shell, solvent, and multi-step mechanisms are out of scope.
 
 ## Wall-clock (planned)
 
-Phase 11 removes the multi-candidate loop and instead runs two endpoint
-relaxations plus one NEB. The 8 example reactions need to be remeasured with
-UMA-m-1p1 on the target GPU before publishing final timings.
+Phase 11 runs full-sphere placement screening, relaxes the top endpoint
+candidates on each side, then runs one NEB. The 8 example reactions need to be
+remeasured with UMA-m-1p1 on the target GPU before publishing final timings.
 
 ## Tests
 

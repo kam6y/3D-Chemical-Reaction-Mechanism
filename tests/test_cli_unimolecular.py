@@ -9,9 +9,6 @@ from reactx.cli import main
 _SN1_DISSOC_FAST = """\
 description = "sn1_dissoc fast"
 
-[placement]
-initial_separation = 6.0
-
 [endpoint_relax]
 fmax = 100.0
 max_steps = 1

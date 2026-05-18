@@ -31,8 +31,9 @@ def test_minimal_config_only_description(tmp_path):
 def test_default_values(tmp_path):
     rxn = _write_rxn_and_toml(tmp_path, 'description = "x"\n')
     cfg = load_config(rxn)
-    assert cfg.placement.initial_separation == 4.0
     assert cfg.placement.orientation == "default"
+    assert cfg.placement.n_candidates == 64
+    assert cfg.placement.relaxed_candidates == 3
     assert cfg.endpoint_relax.fmax == 0.01
     assert cfg.endpoint_relax.max_steps == 500
     assert cfg.endpoint_relax.optimizer == "FIRE"
@@ -48,8 +49,9 @@ def test_all_sections_explicit(tmp_path):
     body = '''description = "all"
 
 [placement]
-initial_separation = 5.5
 orientation = "endo"
+n_candidates = 32
+relaxed_candidates = 5
 
 [endpoint_relax]
 fmax = 0.005
@@ -66,8 +68,9 @@ pad_frames = 2
 '''
     rxn = _write_rxn_and_toml(tmp_path, body)
     cfg = load_config(rxn)
-    assert cfg.placement.initial_separation == 5.5
     assert cfg.placement.orientation == "endo"
+    assert cfg.placement.n_candidates == 32
+    assert cfg.placement.relaxed_candidates == 5
     assert cfg.endpoint_relax.fmax == 0.005
     assert cfg.endpoint_relax.max_steps == 800
     assert cfg.endpoint_relax.optimizer == "BFGS"
@@ -101,9 +104,9 @@ def test_obsolete_keys_rejected(tmp_path, obsolete):
 @pytest.mark.parametrize(
     "bad_val,scope,key",
     [
-        (0.0, "placement", "initial_separation"),
-        (-1.0, "placement", "initial_separation"),
         ("invalid_orient", "placement", "orientation"),
+        (0, "placement", "n_candidates"),
+        (0, "placement", "relaxed_candidates"),
         (0.0, "endpoint_relax", "fmax"),
         (-0.1, "endpoint_relax", "fmax"),
         (0, "endpoint_relax", "max_steps"),
@@ -123,8 +126,15 @@ def test_invalid_values_rejected(tmp_path, bad_val, scope, key):
 
 
 def test_missing_description_rejected(tmp_path):
-    rxn = _write_rxn_and_toml(tmp_path, "[placement]\ninitial_separation = 3.0\n")
+    rxn = _write_rxn_and_toml(tmp_path, "[placement]\nn_candidates = 32\n")
     with pytest.raises(ConfigError, match="description"):
+        load_config(rxn)
+
+
+def test_initial_separation_rejected_as_unknown_key(tmp_path):
+    body = 'description = "x"\n[placement]\ninitial_separation = 4.0\n'
+    rxn = _write_rxn_and_toml(tmp_path, body)
+    with pytest.raises(ConfigError, match="initial_separation"):
         load_config(rxn)
 
 

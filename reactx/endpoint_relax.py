@@ -43,10 +43,12 @@ def relax_endpoint(
     converged = bool(opt.run(fmax=fmax, steps=max_steps))
     forces = work.get_forces()
     final_fmax = float(((forces**2).sum(axis=1).max()) ** 0.5)
+    energy = float(work.get_potential_energy())
     info = {
         "converged": converged,
         "final_fmax": final_fmax,
         "n_steps": int(opt.nsteps),
+        "energy": energy,
     }
     if not converged:
         log.warning(

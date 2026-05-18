@@ -17,8 +17,9 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class PlacementSection:
-    initial_separation: float = 4.0
     orientation: str = "default"
+    n_candidates: int = 64
+    relaxed_candidates: int = 3
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,11 @@ _OBSOLETE_TOP_LEVEL = {
     "sampling",
     "scoring",
 }
-_PLACEMENT_KEYS = {"initial_separation", "orientation"}
+_PLACEMENT_KEYS = {
+    "orientation",
+    "n_candidates",
+    "relaxed_candidates",
+}
 _ENDPOINT_KEYS = {"fmax", "max_steps", "optimizer"}
 _NEB_KEYS = {"n_images", "fmax", "max_steps", "k", "climb", "pad_frames"}
 _VALID_ORIENTATIONS = {"default", "endo", "exo"}
@@ -115,20 +120,26 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
 
 def _build_placement(raw: dict, *, source: str) -> PlacementSection:
     _check_keys(raw, _PLACEMENT_KEYS, set(), scope="[placement]", source=source)
-    initial_separation = _positive_float(
-        raw.get("initial_separation", 4.0),
-        key="[placement].initial_separation",
-        source=source,
-    )
     orientation = raw.get("orientation", "default")
     if orientation not in _VALID_ORIENTATIONS:
         raise ConfigError(
             f"{source}: '[placement].orientation' must be one of "
             f"{sorted(_VALID_ORIENTATIONS)}, got {orientation!r}"
         )
+    n_candidates = _positive_int(
+        raw.get("n_candidates", 64),
+        key="[placement].n_candidates",
+        source=source,
+    )
+    relaxed_candidates = _positive_int(
+        raw.get("relaxed_candidates", 3),
+        key="[placement].relaxed_candidates",
+        source=source,
+    )
     return PlacementSection(
-        initial_separation=initial_separation,
         orientation=orientation,
+        n_candidates=n_candidates,
+        relaxed_candidates=relaxed_candidates,
     )
 
 

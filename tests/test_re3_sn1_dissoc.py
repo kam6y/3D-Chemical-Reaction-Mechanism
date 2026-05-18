@@ -9,9 +9,6 @@ from reactx.cli import main
 
 _SN1_DISSOC_TOML = """\
 description = "SN1 dissociation test"
-
-[placement]
-initial_separation = 6.0
 """
 
 

@@ -1,13 +1,13 @@
-"""Tests for Phase 11 simple_placement."""
+"""Tests for Phase 11 placement candidate generation."""
 from pathlib import Path
 
 import numpy as np
-import pytest
 from rdkit import Chem
 
+import reactx.placement as placement
 from reactx.bond_changes import BondChanges
 from reactx.embed3d import embed_fragments_to_positions
-from reactx.placement import build_atoms_from_positions, simple_placement
+from reactx.placement import build_atoms_from_positions, valid_placements
 from reactx.rxn_parser import parse_rxn
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
@@ -20,84 +20,37 @@ def _r_inputs(rxn_name: str):
     return mol_h, base_positions, bc, heavy_mapping
 
 
-def test_simple_placement_unimolecular_passthrough():
-    mol_h, base_positions, bc, _ = _r_inputs("sn1_dissoc")
-    out = simple_placement(
+def test_legacy_simple_placement_api_removed():
+    assert not hasattr(placement, "simple_placement")
+
+
+def test_valid_placements_sn2_backside_candidates_survive():
+    mol_h, base_positions, bc, _ = _r_inputs("sn2")
+    result = valid_placements(
         mol_h,
+        Chem.GetMolFrags(mol_h),
         base_positions,
         bc,
-        initial_separation=4.0,
-        side="reactant",
-        orientation="default",
+        n_candidates=64,
+        seed=0,
     )
-    assert np.allclose(out, base_positions)
 
+    assert result.n_candidates == 64
+    assert len(result.trials) > 0
+    assert result.n_blocked > 0
 
-def test_simple_placement_bimolecular_separation_at_least_target():
-    mol_h, base_positions, bc, _ = _r_inputs("sn2")
-    out = simple_placement(
-        mol_h,
-        base_positions,
-        bc,
-        initial_separation=4.0,
-        side="reactant",
-        orientation="default",
-    )
-    a, b = bc.formed[0]
-    r = float(np.linalg.norm(out[b] - out[a]))
-    assert r >= 4.0 - 1e-6, f"anchor distance {r} < target 4.0"
+    c_idx, cl_idx = bc.broken[0]
+    c_idx_formed, o_idx = bc.formed[0]
+    assert c_idx == c_idx_formed
 
-    frag_indices = Chem.GetMolFrags(mol_h)
-    assert len(frag_indices) == 2
-    com0 = out[list(frag_indices[0])].mean(axis=0)
-    com1 = out[list(frag_indices[1])].mean(axis=0)
-    assert float(np.linalg.norm(com1 - com0)) > 2.0
+    angles = []
+    for trial in result.trials:
+        v_ccl = trial.positions[cl_idx] - trial.positions[c_idx]
+        v_co = trial.positions[o_idx] - trial.positions[c_idx]
+        cos_theta = (v_ccl @ v_co) / (np.linalg.norm(v_ccl) * np.linalg.norm(v_co))
+        angles.append(np.degrees(np.arccos(np.clip(cos_theta, -1.0, 1.0))))
 
-
-def test_simple_placement_product_uses_broken_anchor():
-    _, _, bc, heavy_mapping = _r_inputs("sn2")
-    _, p_mol, _ = parse_rxn(EXAMPLES / "sn2.rxn")
-    mol_h_p, _, base_positions_p = embed_fragments_to_positions(p_mol, seed=0)
-    out = simple_placement(
-        mol_h_p,
-        base_positions_p,
-        bc,
-        initial_separation=4.0,
-        side="product",
-        orientation="default",
-        heavy_mapping=heavy_mapping,
-    )
-    a_r, b_r = bc.broken[0]
-    a_p = heavy_mapping[a_r]
-    b_p = heavy_mapping[b_r]
-    r = float(np.linalg.norm(out[b_p] - out[a_p]))
-    assert r >= 4.0 - 1e-6
-
-
-def test_simple_placement_invalid_side_raises():
-    mol_h, base_positions, bc, _ = _r_inputs("sn2")
-    with pytest.raises(ValueError, match="side"):
-        simple_placement(
-            mol_h,
-            base_positions,
-            bc,
-            initial_separation=4.0,
-            side="other",
-            orientation="default",
-        )
-
-
-def test_simple_placement_product_without_heavy_mapping_raises():
-    mol_h, base_positions, bc, _ = _r_inputs("sn2")
-    with pytest.raises(ValueError, match="heavy_mapping"):
-        simple_placement(
-            mol_h,
-            base_positions,
-            bc,
-            initial_separation=4.0,
-            side="product",
-            orientation="default",
-        )
+    assert max(angles) >= 150.0
 
 
 def test_build_atoms_from_positions_preserves_symbols():
