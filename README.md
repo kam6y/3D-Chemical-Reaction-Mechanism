@@ -94,7 +94,6 @@ optimizer = "FIRE"       # "FIRE" | "BFGS"
 n_images = 11
 fmax = 0.05
 max_steps = 200
-k = 1.0
 climb = true
 pad_frames = 0
 ```
