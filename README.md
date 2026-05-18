@@ -103,7 +103,7 @@ remove_rotation_and_translation = true
 climb = true
 pad_frames = 0
 guide_bond_changes = true
-guide_k = 0.25              # conservative harmonic bond-distance guide strength
+guide_k = 5.0               # harmonic bond-distance guide strength
 ```
 
 `guide_bond_changes` applies only to internal NEB images. It adds a harmonic

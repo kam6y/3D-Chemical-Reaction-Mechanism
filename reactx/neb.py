@@ -74,7 +74,7 @@ def run_neb(
     climb: bool = True,
     pad_frames: int = 0,
     guide_bond_changes: bool = True,
-    guide_k: float = 0.25,
+    guide_k: float = 5.0,
     bond_changes: BondChanges | None = None,
 ) -> dict:
     """Run IDPP interpolation + (CI-)NEB, write trajectory XYZ, return metadata.

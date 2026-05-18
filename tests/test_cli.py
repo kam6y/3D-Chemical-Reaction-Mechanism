@@ -89,7 +89,7 @@ def test_cli_lj_writes_phase11_outputs(tmp_path: Path, tmp_rxn_with_toml):
     assert meta["neb"]["remove_rotation_and_translation"] is True
     assert meta["neb"]["biased_optimization"] is True
     assert meta["neb"]["guide_bond_changes"] is True
-    assert meta["neb"]["guide_k"] == 0.25
+    assert meta["neb"]["guide_k"] == 5.0
     assert meta["neb"]["guided_bonds"] == [
         {
             "atoms": [0, 2],
@@ -109,7 +109,7 @@ def test_cli_lj_writes_phase11_outputs(tmp_path: Path, tmp_rxn_with_toml):
     assert meta["effective_params"]["neb"]["method"] == "eb"
     assert meta["effective_params"]["neb"]["remove_rotation_and_translation"] is True
     assert meta["effective_params"]["neb"]["guide_bond_changes"] is True
-    assert meta["effective_params"]["neb"]["guide_k"] == 0.25
+    assert meta["effective_params"]["neb"]["guide_k"] == 5.0
 
     energies = json.loads((out / "energies.json").read_text())
     assert len(energies) == 3

@@ -50,7 +50,7 @@ product_structure = "p.xyz"
     assert cfg.neb.climb is True
     assert cfg.neb.pad_frames == 0
     assert cfg.neb.guide_bond_changes is True
-    assert cfg.neb.guide_k == 0.25
+    assert cfg.neb.guide_k == 5.0
 
 
 def test_all_sections_explicit(tmp_path):

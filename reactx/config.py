@@ -29,7 +29,7 @@ class NEBSection:
     climb: bool = True
     pad_frames: int = 0
     guide_bond_changes: bool = True
-    guide_k: float = 0.25
+    guide_k: float = 5.0
 
 
 @dataclass(frozen=True)
@@ -200,9 +200,9 @@ def _build_neb(raw: dict, *, source: str) -> NEBSection:
     guide_bond_changes = raw.get("guide_bond_changes", True)
     if not isinstance(guide_bond_changes, bool):
         raise ConfigError(f"{source}: '[neb].guide_bond_changes' must be boolean")
-    # Conservative restraint strength: weaker than the default NEB spring k=1.0,
-    # enough to discourage endpoint-side bunching without dominating the PES.
-    guide_k = _positive_float(raw.get("guide_k", 0.25), key="[neb].guide_k", source=source)
+    # Bond-distance guide strength. This intentionally biases optimization when
+    # enabled; unbiased energies are written separately for interpretation.
+    guide_k = _positive_float(raw.get("guide_k", 5.0), key="[neb].guide_k", source=source)
     return NEBSection(
         n_images=n_images,
         fmax=fmax,
