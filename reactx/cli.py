@@ -215,6 +215,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         output_xyz=xyz,
         fmax=cfg.neb.fmax,
         max_steps=cfg.neb.max_steps,
+        k=cfg.neb.k,
         climb=cfg.neb.climb,
         pad_frames=cfg.neb.pad_frames,
     )
@@ -252,6 +253,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "converged": bool(neb_info["converged"]),
             "final_fmax": float(neb_info["final_fmax"]),
             "image_energies": [float(e) for e in neb_info["image_energies"]],
+            "k": float(neb_info["k"]),
             "pad_frames": int(neb_info["pad_frames"]),
         },
         "effective_params": {
