@@ -84,7 +84,7 @@ def test_align_works_on_multi_bond_reaction():
 
     from rdkit import Chem
 
-    from reactx.rxn_parser import parse_rxn, heavy_to_hydrogen_groups
+    from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
 
     examples = Path(__file__).resolve().parent.parent / "examples"
     r_mol, p_mol, heavy_mapping = parse_rxn(examples / "e2.rxn")
