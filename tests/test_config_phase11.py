@@ -90,6 +90,8 @@ pad_frames = 2
         ('description = "x"\nreactant_structure = "r.xyz"\n', "product_structure"),
         ('description = "x"\nreactant_structure = ""\nproduct_structure = "p.xyz"\n', "reactant_structure"),
         ('description = "x"\nreactant_structure = "r.xyz"\nproduct_structure = ""\n', "product_structure"),
+        ('description = "x"\nreactant_structure = "   "\nproduct_structure = "p.xyz"\n', "reactant_structure"),
+        ('description = "x"\nreactant_structure = "r.xyz"\nproduct_structure = "   "\n', "product_structure"),
     ],
 )
 def test_required_values_rejected(tmp_path, body, match):

@@ -213,7 +213,7 @@ def _positive_int(value, *, key: str, source: str) -> int:
 
 
 def _endpoint_path(value, *, key: str, source: str) -> str:
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{source}: '{key}' must be a non-empty string")
     return value
 
