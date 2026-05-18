@@ -167,10 +167,7 @@ def run_neb(
         [float("nan")] * n_images,
     )
 
-    # Reference-sharing the endpoint Atoms in the padded list is safe: extxyz
-    # writer only reads positions/symbols, never mutates.
-    padded = [images[0]] * pad_frames + list(images) + [images[-1]] * pad_frames
-    write(str(output_xyz), padded, format="extxyz")
+    write(str(output_xyz), _trajectory_frames(images, pad_frames), format="extxyz")
 
     return {
         "n_images": n_images,
@@ -200,3 +197,11 @@ def _evaluate_unbiased_image_energies(
         unbiased.calc = calculator
         energies.append(float(unbiased.get_potential_energy()))
     return energies
+
+
+def _trajectory_frames(images: list[Atoms], pad_frames: int) -> list[Atoms]:
+    padded = [images[0]] * pad_frames + list(images) + [images[-1]] * pad_frames
+    frames = [img.copy() for img in padded]
+    for frame in frames:
+        frame.calc = None
+    return frames
