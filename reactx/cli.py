@@ -220,6 +220,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         remove_rotation_and_translation=cfg.neb.remove_rotation_and_translation,
         climb=cfg.neb.climb,
         pad_frames=cfg.neb.pad_frames,
+        guide_bond_changes=cfg.neb.guide_bond_changes,
+        guide_k=cfg.neb.guide_k,
+        bond_changes=bond_changes,
     )
     log.info(
         "NEB: converged=%s final_fmax=%.4f",
@@ -229,6 +232,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     (args.output / "energies.json").write_text(
         json.dumps([float(e) for e in neb_info["image_energies"]])
+    )
+    (args.output / "unbiased_energies.json").write_text(
+        json.dumps([float(e) for e in neb_info["unbiased_image_energies"]])
     )
 
     meta = {
@@ -255,6 +261,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "converged": bool(neb_info["converged"]),
             "final_fmax": float(neb_info["final_fmax"]),
             "image_energies": [float(e) for e in neb_info["image_energies"]],
+            "unbiased_image_energies": [
+                float(e) for e in neb_info["unbiased_image_energies"]
+            ],
+            "biased_optimization": bool(neb_info["biased_optimization"]),
+            "guide_bond_changes": bool(neb_info["guide_bond_changes"]),
+            "guide_k": float(neb_info["guide_k"]),
+            "guided_bonds": neb_info["guided_bonds"],
             "k": float(neb_info["k"]),
             "method": str(neb_info["method"]),
             "remove_rotation_and_translation": bool(
@@ -279,6 +292,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 ),
                 "climb": cfg.neb.climb,
                 "pad_frames": cfg.neb.pad_frames,
+                "guide_bond_changes": cfg.neb.guide_bond_changes,
+                "guide_k": cfg.neb.guide_k,
             },
         },
     }

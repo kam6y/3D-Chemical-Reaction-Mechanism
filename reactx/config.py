@@ -28,6 +28,8 @@ class NEBSection:
     remove_rotation_and_translation: bool = True
     climb: bool = True
     pad_frames: int = 0
+    guide_bond_changes: bool = True
+    guide_k: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,8 @@ _NEB_KEYS = {
     "remove_rotation_and_translation",
     "climb",
     "pad_frames",
+    "guide_bond_changes",
+    "guide_k",
 }
 _VALID_OPTIMIZERS = {"FIRE", "BFGS"}
 _VALID_NEB_METHODS = {"aseneb", "improvedtangent", "eb", "spline", "string"}
@@ -193,6 +197,12 @@ def _build_neb(raw: dict, *, source: str) -> NEBSection:
         key="[neb].pad_frames",
         source=source,
     )
+    guide_bond_changes = raw.get("guide_bond_changes", True)
+    if not isinstance(guide_bond_changes, bool):
+        raise ConfigError(f"{source}: '[neb].guide_bond_changes' must be boolean")
+    # Conservative restraint strength: weaker than the default NEB spring k=1.0,
+    # enough to discourage endpoint-side bunching without dominating the PES.
+    guide_k = _positive_float(raw.get("guide_k", 0.25), key="[neb].guide_k", source=source)
     return NEBSection(
         n_images=n_images,
         fmax=fmax,
@@ -202,6 +212,8 @@ def _build_neb(raw: dict, *, source: str) -> NEBSection:
         remove_rotation_and_translation=remove_rotation_and_translation,
         climb=climb,
         pad_frames=pad_frames,
+        guide_bond_changes=guide_bond_changes,
+        guide_k=guide_k,
     )
 
 

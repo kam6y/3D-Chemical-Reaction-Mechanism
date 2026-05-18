@@ -60,7 +60,10 @@ Main flags:
 Outputs:
 
 - `trajectory.xyz` - NEB image sequence
-- `energies.json` - NEB image energies
+- `energies.json` - NEB optimization image energies. When
+  `guide_bond_changes = true`, these include the bond-distance guide bias.
+- `unbiased_energies.json` - per-image energies re-evaluated with the original
+  calculator only; use these for energy display and comparison.
 - `meta.json` - endpoint source, bond changes, relax info, NEB info, effective
   parameters
 - `scene.blend` - Blender scene when `--render` is used
@@ -94,11 +97,23 @@ optimizer = "FIRE"       # "FIRE" | "BFGS"
 n_images = 11
 fmax = 0.05
 max_steps = 200
+k = 1.0
 method = "eb"               # "eb" | "improvedtangent" | "aseneb" | "spline" | "string"
 remove_rotation_and_translation = true
 climb = true
 pad_frames = 0
+guide_bond_changes = true
+guide_k = 0.25              # conservative harmonic bond-distance guide strength
 ```
+
+`guide_bond_changes` applies only to internal NEB images. It adds a harmonic
+guide for each inferred formed and broken bond, with each target distance
+linearly interpolated from the relaxed reactant endpoint distance to the aligned
+product endpoint distance. This intentionally biases optimization to improve
+reaction-coordinate frame distribution. `meta.json` records
+`biased_optimization`, `guide_bond_changes`, `guide_k`, `guided_bonds`,
+`image_energies`, and `unbiased_image_energies`; prefer
+`unbiased_image_energies` or `unbiased_energies.json` for plots and comparison.
 
 | `.rxn` | reactant endpoint | product endpoint | description |
 |---|---|---|---|
@@ -143,6 +158,7 @@ Key files:
 - `reactx/endpoint_relax.py` - FIRE/BFGS endpoint relaxation
 - `reactx/align.py` - atom-map and H permutation alignment
 - `reactx/neb.py` - IDPP + EB/CI-NEB with rotation/translation removal
+- `reactx/neb_guide.py` - generic formed/broken bond-distance guide
 - `reactx/config.py` - TOML schema
 - `reactx/cli.py` - explicit-endpoint CI-NEB pipeline
 
@@ -158,6 +174,8 @@ disappear during the trajectory.
 
 - The trajectory is a CI-NEB approximation for animation; quantitative TS
   energies are not guaranteed.
+- Guided NEB optimization biases `image_energies`; use
+  `unbiased_image_energies` for calculator-only energy display and comparison.
 - Endpoint relaxation may return `converged=false`; the partially relaxed
   endpoint is still passed to NEB and recorded in `meta.json`.
 - NEB can still converge to poor lateral paths for difficult rearrangements;

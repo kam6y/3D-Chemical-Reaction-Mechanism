@@ -49,6 +49,8 @@ product_structure = "p.xyz"
     assert cfg.neb.remove_rotation_and_translation is True
     assert cfg.neb.climb is True
     assert cfg.neb.pad_frames == 0
+    assert cfg.neb.guide_bond_changes is True
+    assert cfg.neb.guide_k == 0.25
 
 
 def test_all_sections_explicit(tmp_path):
@@ -70,6 +72,8 @@ method = "improvedtangent"
 remove_rotation_and_translation = false
 climb = false
 pad_frames = 2
+guide_bond_changes = false
+guide_k = 0.75
 """
     rxn = _write_rxn_and_toml(tmp_path, body)
     cfg = load_config(rxn)
@@ -86,6 +90,8 @@ pad_frames = 2
     assert cfg.neb.remove_rotation_and_translation is False
     assert cfg.neb.climb is False
     assert cfg.neb.pad_frames == 2
+    assert cfg.neb.guide_bond_changes is False
+    assert cfg.neb.guide_k == 0.75
 
 
 @pytest.mark.parametrize(
@@ -144,6 +150,9 @@ product_structure = "p.xyz"
         ("badmethod", "neb", "method"),
         ("true", "neb", "remove_rotation_and_translation"),
         (-1, "neb", "pad_frames"),
+        ("yes", "neb", "guide_bond_changes"),
+        (0.0, "neb", "guide_k"),
+        (-0.1, "neb", "guide_k"),
     ],
 )
 def test_invalid_values_rejected(tmp_path, bad_val, scope, key):

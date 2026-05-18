@@ -9,6 +9,13 @@ from ase.calculators.calculator import Calculator
 from ase.io import write
 from ase.optimize import FIRE
 
+from reactx.bond_changes import BondChanges
+from reactx.neb_guide import (
+    BondDistanceGuideCalculator,
+    build_guided_bonds,
+    targets_for_image,
+)
+
 try:
     from ase.mep import NEB
 except ImportError:  # ASE < 3.23
@@ -66,6 +73,9 @@ def run_neb(
     remove_rotation_and_translation: bool = True,
     climb: bool = True,
     pad_frames: int = 0,
+    guide_bond_changes: bool = True,
+    guide_k: float = 0.25,
+    bond_changes: BondChanges | None = None,
 ) -> dict:
     """Run IDPP interpolation + (CI-)NEB, write trajectory XYZ, return metadata.
 
@@ -81,11 +91,30 @@ def run_neb(
         images.append(reactant.copy())
     images.append(product.copy())
 
+    guided_bonds = (
+        build_guided_bonds(reactant, product, bond_changes)
+        if guide_bond_changes and bond_changes is not None
+        else []
+    )
+    biased_optimization = bool(guided_bonds)
+
     # Single shared calculator: large models (uma-m-1p1 = 11 GB) would OOM if
     # instantiated once per image. allow_shared_calculator=True lets ASE
-    # evaluate images sequentially with one model instance.
+    # evaluate images sequentially with one model instance. Internal images may
+    # receive lightweight wrappers that all call this same base calculator.
     for img in images:
         img.calc = calculator
+    if biased_optimization:
+        for image_index, img in enumerate(images[1:-1], start=1):
+            img.calc = BondDistanceGuideCalculator(
+                calculator,
+                targets=targets_for_image(
+                    guided_bonds,
+                    image_index=image_index,
+                    n_images=n_images,
+                ),
+                guide_k=guide_k,
+            )
 
     # Two-phase NEB: warm up with plain NEB, then climb the TS. IDPP can
     # produce non-physical midpoints for position-swapping reactions, so
@@ -132,6 +161,11 @@ def run_neb(
         "image energies",
         [float("nan")] * n_images,
     )
+    unbiased_image_energies = _safe_call(
+        lambda: _evaluate_unbiased_image_energies(images, calculator),
+        "unbiased image energies",
+        [float("nan")] * n_images,
+    )
 
     # Reference-sharing the endpoint Atoms in the padded list is safe: extxyz
     # writer only reads positions/symbols, never mutates.
@@ -143,9 +177,26 @@ def run_neb(
         "converged": converged,
         "final_fmax": final_fmax,
         "image_energies": image_energies,
+        "unbiased_image_energies": unbiased_image_energies,
+        "biased_optimization": biased_optimization,
+        "guide_bond_changes": guide_bond_changes,
+        "guide_k": guide_k,
+        "guided_bonds": [bond.as_metadata() for bond in guided_bonds],
         "k": k,
         "method": method,
         "remove_rotation_and_translation": remove_rotation_and_translation,
         "pad_frames": pad_frames,
         "image_atoms": [img.copy() for img in images],
     }
+
+
+def _evaluate_unbiased_image_energies(
+    images: list[Atoms],
+    calculator: Calculator,
+) -> list[float]:
+    energies: list[float] = []
+    for img in images:
+        unbiased = img.copy()
+        unbiased.calc = calculator
+        energies.append(float(unbiased.get_potential_energy()))
+    return energies
