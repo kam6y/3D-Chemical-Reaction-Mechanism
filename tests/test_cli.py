@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,8 @@ from reactx.cli import build_parser, main
 
 _FAST_TOML = """\
 description = "sn2 quick"
+reactant_structure = "sn2.reactant.xyz"
+product_structure = "sn2.product.xyz"
 
 [endpoint_relax]
 fmax = 100.0
@@ -70,6 +73,10 @@ def test_cli_lj_writes_phase11_outputs(tmp_path: Path, tmp_rxn_with_toml):
 
     meta = json.loads((out / "meta.json").read_text())
     assert meta["description"] == "sn2 quick"
+    assert meta["endpoint_source"]["mode"] == "explicit_xyz"
+    assert Path(meta["endpoint_source"]["reactant_structure"]).name == "sn2.reactant.xyz"
+    assert Path(meta["endpoint_source"]["product_structure"]).name == "sn2.product.xyz"
+    assert meta["bond_changes"] == {"formed": [[0, 2]], "broken": [[0, 1]]}
     assert "trials" not in meta
     assert "selected_trial" not in meta
     assert "placement" not in meta
@@ -84,6 +91,17 @@ def test_cli_lj_writes_phase11_outputs(tmp_path: Path, tmp_rxn_with_toml):
     assert len(energies) == 3
     frames = read(str(out / "trajectory.xyz"), index=":")
     assert len(frames) == 3
+
+
+def test_cli_explicit_endpoints_do_not_import_placement(tmp_path: Path, tmp_rxn_with_toml):
+    sys.modules.pop("reactx.placement", None)
+    rxn = tmp_rxn_with_toml("sn2", toml_body=_FAST_TOML)
+    out = tmp_path / "out"
+
+    rc = main(["run", str(rxn), "-o", str(out), "--backend", "lj"])
+
+    assert rc == 0
+    assert "reactx.placement" not in sys.modules
 
 
 def test_missing_sidecar_returns_config_error(tmp_path: Path, sn2_rxn_path: Path):

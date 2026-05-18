@@ -9,7 +9,11 @@ from ase.io import read
 
 from reactx.cli import main
 
-_SN2_TOML = 'description = "SN2 anion test"\n'
+_SN2_TOML = """\
+description = "SN2 anion test"
+reactant_structure = "sn2.reactant.xyz"
+product_structure = "sn2.product.xyz"
+"""
 
 
 @pytest.mark.slow

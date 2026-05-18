@@ -8,6 +8,8 @@ from reactx.cli import main
 
 _SN1_DISSOC_FAST = """\
 description = "sn1_dissoc fast"
+reactant_structure = "sn1_dissoc.reactant.xyz"
+product_structure = "sn1_dissoc.product.xyz"
 
 [endpoint_relax]
 fmax = 100.0
@@ -29,6 +31,9 @@ def test_unimolecular_cli_lj_runs_without_trial_metadata(
     rc = main(["run", str(rxn), "-o", str(out), "--backend", "lj"])
     assert rc == 0
     meta = json.loads((out / "meta.json").read_text())
+    assert meta["endpoint_source"]["mode"] == "explicit_xyz"
+    assert Path(meta["endpoint_source"]["reactant_structure"]).name == "sn1_dissoc.reactant.xyz"
+    assert Path(meta["endpoint_source"]["product_structure"]).name == "sn1_dissoc.product.xyz"
     assert "trials" not in meta
     assert "placement" not in meta
     assert meta["neb"]["n_images"] == 3
