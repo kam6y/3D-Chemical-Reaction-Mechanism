@@ -49,7 +49,7 @@ def sn1_recomb_rxn_path(examples_dir: Path) -> Path:
 
 @pytest.fixture()
 def sn2_atoms_setup():
-    """3-fragment-style SN2 setup for placement dispatcher test (CH3Cl + OH-)."""
+    """3-fragment-style SN2 setup for CH3Cl + OH-."""
     mol = Chem.AddHs(Chem.MolFromSmiles("C(Cl).[OH-]"))
     Chem.SanitizeMol(mol)
     frag_indices = Chem.GetMolFrags(mol)
@@ -124,7 +124,7 @@ def sn1_recomb_atoms_setup():
                 positions[h_nb.GetIdx()] = positions[m] + np.array(
                     [0.5 * (h_nb.GetIdx() % 3 - 1), 0.5, 0.5 * ((h_nb.GetIdx() // 3) % 2)]
                 )
-    # Cl- を遠くに置く (Tier 2 placement で動かされる)
+    # Cl- を遠くに置く
     cl_idx = syms.index("Cl")
     positions[cl_idx] = (10.0, 10.0, 10.0)
 
