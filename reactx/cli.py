@@ -14,8 +14,8 @@ from reactx.align import align_product_to_reactant
 from reactx.bond_changes import BondChanges
 from reactx.calculators import make_calculator
 from reactx.config import ConfigError, load_config
-from reactx.endpoints import EndpointError, load_endpoint_pair
 from reactx.endpoint_relax import relax_endpoint
+from reactx.endpoints import EndpointError, load_endpoint_pair
 from reactx.neb import run_neb
 from reactx.rxn_parser import heavy_to_hydrogen_groups, parse_rxn
 
@@ -307,3 +307,7 @@ def _invoke_blender(args: argparse.Namespace, xyz: Path) -> int:
         log.error("Error: blender exited with code %d", result.returncode)
         return 1
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
