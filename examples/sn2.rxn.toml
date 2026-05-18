@@ -1,1 +1,3 @@
 description = "SN2 anion: CH3Cl + OH- -> CH3OH + Cl-"
+reactant_structure = "sn2.reactant.xyz"
+product_structure = "sn2.product.xyz"

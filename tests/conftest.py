@@ -155,6 +155,10 @@ def tmp_rxn_with_toml(tmp_path: Path):
         src_rxn = examples / f"{stem}.rxn"
         dst_rxn = tmp_path / f"{stem}.rxn"
         dst_rxn.write_bytes(src_rxn.read_bytes())
+        for suffix in ("reactant.xyz", "product.xyz"):
+            src = examples / f"{stem}.{suffix}"
+            if src.exists():
+                (tmp_path / f"{stem}.{suffix}").write_bytes(src.read_bytes())
         (tmp_path / f"{stem}.rxn.toml").write_text(toml_body, encoding="utf-8")
         return dst_rxn
 

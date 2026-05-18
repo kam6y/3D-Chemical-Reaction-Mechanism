@@ -1,4 +1,3 @@
 description = "Diels-Alder endo: cyclopentadiene + maleic anhydride -> norbornene-2,3-dicarboxylic anhydride"
-
-[placement]
-orientation = "endo"
+reactant_structure = "diels_alder_endo.reactant.xyz"
+product_structure = "diels_alder_endo.product.xyz"
