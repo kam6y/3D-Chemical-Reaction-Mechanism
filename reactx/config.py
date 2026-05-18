@@ -24,6 +24,8 @@ class NEBSection:
     fmax: float = 0.05
     max_steps: int = 200
     k: float = 1.0
+    method: str = "eb"
+    remove_rotation_and_translation: bool = True
     climb: bool = True
     pad_frames: int = 0
 
@@ -66,8 +68,18 @@ _OBSOLETE_TOP_LEVEL = {
     "scoring",
 }
 _ENDPOINT_KEYS = {"fmax", "max_steps", "optimizer"}
-_NEB_KEYS = {"n_images", "fmax", "max_steps", "k", "climb", "pad_frames"}
+_NEB_KEYS = {
+    "n_images",
+    "fmax",
+    "max_steps",
+    "k",
+    "method",
+    "remove_rotation_and_translation",
+    "climb",
+    "pad_frames",
+}
 _VALID_OPTIMIZERS = {"FIRE", "BFGS"}
+_VALID_NEB_METHODS = {"aseneb", "improvedtangent", "eb", "spline", "string"}
 
 
 def sidecar_path(rxn_path: Path) -> Path:
@@ -162,6 +174,17 @@ def _build_neb(raw: dict, *, source: str) -> NEBSection:
         source=source,
     )
     k = _positive_float(raw.get("k", 1.0), key="[neb].k", source=source)
+    method = raw.get("method", "eb")
+    if method not in _VALID_NEB_METHODS:
+        raise ConfigError(
+            f"{source}: '[neb].method' must be one of "
+            f"{sorted(_VALID_NEB_METHODS)}, got {method!r}"
+        )
+    remove_rotation_and_translation = raw.get("remove_rotation_and_translation", True)
+    if not isinstance(remove_rotation_and_translation, bool):
+        raise ConfigError(
+            f"{source}: '[neb].remove_rotation_and_translation' must be boolean"
+        )
     climb = raw.get("climb", True)
     if not isinstance(climb, bool):
         raise ConfigError(f"{source}: '[neb].climb' must be boolean")
@@ -175,6 +198,8 @@ def _build_neb(raw: dict, *, source: str) -> NEBSection:
         fmax=fmax,
         max_steps=max_steps,
         k=k,
+        method=method,
+        remove_rotation_and_translation=remove_rotation_and_translation,
         climb=climb,
         pad_frames=pad_frames,
     )

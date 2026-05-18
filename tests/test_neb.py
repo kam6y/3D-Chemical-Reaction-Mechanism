@@ -33,8 +33,8 @@ def test_run_neb_returns_image_atoms(tmp_path: Path):
         assert len(img) == 2
 
 
-def test_run_neb_passes_configured_k_to_each_neb(monkeypatch, tmp_path: Path):
-    captured: list[tuple[bool, float]] = []
+def test_run_neb_passes_configured_neb_options_to_each_neb(monkeypatch, tmp_path: Path):
+    captured: list[tuple[bool, float, str, bool]] = []
 
     class FakeNEB:
         def __init__(
@@ -45,10 +45,11 @@ def test_run_neb_passes_configured_k_to_each_neb(monkeypatch, tmp_path: Path):
             climb: bool,
             allow_shared_calculator: bool,
             method: str,
+            remove_rotation_and_translation: bool,
         ):
             self.images = images
             self.energies = [0.0] * len(images)
-            captured.append((climb, k))
+            captured.append((climb, k, method, remove_rotation_and_translation))
 
         def interpolate(self, *, method: str) -> None:
             assert method == "idpp"
@@ -76,7 +77,11 @@ def test_run_neb_passes_configured_k_to_each_neb(monkeypatch, tmp_path: Path):
         output_xyz=tmp_path / "traj.xyz",
         max_steps=2,
         k=2.75,
+        method="eb",
+        remove_rotation_and_translation=True,
     )
 
-    assert captured == [(False, 2.75), (True, 2.75)]
+    assert captured == [(False, 2.75, "eb", True), (True, 2.75, "eb", True)]
     assert info["k"] == 2.75
+    assert info["method"] == "eb"
+    assert info["remove_rotation_and_translation"] is True

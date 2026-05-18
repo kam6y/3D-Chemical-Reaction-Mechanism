@@ -216,6 +216,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         fmax=cfg.neb.fmax,
         max_steps=cfg.neb.max_steps,
         k=cfg.neb.k,
+        method=cfg.neb.method,
+        remove_rotation_and_translation=cfg.neb.remove_rotation_and_translation,
         climb=cfg.neb.climb,
         pad_frames=cfg.neb.pad_frames,
     )
@@ -254,6 +256,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "final_fmax": float(neb_info["final_fmax"]),
             "image_energies": [float(e) for e in neb_info["image_energies"]],
             "k": float(neb_info["k"]),
+            "method": str(neb_info["method"]),
+            "remove_rotation_and_translation": bool(
+                neb_info["remove_rotation_and_translation"]
+            ),
             "pad_frames": int(neb_info["pad_frames"]),
         },
         "effective_params": {
@@ -267,6 +273,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "fmax": cfg.neb.fmax,
                 "max_steps": cfg.neb.max_steps,
                 "k": cfg.neb.k,
+                "method": cfg.neb.method,
+                "remove_rotation_and_translation": (
+                    cfg.neb.remove_rotation_and_translation
+                ),
                 "climb": cfg.neb.climb,
                 "pad_frames": cfg.neb.pad_frames,
             },

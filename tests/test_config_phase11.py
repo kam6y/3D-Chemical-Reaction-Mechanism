@@ -45,6 +45,8 @@ product_structure = "p.xyz"
     assert cfg.neb.fmax == 0.05
     assert cfg.neb.max_steps == 200
     assert cfg.neb.k == 1.0
+    assert cfg.neb.method == "eb"
+    assert cfg.neb.remove_rotation_and_translation is True
     assert cfg.neb.climb is True
     assert cfg.neb.pad_frames == 0
 
@@ -64,6 +66,8 @@ n_images = 13
 fmax = 0.03
 max_steps = 250
 k = 0.5
+method = "improvedtangent"
+remove_rotation_and_translation = false
 climb = false
 pad_frames = 2
 """
@@ -78,6 +82,8 @@ pad_frames = 2
     assert cfg.neb.fmax == 0.03
     assert cfg.neb.max_steps == 250
     assert cfg.neb.k == 0.5
+    assert cfg.neb.method == "improvedtangent"
+    assert cfg.neb.remove_rotation_and_translation is False
     assert cfg.neb.climb is False
     assert cfg.neb.pad_frames == 2
 
@@ -135,6 +141,8 @@ product_structure = "p.xyz"
         (0.0, "neb", "fmax"),
         (0, "neb", "max_steps"),
         (0.0, "neb", "k"),
+        ("badmethod", "neb", "method"),
+        ("true", "neb", "remove_rotation_and_translation"),
         (-1, "neb", "pad_frames"),
     ],
 )

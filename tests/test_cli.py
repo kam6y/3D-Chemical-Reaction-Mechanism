@@ -84,8 +84,12 @@ def test_cli_lj_writes_phase11_outputs(tmp_path: Path, tmp_rxn_with_toml):
     assert meta["endpoint_relax_p"]["converged"] in (True, False)
     assert meta["neb"]["n_images"] == 3
     assert len(meta["neb"]["image_energies"]) == 3
+    assert meta["neb"]["method"] == "eb"
+    assert meta["neb"]["remove_rotation_and_translation"] is True
     assert meta["effective_params"]["endpoint_relax"]["max_steps"] == 1
     assert meta["effective_params"]["neb"]["max_steps"] == 1
+    assert meta["effective_params"]["neb"]["method"] == "eb"
+    assert meta["effective_params"]["neb"]["remove_rotation_and_translation"] is True
 
     energies = json.loads((out / "energies.json").read_text())
     assert len(energies) == 3

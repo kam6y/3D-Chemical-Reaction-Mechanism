@@ -94,6 +94,8 @@ optimizer = "FIRE"       # "FIRE" | "BFGS"
 n_images = 11
 fmax = 0.05
 max_steps = 200
+method = "eb"               # "eb" | "improvedtangent" | "aseneb" | "spline" | "string"
+remove_rotation_and_translation = true
 climb = true
 pad_frames = 0
 ```
@@ -140,7 +142,7 @@ Key files:
 - `reactx/bond_changes.py` - R/P bond-set diff
 - `reactx/endpoint_relax.py` - FIRE/BFGS endpoint relaxation
 - `reactx/align.py` - atom-map and H permutation alignment
-- `reactx/neb.py` - IDPP + CI-NEB
+- `reactx/neb.py` - IDPP + EB/CI-NEB with rotation/translation removal
 - `reactx/config.py` - TOML schema
 - `reactx/cli.py` - explicit-endpoint CI-NEB pipeline
 
@@ -158,7 +160,9 @@ disappear during the trajectory.
   energies are not guaranteed.
 - Endpoint relaxation may return `converged=false`; the partially relaxed
   endpoint is still passed to NEB and recorded in `meta.json`.
-- IDPP can create poor initial paths for difficult atom-rearrangement cases.
+- NEB can still converge to poor lateral paths for difficult rearrangements;
+  the default elastic-band method and rotation/translation removal reduce this
+  but do not replace chemical validation of the final trajectory.
 - Radical, open-shell, solvent, and multi-step mechanisms are out of scope.
 
 ## Wall-clock
