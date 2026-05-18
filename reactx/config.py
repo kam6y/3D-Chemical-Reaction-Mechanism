@@ -1,8 +1,4 @@
-"""Per-reaction sidecar TOML config (Phase 11).
-
-Schema sections: [placement], [endpoint_relax], [neb]. Only `description`
-is required; all sections are optional.
-"""
+"""Per-reaction sidecar TOML config for explicit endpoint inputs."""
 from __future__ import annotations
 
 import math
@@ -13,13 +9,6 @@ from pathlib import Path
 
 class ConfigError(ValueError):
     """Raised when `<rxn_path>.toml` violates the Phase 11 schema."""
-
-
-@dataclass(frozen=True)
-class PlacementSection:
-    orientation: str = "default"
-    n_candidates: int = 64
-    relaxed_candidates: int = 3
 
 
 @dataclass(frozen=True)
@@ -42,34 +31,42 @@ class NEBSection:
 @dataclass(frozen=True)
 class ReactionConfig:
     description: str
-    placement: PlacementSection
+    reactant_structure: str
+    product_structure: str
     endpoint_relax: EndpointRelaxSection
     neb: NEBSection
 
 
-_TOP_LEVEL_KEYS = {"description", "placement", "endpoint_relax", "neb"}
-_TOP_LEVEL_REQUIRED = {"description"}
+_TOP_LEVEL_KEYS = {
+    "description",
+    "reactant_structure",
+    "product_structure",
+    "endpoint_relax",
+    "neb",
+}
+_TOP_LEVEL_REQUIRED = {"description", "reactant_structure", "product_structure"}
 _OBSOLETE_TOP_LEVEL = {
     "afir",
+    "alpha_broken",
+    "alpha_formed",
     "broken",
     "formed",
     "k_broken",
     "k_form",
+    "max_relax_steps",
+    "placement",
     "prescreen",
     "r_broken",
+    "r_broken_threshold",
     "r_form",
+    "r_formed",
+    "r_formed_threshold",
     "restraints",
     "sampling",
     "scoring",
 }
-_PLACEMENT_KEYS = {
-    "orientation",
-    "n_candidates",
-    "relaxed_candidates",
-}
 _ENDPOINT_KEYS = {"fmax", "max_steps", "optimizer"}
 _NEB_KEYS = {"n_images", "fmax", "max_steps", "k", "climb", "pad_frames"}
-_VALID_ORIENTATIONS = {"default", "endo", "exo"}
 _VALID_OPTIMIZERS = {"FIRE", "BFGS"}
 
 
@@ -93,8 +90,8 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
     for key in _OBSOLETE_TOP_LEVEL:
         if key in raw:
             raise ConfigError(
-                f"{source}: '{key}' is removed in Phase 11. "
-                "Migrate to [placement] / [endpoint_relax] / [neb] schema."
+                f"{source}: '{key}' is obsolete with explicit endpoint inputs. "
+                "Use reactant_structure and product_structure instead."
             )
 
     _check_keys(raw, _TOP_LEVEL_KEYS, _TOP_LEVEL_REQUIRED, scope="<top>", source=source)
@@ -102,8 +99,17 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
     description = raw["description"]
     if not isinstance(description, str) or not description.strip():
         raise ConfigError(f"{source}: 'description' must be a non-empty string")
+    reactant_structure = _endpoint_path(
+        raw["reactant_structure"],
+        key="reactant_structure",
+        source=source,
+    )
+    product_structure = _endpoint_path(
+        raw["product_structure"],
+        key="product_structure",
+        source=source,
+    )
 
-    placement = _build_placement(raw.get("placement", {}), source=source)
     endpoint_relax = _build_endpoint_relax(
         raw.get("endpoint_relax", {}),
         source=source,
@@ -112,34 +118,10 @@ def _validate(raw: dict, *, source: str) -> ReactionConfig:
 
     return ReactionConfig(
         description=description,
-        placement=placement,
+        reactant_structure=reactant_structure,
+        product_structure=product_structure,
         endpoint_relax=endpoint_relax,
         neb=neb,
-    )
-
-
-def _build_placement(raw: dict, *, source: str) -> PlacementSection:
-    _check_keys(raw, _PLACEMENT_KEYS, set(), scope="[placement]", source=source)
-    orientation = raw.get("orientation", "default")
-    if orientation not in _VALID_ORIENTATIONS:
-        raise ConfigError(
-            f"{source}: '[placement].orientation' must be one of "
-            f"{sorted(_VALID_ORIENTATIONS)}, got {orientation!r}"
-        )
-    n_candidates = _positive_int(
-        raw.get("n_candidates", 64),
-        key="[placement].n_candidates",
-        source=source,
-    )
-    relaxed_candidates = _positive_int(
-        raw.get("relaxed_candidates", 3),
-        key="[placement].relaxed_candidates",
-        source=source,
-    )
-    return PlacementSection(
-        orientation=orientation,
-        n_candidates=n_candidates,
-        relaxed_candidates=relaxed_candidates,
     )
 
 
@@ -228,6 +210,12 @@ def _positive_int(value, *, key: str, source: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ConfigError(f"{source}: '{key}' must be a positive integer")
     return int(value)
+
+
+def _endpoint_path(value, *, key: str, source: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"{source}: '{key}' must be a non-empty string")
+    return value
 
 
 def _non_negative_int(value, *, key: str, source: str) -> int:
