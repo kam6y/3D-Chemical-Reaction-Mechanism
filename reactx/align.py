@@ -28,17 +28,28 @@ def align_product_to_reactant(
     permutation: list[int] = [-1] * len(reactant)
     reactant_symbols = reactant.get_chemical_symbols()
 
+    used_product_indices: set[int] = set()
+
     for r_idx in range(len(reactant)):
         sym_r = reactant_symbols[r_idx]
-        if sym_r == "H":
+        if sym_r == "H" and r_idx not in heavy_mapping:
             continue
         if r_idx not in heavy_mapping:
             raise ValueError(f"Reactant heavy atom {r_idx} ({sym_r}) not in mapping")
         p_idx = heavy_mapping[r_idx]
         permutation[r_idx] = p_idx
+        used_product_indices.add(p_idx)
+
+    for r_idx in range(len(reactant)):
+        sym_r = reactant_symbols[r_idx]
+        if sym_r == "H":
+            continue
+        p_idx = heavy_mapping[r_idx]
 
         r_hs = reactant_h_groups.get(r_idx, [])
         p_hs = product_h_groups.get(p_idx, [])
+        r_hs = [idx for idx in r_hs if permutation[idx] < 0]
+        p_hs = [idx for idx in p_hs if idx not in used_product_indices]
         if len(r_hs) != len(p_hs):
             raise ValueError(
                 f"hydrogen count mismatch for heavy atom {r_idx}->{p_idx}: "
@@ -46,6 +57,7 @@ def align_product_to_reactant(
             )
         for r_h, p_h in zip(r_hs, p_hs, strict=True):
             permutation[r_h] = p_h
+            used_product_indices.add(p_h)
 
     if any(x < 0 for x in permutation):
         missing = [i for i, x in enumerate(permutation) if x < 0]
@@ -54,10 +66,10 @@ def align_product_to_reactant(
     aligned = product[permutation]
 
     # Rigid-body rotate+translate product onto reactant. Without this step,
-    # embed3d generates R and P in independent orientations, which causes the
-    # NEB interpolated path to pass atoms through each other (e.g. F/Cl
-    # swapping sides across C in SN2). Alignment is driven by atom-index
-    # correspondence so the RMSD-minimization is chemically meaningful.
+    # independently prepared endpoints can make the NEB interpolated path pass
+    # atoms through each other (e.g. F/Cl swapping sides across C in SN2).
+    # Alignment is driven by atom-index correspondence so the RMSD-minimization
+    # is chemically meaningful.
     minimize_rotation_and_translation(reactant, aligned)
 
     # ETKDG seeds R and P independently, so hydrogens bonded to the same heavy

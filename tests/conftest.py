@@ -1,4 +1,5 @@
 """Shared pytest fixtures for reactx tests."""
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +7,14 @@ import pytest
 from rdkit import Chem
 
 from reactx.bond_changes import BondChanges
+
+
+@pytest.fixture(autouse=True)
+def reset_reactx_logger_after_test():
+    yield
+    logger = logging.getLogger("reactx")
+    logger.handlers.clear()
+    logger.propagate = True
 
 
 @pytest.fixture()
@@ -40,7 +49,7 @@ def sn1_recomb_rxn_path(examples_dir: Path) -> Path:
 
 @pytest.fixture()
 def sn2_atoms_setup():
-    """3-fragment-style SN2 setup for placement dispatcher test (CH3Cl + OH-)."""
+    """3-fragment-style SN2 setup for CH3Cl + OH-."""
     mol = Chem.AddHs(Chem.MolFromSmiles("C(Cl).[OH-]"))
     Chem.SanitizeMol(mol)
     frag_indices = Chem.GetMolFrags(mol)
@@ -115,7 +124,7 @@ def sn1_recomb_atoms_setup():
                 positions[h_nb.GetIdx()] = positions[m] + np.array(
                     [0.5 * (h_nb.GetIdx() % 3 - 1), 0.5, 0.5 * ((h_nb.GetIdx() // 3) % 2)]
                 )
-    # Cl- を遠くに置く (Tier 2 placement で動かされる)
+    # Cl- を遠くに置く
     cl_idx = syms.index("Cl")
     positions[cl_idx] = (10.0, 10.0, 10.0)
 
@@ -130,16 +139,11 @@ def tmp_rxn_with_toml(tmp_path: Path):
     Usage:
         rxn_path = tmp_rxn_with_toml("sn2", toml_body='''\\
             description = "sn2 fast"
-            formed = [[1, 3]]
-            broken = [[1, 2]]
-            [afir]
-            alpha_formed = 0.5
-            alpha_broken = 1.0
-            max_relax_steps = 30
-            [scoring]
-            r_broken_threshold = 4.0
-            [sampling]
-            n_candidates = 1
+            [endpoint_relax]
+            max_steps = 1
+            [neb]
+            n_images = 3
+            max_steps = 1
         ''')
 
     Returns the temp `.rxn` Path. The .rxn body is unchanged from
@@ -151,6 +155,10 @@ def tmp_rxn_with_toml(tmp_path: Path):
         src_rxn = examples / f"{stem}.rxn"
         dst_rxn = tmp_path / f"{stem}.rxn"
         dst_rxn.write_bytes(src_rxn.read_bytes())
+        for suffix in ("reactant.xyz", "product.xyz"):
+            src = examples / f"{stem}.{suffix}"
+            if src.exists():
+                (tmp_path / f"{stem}.{suffix}").write_bytes(src.read_bytes())
         (tmp_path / f"{stem}.rxn.toml").write_text(toml_body, encoding="utf-8")
         return dst_rxn
 

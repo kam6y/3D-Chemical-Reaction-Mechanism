@@ -36,9 +36,8 @@ def cordero_radius(symbol: str, *, default: float = 1.5) -> float:
     """Cordero (2008) covalent radius (Å) for a chemical element symbol.
 
     Unknown symbols (Z > 83, lanthanide/actinide gaps, garbled) → log warning
-    and return ``default`` (1.5 Å). Phase 9 uses this for the
-    ``reached_product`` 1.15 × Rsum threshold; a wrong fallback radius
-    affects scoring decisions, so the warning surfaces unexpected inputs.
+    and return ``default`` (1.5 Å). A wrong fallback radius affects geometry
+    checks, so the warning surfaces unexpected inputs.
     """
     if symbol not in CORDERO_2008:
         log.warning(

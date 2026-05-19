@@ -1,10 +1,3 @@
 description = "SN1 step 1 dissociation: tBuBr -> tBu+ + Br-"
-formed = []
-broken = [[1, 5]]
-
-[afir]
-alpha_broken = 2.5
-max_relax_steps = 200
-
-[scoring]
-r_broken_threshold = 6.0
+reactant_structure = "sn1_dissoc.reactant.xyz"
+product_structure = "sn1_dissoc.product.xyz"

@@ -76,9 +76,8 @@ def _collect_atom_map_numbers(mol: Chem.Mol, *, side: str) -> dict[int, int]:
 def heavy_to_hydrogen_groups(mol_with_h: Chem.Mol) -> dict[int, list[int]]:
     """Return {heavy_atom_idx: [bonded_h_idx, ...]} for a Mol with explicit Hs.
 
-    Use after Chem.AddHs so that hydrogen indices correspond to positions in the
-    Atoms object produced by embed3d.embed_mol_to_atoms, which preserves the
-    Chem.AddHs(mol) atom ordering exactly.
+    Use after Chem.AddHs so that hydrogen indices correspond to explicit-H
+    endpoint atom ordering, which preserves the original heavy atom indices.
     """
     groups: dict[int, list[int]] = {}
     for atom in mol_with_h.GetAtoms():
@@ -96,7 +95,7 @@ def atom_map_to_reactant_idx(reactant_mol: Chem.Mol) -> dict[int, int]:
     The mapping is identical for the post-AddHs Mol because Chem.AddHs appends
     new H atoms at indices >= original count, preserving every existing atom's
     index. Use this dict to translate TOML-side atom-map pairs into 0-based
-    indices that BondChanges, embed3d, and build_afir_constraint expect.
+    indices that BondChanges and endpoint construction expect.
     """
     return {
         a.GetAtomMapNum(): a.GetIdx()
